@@ -162,3 +162,7 @@ nothing is claimed as bridged until it is. See `LAUNCH_CHECKLIST.md`.
 | `keys/` | Dev-only bootstrap keypairs (founder/vote/stake/faucet) |
 | `bin/` | Agave binaries (not committed — `install.sh` fetches them) |
 | `ledger-test/` | Working copy of the ledger (not committed — created at runtime) |
+
+## Bridge
+
+Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation. See [bridge/](bridge/) — 34 tests passing, local only, not deployed, not audited.
