@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bridge-common",
+    "crates/machine-bridge",
+    "crates/solana-lock",
+]
