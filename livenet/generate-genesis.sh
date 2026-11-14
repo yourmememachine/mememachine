@@ -12,11 +12,24 @@
 # genesis creation. Everything else matches the localnet: Agave 2.3.13,
 # 1,000,000,000 MACHINE, the same fee schedule and timing.
 #
-# Distribution (1,000,000,000 MACHINE):
-#   treasury            993,999,000  (primordial account)
-#   each validator id   1,000,000 x3 (bootstrap-validator-lamports)
-#   each validator stake 1,000,000 x3 (bootstrap-validator-stake-lamports)
-#   faucet              1,000
+# Distribution (1,000,000,000 MACHINE) — balanced livenet allocation.
+# No single holder is near the whole supply. The five primordial
+# accounts below are separate keypairs (see generate-keys.sh), so the
+# split is on-chain at genesis, not just documented:
+#   founder / team (vested)  150,000,000  (15.0000%)
+#   ecosystem fund            250,000,000  (25.0000%)
+#   community / airdrop       200,000,000  (20.0000%)
+#   validator rewards reserve 150,000,000  (15.0000%)
+#   treasury / operations     243,999,000  (24.3999%)
+#   each validator id         1,000,000 x3 (bootstrap-validator-lamports)
+#   each validator stake      1,000,000 x3 (bootstrap-validator-stake-lamports)
+#   faucet                    1,000
+# Primordial subtotal 993,999,000 + validator 6,000,000 + faucet 1,000
+# = 1,000,000,000 exactly. Vesting terms for the founder/team bucket
+# are in WHITEPAPER.md Section 3. This replaces the old livenet split
+# (treasury 993,999,000) and has nothing to do with the localnet dev
+# genesis, whose founder-weighted distribution is throwaway (see the
+# note at the end of WHITEPAPER.md Section 3).
 #
 # Notes on the flags (verified against Agave 2.3.13 on 2026-11-14):
 # - --target-tick-duration takes MICROSECONDS in this build, despite the
@@ -58,7 +71,8 @@ if [ ! -d "$KEYS_DIR" ] || [ -z "$(ls -A "$KEYS_DIR" 2>/dev/null)" ]; then
     "$SCRIPT_DIR/generate-keys.sh"
 fi
 for f in v1-identity v1-vote v1-stake v2-identity v2-vote v2-stake \
-         v3-identity v3-vote v3-stake faucet treasury; do
+         v3-identity v3-vote v3-stake faucet treasury founder ecosystem \
+         community validator-rewards; do
     [ -f "$KEYS_DIR/$f.json" ] || { echo "ERROR: missing keypair $KEYS_DIR/$f.json" >&2; exit 1; }
 done
 
@@ -79,12 +93,37 @@ V2I=$(pubkey v2-identity); V2V=$(pubkey v2-vote); V2S=$(pubkey v2-stake)
 V3I=$(pubkey v3-identity); V3V=$(pubkey v3-vote); V3S=$(pubkey v3-stake)
 FAUCET=$(pubkey faucet)
 TREASURY=$(pubkey treasury)
+FOUNDER=$(pubkey founder)
+ECOSYSTEM=$(pubkey ecosystem)
+COMMUNITY=$(pubkey community)
+VALIDATOR_REWARDS=$(pubkey validator-rewards)
 
-# Primordial treasury account: 993,999,000 MACHINE = 993,999,000,000,000,000 lamports.
+# Primordial allocation accounts (1 MACHINE = 1,000,000,000 lamports).
+# Subtotal 993,999,000 MACHINE = 993,999,000,000,000,000 lamports.
 PRIMORDIAL="$SCRIPT_DIR/.primordial.yaml"
 cat > "$PRIMORDIAL" <<EOF
+$FOUNDER:
+  balance: 150000000000000000
+  owner: 11111111111111111111111111111111
+  data: ""
+  executable: false
+$ECOSYSTEM:
+  balance: 250000000000000000
+  owner: 11111111111111111111111111111111
+  data: ""
+  executable: false
+$COMMUNITY:
+  balance: 200000000000000000
+  owner: 11111111111111111111111111111111
+  data: ""
+  executable: false
+$VALIDATOR_REWARDS:
+  balance: 150000000000000000
+  owner: 11111111111111111111111111111111
+  data: ""
+  executable: false
 $TREASURY:
-  balance: 993999000000000000
+  balance: 243999000000000000
   owner: 11111111111111111111111111111111
   data: ""
   executable: false
@@ -135,6 +174,10 @@ V3_VOTE=$V3V
 V3_STAKE=$V3S
 FAUCET=$FAUCET
 TREASURY=$TREASURY
+FOUNDER=$FOUNDER
+ECOSYSTEM=$ECOSYSTEM
+COMMUNITY=$COMMUNITY
+VALIDATOR_REWARDS=$VALIDATOR_REWARDS
 EOF
 
 rm -f "$PRIMORDIAL"

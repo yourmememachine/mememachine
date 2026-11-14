@@ -6,6 +6,12 @@
 #   v2-identity.json, v2-vote.json, v2-stake.json
 #   v3-identity.json, v3-vote.json, v3-stake.json
 #   faucet.json, treasury.json
+#   founder.json, ecosystem.json, community.json, validator-rewards.json
+# The last four hold the separate livenet allocation buckets (see
+# generate-genesis.sh and WHITEPAPER.md Section 3): founder/team,
+# ecosystem fund, community/airdrop, and validator rewards reserve.
+# Each bucket has its own keypair so the split is on-chain at genesis,
+# not just a line in a document.
 #
 # These are the LIVE keys. They are generated ON the deployment host and
 # must never be copied into the git repo. The dev keypairs in the repo
@@ -53,6 +59,10 @@ for n in 1 2 3; do
 done
 "$AGAVE_BIN/solana-keygen" new --no-bip39-passphrase -s -o "$KEYS_DIR/faucet.json" >/dev/null
 "$AGAVE_BIN/solana-keygen" new --no-bip39-passphrase -s -o "$KEYS_DIR/treasury.json" >/dev/null
+"$AGAVE_BIN/solana-keygen" new --no-bip39-passphrase -s -o "$KEYS_DIR/founder.json" >/dev/null
+"$AGAVE_BIN/solana-keygen" new --no-bip39-passphrase -s -o "$KEYS_DIR/ecosystem.json" >/dev/null
+"$AGAVE_BIN/solana-keygen" new --no-bip39-passphrase -s -o "$KEYS_DIR/community.json" >/dev/null
+"$AGAVE_BIN/solana-keygen" new --no-bip39-passphrase -s -o "$KEYS_DIR/validator-rewards.json" >/dev/null
 chmod 600 "$KEYS_DIR"/*.json
 
 echo "Generated keypairs in $KEYS_DIR:"
@@ -60,5 +70,5 @@ for f in "$KEYS_DIR"/*.json; do
     echo "  $(basename "$f"): $("$AGAVE_BIN/solana-keygen" pubkey "$f")"
 done
 echo
-echo "BACK THESE UP NOW. Lose the treasury key and the 993,999,000 MACHINE is gone."
+echo "BACK THESE UP NOW. Lose the treasury key and the 243,999,000 MACHINE in it is gone; the founder, ecosystem, community, and validator-rewards keys hold their own buckets (see WHITEPAPER.md Section 3) and are equally unrecoverable if lost."
 echo "Do not commit this directory to git."

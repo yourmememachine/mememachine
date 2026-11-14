@@ -123,7 +123,7 @@ copied to the other hosts if you chose option B).
 
 ```bash
 cd /opt/mememachine/livenet
-./generate-keys.sh      # fresh keypairs for 3 validators + faucet + treasury
+./generate-keys.sh      # fresh keypairs for 3 validators + faucet + 5 allocation accounts (treasury, founder, ecosystem, community, validator-rewards)
 ./generate-genesis.sh   # builds the 3-validator genesis, prints the new hash
 ```
 
@@ -134,9 +134,12 @@ genesis with a new hash** — it is NOT the localnet hash
 livenet's identity; publish it so others can join.
 
 **Back up `livenet/keys/` NOW, off the server** (encrypted USB, password
-manager, whatever you trust). Lose the treasury key and the 993,999,000
-MACHINE is gone forever. Lose a validator identity key and that
-validator cannot restart. Do not commit `keys/` to git.
+manager, whatever you trust). Lose the treasury key and the 243,999,000
+MACHINE in it is gone forever. The founder (150,000,000), ecosystem
+(250,000,000), community (200,000,000), and validator-rewards
+(150,000,000) keys hold their own buckets and are equally unrecoverable
+if lost. Lose a validator identity key and that validator cannot
+restart. Do not commit `keys/` to git.
 
 For option B, copy the whole `livenet/` directory to the other two
 hosts (keys, ledger, genesis-info.env included) — e.g.:
@@ -225,6 +228,7 @@ facts to publish (website, repo, X):
 - **Genesis hash:** the value in `livenet/genesis-info.env`
 - **Shred version:** the value in `livenet/genesis-info.env`
 - **Validators:** 3, with their identity pubkeys from `genesis-info.env`
+- **Allocation:** founder/team 150,000,000 (vested, WHITEPAPER.md Section 3), ecosystem 250,000,000, community 200,000,000, validator rewards 150,000,000, treasury 243,999,000, validator identities + stakes 6,000,000, faucet 1,000 — total 1,000,000,000 MACHINE
 - **Slot:** whatever `solana slot --url http://<V1_PUBLIC_IP>:8899` returns
 
 Anyone can join with those three values (genesis hash + shred version
