@@ -9,3 +9,11 @@ solana-release/
 *.tar.bz2
 ledger-test/
 *.log
+# Livenet secrets and runtime state — NEVER committed.
+# Keys are generated on the deployment host; the livenet genesis and
+# per-validator ledgers are generated at deploy time.
+livenet/keys/
+livenet/ledger/
+livenet/ledgers/
+livenet/genesis-info.env
+livenet/.primordial.yaml
