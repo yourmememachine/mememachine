@@ -1,0 +1,86 @@
+# Patch 01: Chain identity — report this fork as client id 4 (MemeMachine)
+# File: version/src/lib.rs (Agave 2.3.13)
+# What: adds a `MemeMachine` variant (id 4) to the private `ClientId` enum,
+# makes it the default client in `Version::default()`, and updates the
+# `From<u16>` / `TryFrom<ClientId>` mappings plus the `test_client_id` test.
+# Why: a binary built from this source prints `client:MemeMachine` in
+# `--version` output (e.g. `agave-validator 2.3.13 (src:...; feat:...;
+# client:MemeMachine)`) and in gossip, instead of `client:Agave`, so fork
+# nodes are identifiable as such. The id is a gossip identity label only;
+# it changes no consensus rule, vote, shred, or bank-hash computation.
+# Applies to: Agave 2.3.13 source, verified with `patch --dry-run` and
+# `git apply --check` (see patches/README.md).
+--- a/version/src/lib.rs
++++ b/version/src/lib.rs
+@@ -21,7 +21,16 @@
+     JitoLabs,
+     Firedancer,
+     Agave,
++    // MemeMachine: this fork's client id (4). A binary built from this
++    // source reports `client:MemeMachine` in `--version` output and in
++    // gossip, instead of `client:Agave`, so a fork node is identifiable
++    // as such. The id is a gossip identity label only; it changes no
++    // consensus rule, vote, shred, or bank-hash computation. Stock Agave
++    // nodes decode id 4 as `Unknown(4)`, which is expected: this chain
++    // runs its own genesis and shred version and does not peer with
++    // stock Agave clusters.
+     // If new variants are added, update From<u16> and TryFrom<ClientId>.
++    MemeMachine,
+     Unknown(u16),
+ }
+ 
+@@ -66,8 +75,9 @@
+                 .or(compute_commit(option_env!("AGAVE_GIT_COMMIT_HASH")))
+                 .unwrap_or_else(|| thread_rng().gen::<u32>()),
+             feature_set,
++            // MemeMachine: this fork reports its own client id.
+             // Other client implementations need to modify this line.
+-            client: u16::try_from(ClientId::Agave).unwrap(),
++            client: u16::try_from(ClientId::MemeMachine).unwrap(),
+         }
+     }
+ }
+@@ -102,6 +112,7 @@
+             1u16 => Self::JitoLabs,
+             2u16 => Self::Firedancer,
+             3u16 => Self::Agave,
++            4u16 => Self::MemeMachine,
+             _ => Self::Unknown(client),
+         }
+     }
+@@ -116,7 +127,8 @@
+             ClientId::JitoLabs => Ok(1u16),
+             ClientId::Firedancer => Ok(2u16),
+             ClientId::Agave => Ok(3u16),
+-            ClientId::Unknown(client @ 0u16..=3u16) => Err(format!("Invalid client: {client}")),
++            ClientId::MemeMachine => Ok(4u16),
++            ClientId::Unknown(client @ 0u16..=4u16) => Err(format!("Invalid client: {client}")),
+             ClientId::Unknown(client) => Ok(client),
+         }
+     }
+@@ -154,20 +166,22 @@
+         assert_eq!(ClientId::from(1u16), ClientId::JitoLabs);
+         assert_eq!(ClientId::from(2u16), ClientId::Firedancer);
+         assert_eq!(ClientId::from(3u16), ClientId::Agave);
+-        for client in 4u16..=u16::MAX {
++        assert_eq!(ClientId::from(4u16), ClientId::MemeMachine);
++        for client in 5u16..=u16::MAX {
+             assert_eq!(ClientId::from(client), ClientId::Unknown(client));
+         }
+         assert_eq!(u16::try_from(ClientId::SolanaLabs), Ok(0u16));
+         assert_eq!(u16::try_from(ClientId::JitoLabs), Ok(1u16));
+         assert_eq!(u16::try_from(ClientId::Firedancer), Ok(2u16));
+         assert_eq!(u16::try_from(ClientId::Agave), Ok(3u16));
+-        for client in 0..=3u16 {
++        assert_eq!(u16::try_from(ClientId::MemeMachine), Ok(4u16));
++        for client in 0..=4u16 {
+             assert_eq!(
+                 u16::try_from(ClientId::Unknown(client)),
+                 Err(format!("Invalid client: {client}"))
+             );
+         }
+-        for client in 4u16..=u16::MAX {
++        for client in 5u16..=u16::MAX {
+             assert_eq!(u16::try_from(ClientId::Unknown(client)), Ok(client));
+         }
+     }

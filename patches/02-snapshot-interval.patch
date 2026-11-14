@@ -1,0 +1,34 @@
+# Patch 02: Incremental snapshot interval — 100 slots -> 500 slots
+# File: runtime/src/snapshot_bank_utils.rs (Agave 2.3.13)
+# What: changes DEFAULT_INCREMENTAL_SNAPSHOT_ARCHIVE_INTERVAL_SLOTS from
+# 100 to 500. Full-snapshot interval (50,000 slots) is unchanged.
+# Why: a small single-validator chain writes far fewer incremental snapshot
+# archives at 500 slots (~200s at 400ms/slot) than at 100 slots (~40s), at
+# the cost of a coarser restart point. Operational default only: it changes
+# no consensus rule and no shred, vote, or bank-hash computation. The
+# validator CLI reads this constant for its `--snapshot-interval-slots`
+# default, so the CLI default follows automatically. `is_snapshot_config_valid`
+# in core/src/validator.rs still accepts the defaults (50,000 > 500).
+# Applies to: Agave 2.3.13 source, verified with `patch --dry-run` and
+# `git apply --check` (see patches/README.md).
+--- a/runtime/src/snapshot_bank_utils.rs
++++ b/runtime/src/snapshot_bank_utils.rs
+@@ -62,7 +62,17 @@
+ };
+ 
+ pub const DEFAULT_FULL_SNAPSHOT_ARCHIVE_INTERVAL_SLOTS: Slot = 50_000;
+-pub const DEFAULT_INCREMENTAL_SNAPSHOT_ARCHIVE_INTERVAL_SLOTS: Slot = 100;
++// MemeMachine: incremental snapshots every 500 slots (~200s at
++// 400ms/slot) instead of the stock 100 slots (~40s). A small
++// single-validator chain writes far fewer incremental archives this way,
++// at the cost of a coarser restart point. Operational default only: it
++// changes no consensus rule and no shred, vote, or bank-hash computation.
++// The full-snapshot interval (50,000 slots) is unchanged and still
++// exceeds the incremental interval, so `is_snapshot_config_valid` in
++// core/src/validator.rs still accepts the defaults. The validator CLI
++// (`validator/src/cli.rs`) reads this constant for its default value, so
++// the CLI default follows automatically; no CLI change is needed.
++pub const DEFAULT_INCREMENTAL_SNAPSHOT_ARCHIVE_INTERVAL_SLOTS: Slot = 500;
+ pub const DISABLED_SNAPSHOT_ARCHIVE_INTERVAL: Slot = Slot::MAX;
+ 
+ pub fn serialize_status_cache(
