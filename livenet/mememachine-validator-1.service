@@ -1,0 +1,22 @@
+[Unit]
+Description=MemeMachine livenet validator 1 (bootstrap, public RPC)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mememachine
+Group=mememachine
+WorkingDirectory=/opt/mememachine
+ExecStart=/opt/mememachine/livenet/start-validator.sh 1
+Restart=on-failure
+RestartSec=10
+# agave-validator hard-requires a 1,000,000 file-descriptor limit.
+LimitNOFILE=1000000
+LimitNPROC=8192
+# Keep the process alive across logins and give it a clean environment.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

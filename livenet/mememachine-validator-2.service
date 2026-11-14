@@ -1,0 +1,21 @@
+[Unit]
+Description=MemeMachine livenet validator 2
+After=network-online.target mememachine-validator-1.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mememachine
+Group=mememachine
+WorkingDirectory=/opt/mememachine
+ExecStart=/opt/mememachine/livenet/start-validator.sh 2
+Restart=on-failure
+RestartSec=10
+# agave-validator hard-requires a 1,000,000 file-descriptor limit.
+LimitNOFILE=1000000
+LimitNPROC=8192
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
