@@ -1,0 +1,19 @@
+[package]
+name = "machine-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+bridge-common = { path = "../bridge-common" }
+solana-program = "2.3"
+borsh = "1"
+spl-token = { version = "4", features = ["no-entrypoint"] }
+
+[dev-dependencies]
+solana-program-test = "2.3"
+solana-sdk = "2.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
