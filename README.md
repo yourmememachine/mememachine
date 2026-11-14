@@ -1,4 +1,5 @@
 # MemeMachine
+Website: https://machinechain.netlify.app/
 
 A Solana-derived L1 with its own token, its own culture, and apps
 running on it — built to be one of the best Solana forks, not just a
