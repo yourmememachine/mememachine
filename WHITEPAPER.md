@@ -74,8 +74,13 @@ network.
 ## 3. Tokenomics and Distribution
 
 $MACHINE is the native gas token. It exists from genesis: no other token
-exists at genesis, and the founder balance decreases only by
-vote-transaction fees paid in $MACHINE.
+exists at genesis.
+
+### 3.1 Localnet distribution (observed, dev-only)
+
+This is the distribution of the single-node localnet that exists today.
+It is a throwaway dev genesis, not the live economics — see the note at
+the end of this section.
 
 | Allocation | Amount ($MACHINE) |
 |---|---|
@@ -85,13 +90,72 @@ vote-transaction fees paid in $MACHINE.
 | System | ~0.2536 |
 | **Total** | **1,000,000,000** |
 
-The distribution is deliberately simple and fully published. There is no
-hidden allocation, no second mint, and no undisclosed reserve. The live
-network will use a fresh genesis with a new hash — the localnet genesis
-has a single bootstrap validator baked in and cannot be extended to three
-validators — with the same structure: a treasury allocation, one million
-$MACHINE per validator identity, one million per stake account, and a
-1,000 $MACHINE faucet.
+The localnet distribution is deliberately simple and fully published.
+There is no hidden allocation, no second mint, and no undisclosed
+reserve on the localnet.
+
+### 3.2 Livenet distribution (the live network)
+
+The live network uses a fresh genesis with a new hash — the localnet
+genesis has a single bootstrap validator baked in and cannot be extended
+to three validators. The livenet allocation is balanced: no single
+holder is near the whole supply. Each of the five primordial buckets has
+its own keypair at genesis (`livenet/generate-keys.sh` creates
+`founder.json`, `ecosystem.json`, `community.json`,
+`validator-rewards.json`, and `treasury.json`), so the split is on-chain
+from the first block, not just documented. `livenet/generate-genesis.sh`
+implements exactly this table.
+
+| Allocation | Amount ($MACHINE) | Share |
+|---|---|---|
+| Founder / team (vested — see below) | 150,000,000 | 15.0000% |
+| Ecosystem fund | 250,000,000 | 25.0000% |
+| Community / airdrop | 200,000,000 | 20.0000% |
+| Validator rewards reserve | 150,000,000 | 15.0000% |
+| Treasury / operations | 243,999,000 | 24.3999% |
+| Validator identities (3 × 1,000,000) | 3,000,000 | 0.3000% |
+| Validator stakes (3 × 1,000,000) | 3,000,000 | 0.3000% |
+| Faucet | 1,000 | 0.0001% |
+| **Total** | **1,000,000,000** | **100%** |
+
+Why these buckets: the founder/team share is capped at 15% and vested;
+the ecosystem fund (25%) is the largest bucket because grants,
+integrations, and liquidity for applications built on the chain are the
+main use of supply after launch; community (20%) funds distribution to
+users rather than insiders; the validator rewards reserve (15%) pays for
+securing the chain beyond the 6,000,000 $MACHINE of genesis validator
+funding; treasury (24.3999%) is the residual that makes the total exact
+and covers operations. There is no hidden allocation, no second mint,
+and no undisclosed reserve in the livenet genesis either.
+
+### 3.3 Founder / team vesting
+
+The 150,000,000 $MACHINE founder/team allocation vests over 48 months
+from livenet genesis:
+
+- **Months 0–12 (cliff):** 0 $MACHINE unlocked. Nothing from this bucket
+  may be sold or transferred before the cliff.
+- **Months 13–48:** linear vesting, 1/36 of the allocation per month
+  (about 4,166,667 $MACHINE; the final month is adjusted so the total
+  vested is exactly 150,000,000).
+- **Month 48:** fully vested.
+
+Honest limit on this schedule: it is a published commitment, not yet a
+code-enforced lockup. The livenet genesis holds the founder/team
+allocation in a plain System account under its own keypair; no on-chain
+vesting program or multisig exists yet to enforce the cliff. Until such
+a program is deployed, compliance with the schedule is verifiable only
+by watching the founder keypair's balance and transfers on-chain. No
+claim is made here that the vesting is enforced by code.
+
+> **The localnet genesis is dev-only and is NOT the livenet economics.**
+> The localnet genesis (`32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb`)
+> is a throwaway dev genesis whose founder holds ~999M of 1B $MACHINE.
+> That founder-weighted distribution exists only because the localnet
+> was built for testing a single validator, and it must not be quoted
+> as the livenet allocation. The livenet allocation is the balanced
+> table in Section 3.2 above, implemented by `livenet/generate-genesis.sh`
+> in a fresh genesis with a new hash.
 
 ## 4. Fee Model
 
@@ -159,10 +223,11 @@ not pretend otherwise. Current state:
 - The genesis, fee schedule, and distribution are fixed in the
   repository and published. Changing them requires a new genesis or a
   network upgrade, both of which are public events.
-- The founder holds the founding allocation stated in Section 3. That
-  concentration is disclosed, not hidden; the live network's fresh
-  genesis is the point at which distribution can be set deliberately
-  rather than inherited from the localnet.
+- The founder holds the 15% vested founding allocation stated in
+  Section 3.2, with a 12-month cliff and 36 months of linear vesting
+  thereafter. That allocation is disclosed, not hidden; the localnet's
+  founder-weighted dev distribution does not carry over to the
+  livenet.
 - The day-one applications (Rug-Farm Registry, Solana OS) are open
   source and independently verifiable.
 

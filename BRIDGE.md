@@ -1,6 +1,6 @@
 # Machine Bridge — Design Document
 
-**Status: DESIGN ONLY. Nothing in this document is built. No bridge exists, nothing has been bridged, and no asset may cross until the prerequisites in §5 are met.**
+**Status: programs built and tested locally (see `bridge/` — `cargo test --release`: 34 passed, 0 failed); NOT deployed, NOT audited. Nothing has been bridged, and no asset may cross until the prerequisites in §5 are met.**
 
 - **Chains:** Solana mainnet ↔ Machine
 - **Machine identity:** Solana fork (Agave 2.3.13), custom genesis `32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb`, native gas token **$MACHINE**, fixed supply 1,000,000,000, no inflation.
