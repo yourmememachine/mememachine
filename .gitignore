@@ -1,0 +1,11 @@
+# Build outputs and runtime state — not committed.
+# The repo ships the genesis (ledger/), the docs, and the scripts.
+# Binaries are fetched by ./install.sh; the working ledger is created
+# by ./start-validator.sh.
+
+bin/
+bin-extra/
+solana-release/
+*.tar.bz2
+ledger-test/
+*.log
