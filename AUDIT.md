@@ -165,6 +165,16 @@ starts from what is already known:
       are the last line of defense, and the collector's
       disagreement-blocks-quorum behavior is covered by the
       end-to-end drill test.
+  *Reviewer's bottom line:* the implementation is careful and
+  the design conservative; no obvious critical (drain /
+  infinite-mint) bug was found. The two areas most needing
+  professional review are (1) the ed25519 precompile +
+  instructions-sysvar parser and (2) the full end-to-end
+  instruction flows under adversarial conditions (caps, nonces,
+  kill-switch) — both already named in Scope A above — and a
+  real audit remains required before any real asset crosses,
+  which is this project's standing deployment gate (BRIDGE.md
+  §5).
 
 ## Known limitations (stated up front, from the project's own docs)
 - Single-validator localnet today; transfers unverified on the
