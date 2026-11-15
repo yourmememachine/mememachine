@@ -210,7 +210,6 @@ what it needs). Nothing is marked proven on a claim.
 | Public RPC endpoint | Hosting: a machine with a public IP and the validator's RPC exposed. Not claimed until it answers. |
 | Chain-level wallet support | A public RPC endpoint plus the published chain identity, so wallets can add the Machine network. |
 | Bridge (Solana mainnet ↔ Machine) | A bridge implementation (lock/mint or equivalent) plus a security review. Nothing is claimed as bridged until a real asset crosses. |
-| Fair-launched token bridged in as the flagship ecosystem asset | A fair launch on Solana mainnet, then bridging to Machine. $MACHINE stays the gas token; the bridged token is the ecosystem asset. |
 | Audit | An independent audit of the validator configuration and any bridge or program code, with the report published. |
 | Bug bounty | A published bounty program with scope and rewards. |
 | Public chain | Hosted validators, stake, monitoring, incident response, and a public RPC. A separate step, not claimed now. |

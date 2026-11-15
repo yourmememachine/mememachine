@@ -9,7 +9,7 @@ and firewall notes, and a step-by-step VPS deployment guide.
 The livenet is **not up**. Nothing here has been launched, and no
 server has been paid for. This package is the complete, tested
 preparation — the one thing missing is a host. See `DEPLOY.md` for the
-exact host requirements and the one decision Dillu still has to make
+exact host requirements and the one hosting decision still to make
 (one VPS with all three validators, or three VPSs, one per validator).
 
 Why it cannot run here: this VM cannot raise the open-file-descriptor

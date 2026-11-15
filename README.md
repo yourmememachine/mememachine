@@ -3,7 +3,7 @@ Website: https://machinechain.netlify.app/
 
 A Solana-derived L1 with its own token, its own culture, and apps
 running on it — built to be one of the best Solana forks, not just a
-rebrand. MemeMachine is the chain Dillu's Solana OS runs on.
+rebrand. MemeMachine is the chain the Solana OS runs on.
 
 - **Chain:** MemeMachine (Agave 2.3.13, a real Solana/Agave fork)
 - **Token:** **$MACHINE** — the native gas token, 1,000,000,000 supply,
@@ -89,26 +89,6 @@ not a claim.
 | Native token as gas from genesis | **Shipped.** MACHINE is the gas token from genesis, distribution in `GENESIS.md`. |
 | Technical deltas with measurements | **Shipped (partially).** The vote-authority patch + the localnet measurements (slot rate, confirmation, finalization, vote credits) are documented in `GENESIS.md`. More deltas are NEXT. |
 
-## Token plan (Dillu's launch — not ours to do)
-
-After MemeMachine is built, Dillu will launch a token on pump.fun.
-This is his launch to do; nothing here launches a mainnet token and
-nothing here creates one.
-
-1. **Fair launch on pump.fun (Solana mainnet).** The token is
-   fair-launched on pump.fun, the same playbook as MeMeChainLab's MMC.
-2. **Bridge it to MemeMachine as the native asset.** Once launched,
-   the token is bridged to MemeMachine and becomes the chain's first
-   bridged asset / flagship ecosystem token — the same role MMC plays
-   for its fork.
-3. **MACHINE stays the gas token.** The bridged pump.fun token does not
-   replace MACHINE. MACHINE (minted in genesis, 1B supply) remains the
-   token fees are paid in. The bridged token is the ecosystem's flagship
-   asset; MACHINE is the chain's gas.
-
-The bridge step is **NEXT, not proven** — there is no bridge yet, and
-nothing is claimed as bridged until it is. See `LAUNCH_CHECKLIST.md`.
-
 ## Roadmap (dated)
 
 | When | Item | Status |
@@ -119,7 +99,7 @@ nothing is claimed as bridged until it is. See `LAUNCH_CHECKLIST.md`.
 | Next | User transfer verified on a host where UDP send works | NEXT — blocked on this VM (see below) |
 | Next | Multi-validator localnet (3 nodes reaching consensus) | NEXT — needs a host with `--ulimit nofile=1000000` and working UDP |
 | Next | Public RPC endpoint + wallet network support | NEXT — needs hosting |
-| Next | Bridge (Solana mainnet ↔ MemeMachine) + pump.fun token bridged in | NEXT — Dillu's token launch comes first |
+| Next | Bridge (Solana mainnet ↔ MemeMachine) for approved SPL assets | NEXT — programs + relayer built locally; needs deployment and audit (see `BRIDGE.md` §5) |
 | Next | Audit + bug bounty | NEXT |
 | Next | Whitepaper | NEXT |
 | Later | Public chain (hosted validators, stake, monitoring) | NEXT — a separate step, not claimed now |
@@ -165,4 +145,4 @@ nothing is claimed as bridged until it is. See `LAUNCH_CHECKLIST.md`.
 
 ## Bridge
 
-Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation. See [bridge/](bridge/) — 34 tests passing, local only, not deployed, not audited.
+Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation. See [bridge/](bridge/) — 34 program tests passing, plus the off-chain relayer in `bridge/crates/relayer/` (22 tests passing). Local only, not deployed, not audited, nothing has crossed.

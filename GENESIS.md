@@ -39,8 +39,8 @@ system accounts, inherent to every Solana genesis.
 
 MACHINE is the native gas token from genesis: every transaction fee on
 MemeMachine is paid in MACHINE. There is no separate wrapped or bridged
-token at genesis. (A future pump.fun token bridged in from Solana mainnet
-would be a separate asset — see `README.md`, Token plan.)
+token at genesis. (An approved SPL asset bridged in from Solana mainnet
+would be a separate asset — see `BRIDGE.md`.)
 
 ## Validator keys (bootstrap validator)
 

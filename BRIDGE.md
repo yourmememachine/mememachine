@@ -5,7 +5,7 @@
 - **Chains:** Solana mainnet ↔ Machine
 - **Machine identity:** Solana fork (Agave 2.3.13), custom genesis `32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb`, native gas token **$MACHINE**, fixed supply 1,000,000,000, no inflation.
 - **Machine today:** single-node localnet, voting and finalizing, ~3 slots/s. The 3-validator live net is the next step (see `livenet/` in this repo).
-- **Flagship use case:** the founder fair-launches a token on pump.fun (Solana mainnet) and bridges it to Machine as the ecosystem asset. **$MACHINE stays the gas token** — the bridged token is a separate asset and never replaces it.
+- **Use case:** approved SPL tokens on Solana mainnet are bridged to Machine as wrapped assets. **$MACHINE stays the gas token** — a bridged token is a separate asset and never replaces it.
 
 ---
 
@@ -37,7 +37,7 @@ One asset, two representations. The original token never leaves Solana mainnet; 
 ### What is NOT in this design
 
 - No liquidity-pool bridge (no AMM, no swapping, no price exposure). This is a 1:1 custody bridge only.
-- No wrapping of $MACHINE itself. $MACHINE is native to Machine and is never bridged; only the pump.fun token (and later, approved SPL assets) cross.
+- No wrapping of $MACHINE itself. $MACHINE is native to Machine and is never bridged; only approved SPL assets cross.
 - No "validator set controls the vault" in phase 1. Custody is program + multisig; validator-set attestation is a later phase (see §6).
 
 ---
@@ -188,14 +188,14 @@ None of these is optional. If any item is missing, the bridge stays off.
 | **0 — Design** | This document. Message format, program interfaces, relayer set, caps, and the pause design frozen and reviewed internally. | Design reviewed by at least two people who did not write it. |
 | **1 — Testnet bridge** | Programs deployed on a Machine testnet and Solana devnet. Worthless test assets cross in both directions. Relayer-outage and pause drills run. | 100 test crossings, 0 lost or duplicated tokens, both drills passed. |
 | **2 — Audit** | Independent security review of both programs, the relayer, and the key management. All critical and high findings fixed; mediums fixed or accepted in writing. | Audit report published. |
-| **3 — Capped mainnet** | Bridge goes live with the pump.fun token only, per-transaction and daily caps on, vault ceiling low, allowlist of recipient addresses optional. Monitoring and the pause drill are live. | 30 days of capped operation with 0 incidents and reconciliation matching every minute. |
+| **3 — Capped mainnet** | Bridge goes live with one approved SPL asset only, per-transaction and daily caps on, vault ceiling low, allowlist of recipient addresses optional. Monitoring and the pause drill are live. | 30 days of capped operation with 0 incidents and reconciliation matching every minute. |
 | **4 — Full** | Caps raised in steps, ceiling raised, additional approved SPL assets added one at a time, relayer set expanded, validator-set attestation evaluated. | Each cap raise is a separate multisig + timelock decision, never automatic. |
 
 ---
 
 ## Honest limits
 
-- **This is a design document, not a bridge.** No program is written, no relayer is running, no asset has crossed, and nothing here should be read as a claim that bridging works.
+- **This document is the design; the code exists but no bridge is live.** The programs and the relayer are written and tested locally (see `bridge/`), but nothing is deployed, no relayer is running against a live chain, no asset has crossed, and nothing here should be read as a claim that bridging works live.
 - **A bridge is the highest-risk component in this project.** It holds other people's funds by design. Every shortcut in §5 converts directly into loss.
 - **The 3-of-5 relayer set in phase 1 is a trust assumption.** It is weaker than full validator-set attestation and is chosen only to get a safe, capped launch. It is not presented as decentralized.
 - **Machine is a single-node localnet today.** Until the 3-validator live net exists and user transfers are verified on it, the Machine side of this design has no real endpoint to connect to.

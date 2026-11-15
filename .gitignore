@@ -17,3 +17,8 @@ livenet/ledger/
 livenet/ledgers/
 livenet/genesis-info.env
 livenet/.primordial.yaml
+# Bridge build outputs and relayer runtime state — not committed.
+bridge/target/
+bridge-attestations/
+relayer-state.json
+*.tmp

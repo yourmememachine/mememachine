@@ -37,12 +37,11 @@ writing: slot 1,180, confirmed 1,179, finalized 1,149.
 | 18 | Multi-validator: 3 nodes reaching consensus | **A host with `--ulimit nofile=1000000` and working UDP.** `agave-validator` (the only multi-validator binary) refuses to start here: it requires raising the open-file-descriptor limit to 1,000,000, but the container hard limit is 4,096 and cannot be raised (sysctl bypass fixed the network check, `prlimit` and the user-namespace raise both return "Operation not permitted"). `solana-test-validator` is single-node only (no entrypoint/join flag). Also needs UDP for gossip. On a suitable host, boot 3 `agave-validator` nodes on this genesis (or a regenerated 3-bootstrap-validator genesis) and show all three voting. |
 | 19 | Public RPC endpoint | Hosting (a VM/bare metal with a public IP, the validator's RPC exposed). Not claimed until it answers. |
 | 20 | Chain-level wallet support (wallets adding the MemeMachine network) | A public RPC endpoint (item 19) plus the chain ID published so wallets can add it. The OS-layer wallet connect (item 14) is done; this is the network-add step. |
-| 21 | Bridge (Solana mainnet ↔ MemeMachine) | Bridge programs implemented and tested locally (`bridge/`, 34/34 tests) — security review still pending. Nothing is claimed as bridged until a real asset crosses. |
-| 22 | Pump.fun token fair-launched and bridged in as the native asset | **Dillu's launch.** He fair-launches the token on pump.fun (Solana mainnet), then it is bridged to MemeMachine. MACHINE stays the gas token; the bridged token is the flagship ecosystem asset (MMC playbook). Do not launch it from here. |
-| 23 | Audit | An independent audit of the validator configuration and any bridge/program code, with the report published. |
-| 24 | Bug bounty | A published bounty program with scope and rewards. |
-| 25 | Whitepaper | A written whitepaper (tokenomics, consensus, roadmap, governance). |
-| 26 | Public chain | Hosted validators, stake, monitoring, incident response, and a public RPC — a separate step, not claimed now. |
+| 21 | Bridge (Solana mainnet ↔ MemeMachine) | Bridge programs implemented and tested locally (`bridge/`, 34/34 program tests) and the off-chain relayer implemented and tested locally (`bridge/crates/relayer/`, 22/22 tests) — security review still pending, SBF build still unverified, not deployed. Nothing is claimed as bridged until a real asset crosses. |
+| 22 | Audit | An independent audit of the validator configuration and any bridge/program code, with the report published. |
+| 23 | Bug bounty | A published bounty program with scope and rewards. |
+| 24 | Whitepaper | A written whitepaper (tokenomics, consensus, roadmap, governance). |
+| 25 | Public chain | Hosted validators, stake, monitoring, incident response, and a public RPC — a separate step, not claimed now. |
 
 ## What "best" does NOT mean (yet)
 
@@ -50,9 +49,8 @@ writing: slot 1,180, confirmed 1,179, finalized 1,149.
   It is 1 validator right now. The multi-validator upgrade
   (item 18) is the proof that would change that, and it is NEXT.
 - MemeMachine has **no** trading token, no deployed bridge, and no audit yet.
-  The pump.fun token (item 22) is Dillu's launch and is not done; the bridge
-  programs (item 21) are built and tested locally but not deployed, reviewed,
-  or crossed.
+  The bridge programs and relayer (item 21) are built and tested
+  locally but not deployed, reviewed, or crossed.
 - A transfer has **not** been confirmed on this VM (item 17). The
   chain votes and finalizes, but do not present a transfer signature
   until one exists on a host where UDP works.

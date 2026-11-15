@@ -61,6 +61,8 @@ cd bridge && cargo build --release && cargo test --release
 | P11 | Whitepaper draft exists in the repo | `WHITEPAPER.md`, v1.0, 2026-11-14, 262 lines: chain, architecture, fee model, the balanced livenet allocation (founder/team 15% with a 48-month vesting schedule, ecosystem 25%, community 20%, validator rewards 15%, treasury 24.3999%) and the localnet-vs-livenet distinction. A draft document — not a published paper, not a review of anything. |
 | P12 | Prebuilt binaries only, no source build | `bin/` holds Agave 2.3.13 release binaries (`solana-cli 2.3.13, src:5466f459`); `install.sh` pins version 2.3.13 and that commit and downloads the prebuilt release. |
 | P13 | Day-one apps exist | Rug-Farm Registry (repo `github.com/yourmememachine/rug-farm-registry`, hosted API) and Solana OS (browser desktop, wallet connect for Phantom/Solflare/Backpack). These are apps that run on/around the chain, not chain consensus — they do not change the single-validator fact. |
+| P14 | Bridge relayer implemented and tested locally (added 2026-11-14) | `bridge/crates/relayer/` — nonce-cursor watcher with the finalized-only rule (+16 slots Solana side), deterministic message construction, ed25519 signing, 3-of-5 attestation file exchange + collector (disagreement blocks quorum), MintWrapped/Unlock submitters, JSON-RPC client, CLI (sign-once / collect / submit / run, dry-run unless `submit_enabled`). `cargo test --release -p relayer`: **22 passed, 0 failed** (20 unit + 2 integration). Never run live — see N3. |
+| P15 | Repo operability package exists (added 2026-11-14) | All shell scripts executable in git (fork suite: 23 passed, 2 skipped, after the mode fix); `ops/` (host-readiness gate — verified to FAIL with both blockers named on a restricted VM, public-RPC plan, wallet network template, reconciliation job + systemd timer, incident response); `bridge/deploy/` (SBF build script, caps calculator, deploy runbook with the §5 gate); `bridge/drills/` (test-crossing, pause, relayer-outage); `AUDIT.md` audit-readiness package with scope fixed in public. None of these is a live deployment. |
 
 ## NEXT
 
@@ -68,7 +70,7 @@ cd bridge && cargo build --release && cargo test --release
 |---|---|---|
 | N1 | User transfer verified (a confirmed transfer between two fresh keypairs, with a signature) | **This host blocks UDP send** (container: `sendto` → EPERM), which breaks RPC → TPU forwarding. The faucet also fails here. Needs a host where UDP works; then fund a fresh keypair and transfer — the signature is the proof. |
 | N2 | Multi-validator: 3 nodes reaching consensus | **This host cannot run `agave-validator`.** Its file-descriptor hard limit is 4,096 (`ulimit -Hn` = 4096, observed 2026-11-14); `agave-validator` requires 1,000,000 and it cannot be raised here. Also needs working UDP for gossip. The livenet package (P10) is ready to run on a suitable host; no livenet keys, genesis, or `genesis-info.env` exist yet. |
-| N3 | Bridge deployed; an asset actually crossed | **No live net to deploy to, no audit, no relayer.** The programs (P9) are local-only: no SBF build, no program deployed anywhere, no relayer implementation in this repo, no asset has crossed. Needs N2 + a security audit + fresh production keys + worthless-amount test crossings first (see `bridge/README.md`, Deploy). |
+| N3 | Bridge deployed; an asset actually crossed | **No live net to deploy to, no audit.** The programs (P9) and the relayer (P14, added 2026-11-14) are local-only: no SBF build, no program deployed anywhere, no relayer has run live, no asset has crossed. Needs N2 + a security audit + fresh production keys + worthless-amount test crossings first (see `bridge/deploy/DEPLOY-BRIDGE.md`). |
 | N4 | Public RPC endpoint | Needs hosted validators on a public host (N2 first) with the RPC exposed. Nothing public answers today. |
 | N5 | Chain-level wallet support (wallets adding the MemeMachine network) | Needs N4 (a public RPC endpoint) plus the published chain identity. OS-layer wallet connect (P13) is done; this is the network-add step. |
 | N6 | Independent audit | No auditor engaged, no report. Covers the validator configuration and the bridge programs before real value is involved. |
@@ -80,7 +82,7 @@ cd bridge && cargo build --release && cargo test --release
   this VM. Everything public-facing is NEXT.
 - **Transfers unverified** (N1). The chain votes and finalizes, but no
   user-transfer signature exists.
-- **Bridge code only, not a bridge** (N3). 34/34 tests prove the
+- **Bridge code only, not a live bridge** (N3). 34/34 program tests and 22/22 relayer tests prove the
   programs behave as designed in program-test; they prove nothing about
   a live deployment, which does not exist.
 - **Dev keys only.** The keypairs in `keys/` are throwaway test keys

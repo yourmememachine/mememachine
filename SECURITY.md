@@ -10,9 +10,10 @@ disclosure policy, not a marketing document.
   `32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb`, native gas token
   $MACHINE, fixed supply 1,000,000,000.
 - **Current state:** single-node localnet, voting and finalizing. The
-  3-validator live net is the next step (see `livenet/` in the repo). No
-  bridge exists yet — `BRIDGE.md` is a design document only. No audit has
-  been performed yet.
+  3-validator live net is the next step (see `livenet/` in the repo). The
+  bridge programs and the off-chain relayer are written and tested
+  locally (see `bridge/`) but are NOT deployed, and no asset has
+  crossed. No audit has been performed yet.
 
 ---
 
@@ -26,13 +27,14 @@ disclosure policy, not a marketing document.
 | Livenet deployment package | Everything under `livenet/` — key generation, genesis generation, validator systemd units, cluster checks, port and firewall documentation. |
 | Machine website | The public Machine website (the deployed site and its source artifact). Findings must be about the site itself, not about the hosting provider's infrastructure. |
 | Rug-Farm Registry hosted API | The public read API at `rug-farm-registry.onrender.com` — read-only testing only. Findings about incorrect registry data are data-quality issues, not security issues, unless they demonstrate an integrity or access-control failure. |
+| Bridge programs and relayer (code review) | Everything under `bridge/` — the solana-lock and machine-bridge programs, bridge-common, and the off-chain relayer in `bridge/crates/relayer/`. Code review only: nothing is deployed, so findings must be demonstrated against the code and its tests. |
 
 ### Out of scope
 
-- **Bridge programs.** No bridge program is written or deployed. The
-  design in `BRIDGE.md` is not code; reviewing the design document for
-  logic errors is welcome and will be credited, but there is no running
-  bridge to test.
+- **A live bridge.** The bridge programs and relayer are written but
+  not deployed. There is no running bridge, no vault with funds, and
+  no deployed mint to test against — see the in-scope row for code
+  review instead.
 - **Third-party wallets.** Phantom, Solflare, Backpack, and any other
   wallet software are the vendors' responsibility.
 - **Social engineering, phishing, and physical attacks** against any
@@ -156,8 +158,8 @@ receive a thank-you and, where useful, a public credit for the report.
   output without a demonstrated impact will be closed without review.
 - **No social engineering.** No phishing, pretexting, or impersonation
   of maintainers, users, or third parties.
-- **Do not test the bridge.** There is nothing to test; the bridge is a
-  design document. Review the design on paper instead.
+- **Do not test a live bridge.** None is deployed. Review the bridge
+  code in `bridge/` and reproduce findings against its test suite.
 - **Follow the law.** Research must stay within applicable law in your
   jurisdiction.
 
@@ -175,5 +177,5 @@ Researchers who have responsibly disclosed a qualifying issue:
 ---
 
 *This policy may change as the project grows — notably when the live
-network launches, when the bridge is built, and when an audit is
+network launches, when the bridge is deployed, and when an audit is
 completed. The version in the repository is the current one.*

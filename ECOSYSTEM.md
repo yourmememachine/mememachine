@@ -74,19 +74,17 @@ asset has crossed, nothing here holds real funds.
 integration). Full output in `bridge/VERIFY.md`.
 
 **Honest limits.** No SBF build has been run (`cargo build --release`
-produces host libraries, not deployable programs). No deployment, no
-relayer implementation, no audit. All seven prerequisites in
-`BRIDGE.md` §5 (live 3-validator net, public RPC, verified user
-transfers, fresh production keys, security review, worthless-amount
-test crossings, monitoring) are unmet.
+produces host libraries, not deployable programs). No deployment and
+no audit. The off-chain relayer is now implemented and tested
+locally (`bridge/crates/relayer/`) but has never run live. All seven
+prerequisites in `BRIDGE.md` §5 (live 3-validator net, public RPC,
+verified user transfers, fresh production keys, security review,
+worthless-amount test crossings, monitoring) are unmet.
 
-> **Stale text, flagged for update:** `BRIDGE.md` still carries the
-> header "DESIGN ONLY. Nothing in this document is built", and
-> `LAUNCH_CHECKLIST.md` item 21 still says "no bridge implementation".
-> Both predate the `bridge/` programs and are now out of date on that
-> one point. The programs exist and pass their tests locally; the
-> "not deployed, not audited, nothing crossed" part of those
-> documents is still true.
+> **Update (2026-11-14):** the programs and the relayer now exist
+> and pass their tests locally; `BRIDGE.md` and
+> `LAUNCH_CHECKLIST.md` item 21 have been updated to say so. The
+> "not deployed, not audited, nothing crossed" part is still true.
 
 ### Layer 3 — Browser interface (Solana OS)
 
@@ -171,7 +169,6 @@ What does **not** connect today:
 | OS reads Machine chain data | Public RPC above | NEXT |
 | Registry coverage for Machine | Public RPC + real on-chain activity to check | NEXT — listing (v2.19) is the first step, not coverage |
 | Bridge deployment | All `BRIDGE.md` §5 prerequisites (live net, public RPC, verified transfers, fresh keys, audit, test crossings, monitoring) | NEXT — programs built + tested locally only |
-| Fair-launched token bridged in as flagship asset | Dillu's pump.fun launch first, then bridge deployment | NEXT — Dillu's launch to do, not this repo's |
 | Multi-validator consensus (3 nodes) | Host where UDP works and fd limit can be raised | NEXT — top roadmap item |
 | Independent audit | Live net + bridge deployment to review | NEXT |
 | Machine-native apps deployed on-chain | Public chain + verified transfers | NEXT |

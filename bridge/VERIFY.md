@@ -118,3 +118,43 @@ test pause_blocks_deposit_and_unlock ... ok
    nonce PDA is present, program-owned, 89 bytes, discriminator 2.
 5. `rand` was a transitive-only dependency; added as a dev-dependency
    for the unit tests.
+
+---
+
+## Update — 2026-11-14: relayer
+
+New crate `crates/relayer/` (off-chain relayer, see its README).
+Verified in the bridge workspace directory:
+
+```
+$ cargo test --release -p relayer
+test result: ok. 20 passed; 0 failed  — relayer unit tests
+test result: ok. 2 passed; 0 failed   — relayer integration tests
+                                       (deposit -> 3-of-5 quorum ->
+                                        MintWrapped instruction;
+                                        expired attestation rejected)
+```
+
+Total for the relayer: **22 passed, 0 failed.**
+
+One compile error was found and fixed during this build (ureq 2
+`send_json` returns a `Response`; the JSON body is read with
+`.into_json()`), recorded here the same way as the program issues
+above.
+
+### What was NOT verified (relayer)
+- **No live run.** No relayer has watched a real deposit or burn:
+  there is no deployed bridge and no public Machine RPC yet.
+- **No SBF build** (unchanged from above).
+- **No deployment, no audit** (unchanged from above).
+Full bridge workspace, same day:
+
+```
+$ cargo test --release        # whole bridge workspace
+test result: ok. 15 passed  — bridge-common unit
+test result: ok. 9 passed   — machine-bridge integration
+test result: ok. 10 passed  — solana-lock integration
+test result: ok. 20 passed  — relayer unit
+test result: ok. 2 passed   — relayer integration
+Total: 56 passed, 0 failed. Exit code 0.
+```

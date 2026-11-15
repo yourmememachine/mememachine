@@ -21,10 +21,13 @@ bridge/
     │   ├── src/lib.rs
     │   ├── src/processor.rs
     │   └── tests/mint_tests.rs # program-test integration tests
-    └── solana-lock/            # Solana-side program (deposit / unlock)
-        ├── src/lib.rs
-        ├── src/processor.rs
-        └── tests/lock_tests.rs # program-test integration tests
+    ├── solana-lock/            # Solana-side program (deposit / unlock)
+    │   ├── src/lib.rs
+    │   ├── src/processor.rs
+    │   └── tests/lock_tests.rs # program-test integration tests
+    └── relayer/                # off-chain relayer (see its README)
+        └── src/                  # watcher, signing, attestation
+                                # collector, submitter, RPC, CLI
 ```
 
 ## Design (from BRIDGE.md)
@@ -106,7 +109,7 @@ When those exist, the deploy path is:
    and the launch caps. Caps are absolute amounts; BRIDGE.md section 4.4
    gives launch values as 1% of locked supply (per-tx) and 5% (daily) —
    translate them to absolute numbers at deployment.
-5. Run the relayer (off-chain, not in this repo) and do worthless-amount
+5. Run the relayer (off-chain, `crates/relayer/`) and do worthless-amount
    test crossings in both directions, including a pause/unpause drill and
    a relayer-outage drill, before any real asset crosses.
 
@@ -116,16 +119,19 @@ When those exist, the deploy path is:
   A bridge holds other people's funds by design; do not deploy this
   with real assets until the audit in BRIDGE.md section 5 is done.
 - **No live deployment.** No program is deployed anywhere, no relayer is
-  running, no asset has crossed.
+  running live, no asset has crossed.
 - **Attestation verification is in-program ed25519 (ed25519-dalek), not
   the ed25519 precompile + instructions sysvar.** The verification is
   equivalent (same curve, same hash) and directly unit-testable. The
   precompile path is a gas optimization for a later review, and the SBF
   build must be checked for ed25519-dalek compatibility before
   deployment.
-- **No relayer implementation.** The off-chain relayer (watching for
-  finalized deposits/burns, signing attestations, submitting them) is
-  not in this repo.
+- **Relayer: implemented, never run live.** The off-chain relayer
+  (watching for finalized deposits/burns, signing attestations,
+  collecting a 3-of-5 quorum, submitting them) is in
+  `crates/relayer/` and passes its tests locally (22 tests). It has
+  never watched a real deposit — there is no deployed bridge or
+  public Machine RPC for it to watch yet.
 - **No upgrade path in the programs.** Program upgrades go through a
   multisig with a timelock (BRIDGE.md 4.2); the upgrade authority is a
   deployment concern, not program code.

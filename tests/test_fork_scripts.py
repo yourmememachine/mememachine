@@ -37,6 +37,8 @@ SHELL_SCRIPTS = [
     "livenet/generate-genesis.sh",
     "livenet/generate-keys.sh",
     "livenet/check-cluster.sh",
+    "ops/check-host.sh",
+    "bridge/deploy/build-sbf.sh",
 ]
 
 GENESIS_HASH = "32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb"

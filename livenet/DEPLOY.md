@@ -19,7 +19,7 @@ end (Hetzner, DigitalOcean, Vultr and similar all have a suitable tier
 in that range — check the current price on the provider's page before
 you buy; this guide does not promise a price).
 
-**The one decision Dillu has to make:**
+**The one hosting decision to make:**
 
 | Option | Cost | What it proves |
 |---|---|---|

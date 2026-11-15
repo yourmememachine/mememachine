@@ -1,0 +1,25 @@
+[package]
+name = "relayer"
+version = "0.1.0"
+edition = "2021"
+description = "Off-chain relayer for the Machine bridge: watches for finalized deposits/burns, signs 3-of-5 attestations, collects a quorum, and submits MintWrapped / Unlock to the destination chain. Holds no funds."
+
+[[bin]]
+name = "relayer"
+path = "src/main.rs"
+
+[dependencies]
+bridge-common = { path = "../bridge-common" }
+solana-program = "2.3"
+solana-sdk = "2.3"
+borsh = "1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bs58 = "0.5"
+bincode = "1"
+base64 = "0.22"
+ureq = { version = "2", features = ["json"] }
+
+[dev-dependencies]
+rand = "0.8"

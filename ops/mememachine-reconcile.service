@@ -1,0 +1,13 @@
+[Unit]
+Description=MemeMachine bridge reconciliation (locked vs minted)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=mememachine
+# Fill in the deployed bridge's addresses and RPC endpoints.
+ExecStart=/usr/bin/python3 /opt/mememachine/ops/reconcile.py --solana-rpc https://api.mainnet-beta.solana.com --machine-rpc http://127.0.0.1:8899 --vault REPLACE_WITH_VAULT_TOKEN_ACCOUNT --wrapped-mint REPLACE_WITH_WRAPPED_MINT
+# A non-zero exit (mismatch or RPC failure) marks the unit failed;
+# alert on that (journal / your monitoring of choice). Do not add
+# Restart= — a mismatch is a human decision, not a retry.
