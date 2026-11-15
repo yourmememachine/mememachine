@@ -12,10 +12,12 @@ gate allows.
 
 ## Phase 0 — Public proof of work ($0) — *current*
 
-- Everything in the open: code, tests (56 bridge + 23 fork +
-  LaunchGuard), SBF hashes, runbooks, drills, honest status docs.
-- Free security passes: Sec3 X-Ray free tier, `cargo audit`,
-  clippy, plus a documented self-review checklist.
+- Everything in the open: code, tests (74 bridge + 23 fork +
+  10 LaunchGuard), SBF hashes, runbooks, drills, honest status docs.
+- Free security passes: `cargo audit`, clippy, cargo-fuzz, plus a
+  documented self-review checklist. (Sec3 X-Ray turned out to be
+  paid-only and Soteria cannot read this codebase's toolchain —
+  both recorded in AUDIT.md.)
 - Audit quotes in hand (Accretion, Sec3 — inquiries sent 2026-11-14).
 - Grant applications for audit funding (Solana ecosystem programs).
 - Build in public (X updates from the repo's own status docs).

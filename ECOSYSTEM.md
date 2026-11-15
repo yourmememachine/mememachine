@@ -65,26 +65,22 @@ deposit/unlock), implementing the lock/mint design in `BRIDGE.md`:
 protection, on-chain caps, pause, and a one-way kill-switch on the
 Machine side. No admin mint; $MACHINE itself is never bridged.
 
-**What it is not.** Not deployed. Not audited. No relayer exists, no
-asset has crossed, nothing here holds real funds.
+**What it is not.** Not deployed. Not audited. The off-chain
+relayer exists (`bridge/crates/relayer/`) but has never run live;
+no asset has crossed, nothing here holds real funds.
 
-**Proven.** Built and tested locally only. Re-verified 2026-11-14:
-`cargo test --release` in `bridge/` — **34 passed, 0 failed**
-(15 bridge-common unit, 9 machine-bridge integration, 10 solana-lock
-integration). Full output in `bridge/VERIFY.md`.
+**Proven.** Built and tested locally only. Re-verified 2026-11-15:
+`cargo test --release` in `bridge/` — **74 passed, 0 failed**
+(18 bridge-common unit, 19 machine-bridge integration, 14
+solana-lock integration, 23 relayer including the full end-to-end
+drill). Full output in `bridge/VERIFY.md`.
 
-**Honest limits.** No SBF build has been run (`cargo build --release`
-produces host libraries, not deployable programs). No deployment and
-no audit. The off-chain relayer is now implemented and tested
-locally (`bridge/crates/relayer/`) but has never run live. All seven
-prerequisites in `BRIDGE.md` §5 (live 3-validator net, public RPC,
-verified user transfers, fresh production keys, security review,
+**Honest limits.** SBF builds of all three programs are verified
+locally (hashes in `bridge/VERIFY.md`); that is a build proof, not
+a deployment. No deployment and no audit. All seven prerequisites
+in `BRIDGE.md` §5 (live 3-validator net, public RPC, verified user
+transfers, fresh production keys, security review,
 worthless-amount test crossings, monitoring) are unmet.
-
-> **Update (2026-11-14):** the programs and the relayer now exist
-> and pass their tests locally; `BRIDGE.md` and
-> `LAUNCH_CHECKLIST.md` item 21 have been updated to say so. The
-> "not deployed, not audited, nothing crossed" part is still true.
 
 ### Layer 3 — Browser interface (Solana OS)
 

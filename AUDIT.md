@@ -143,6 +143,28 @@ starts from what is already known:
   6. *LaunchGuard.* Verified: revoked mint + freeze authorities,
      classic SPL only, ≥10% / ≥30-day lock, creator-only release
      after slot expiry, no early-release path.
+  7. *Pause is low-threshold; unpause is admins-only.* Verified:
+     pause takes 2-of-5 relayers or 2-of-3 admins
+     (`PAUSE_RELAYER_THRESHOLD = 2`); unpause takes the admin
+     multisig only. Matches BRIDGE.md §4.3.
+  8. *No path to mint without a valid attestation.* Verified:
+     the mint authority is the program PDA and MintWrapped runs
+     the precompile attestation check before any mint.
+  9. *Some status/docs lag the code (older test counts).*
+     Confirmed and fixed 2026-11-15: ECOSYSTEM.md still claimed
+     34 tests, no relayer, and no SBF build; README, STATUS.md,
+     bridge/README.md, the relayer README, and STAGED-LAUNCH.md
+     carried 22-relayer / 6-and-8-LaunchGuard / 69-workspace
+     counts. All now state the current figures (74 bridge
+     workspace incl. 23 relayer; 10 LaunchGuard). Dated logs in
+     the VERIFY.md files are historical records and were left
+     as written.
+  10. *Relayer finality and disagreement handling are off-chain.*
+      Agreed: a relayer bug can stall the bridge or attempt a bad
+      signature; the on-chain attestation, nonce, and cap checks
+      are the last line of defense, and the collector's
+      disagreement-blocks-quorum behavior is covered by the
+      end-to-end drill test.
 
 ## Known limitations (stated up front, from the project's own docs)
 - Single-validator localnet today; transfers unverified on the

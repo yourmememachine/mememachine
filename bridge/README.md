@@ -129,7 +129,7 @@ When those exist, the deploy path is:
 - **Relayer: implemented, never run live.** The off-chain relayer
   (watching for finalized deposits/burns, signing attestations,
   collecting a 3-of-5 quorum, submitting them) is in
-  `crates/relayer/` and passes its tests locally (22 tests). It has
+  `crates/relayer/` and passes its tests locally (23 tests). It has
   never watched a real deposit — there is no deployed bridge or
   public Machine RPC for it to watch yet.
 - **No upgrade path in the programs.** Program upgrades go through a

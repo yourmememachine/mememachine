@@ -5,7 +5,7 @@ The off-chain relayer for the Machine bridge (BRIDGE.md sections
 3-of-5 attestations, collects a quorum, and submits `MintWrapped` /
 `Unlock` to the destination chain.
 
-**Status: built and tested locally (22 tests, see below). NOT
+**Status: built and tested locally (23 tests, see below). NOT
 deployed. NOT audited. No asset has crossed with it.** The deploy
 gate in BRIDGE.md section 5 applies to the relayer exactly as it
 does to the programs: live net, public RPC, fresh production keys,
