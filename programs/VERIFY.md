@@ -59,3 +59,34 @@ pins beyond the workspace lock: `cpufeatures 0.3.1 → 0.2.17`,
 `crypto-common 0.2.2 → 0.1.7`, `indexmap 2.14.2 → 2.13.1`,
 `zeroize 1.9.1 → 1.8.2`, `proc-macro-crate 3.5.0 → 3.3.0`
 (drops the edition2024 `toml_edit 0.25` chain). Not deployed.
+
+---
+
+## Update — 2026-11-14 (evening): Token-2022 stance + rebuild
+
+From the same external review: registration now **explicitly rejects
+Token-2022 mints** (`LaunchError::UnsupportedTokenProgram`). v1 of
+the standard is classic SPL Token only — Token-2022 extensions
+(permanent delegate, transfer hooks, mint-close authority) can
+reintroduce exactly the supply/control properties LaunchGuard
+exists to remove, and they get their own analysis before any
+support. The check covers the token-program account, the mint's
+owning program, and the creator token account's owning program.
+
+```
+$ cd programs && cargo test --release
+test register_rejected_for_token2022_mint ... ok   (new)
+test compute_units_register ... ok                 (new, measurement)
+Total: 8 passed, 0 failed.
+```
+
+RegisterAndLock measures **9,508 CU** in program-test (native
+execution; SBF-execution figure to be measured on the testnet host).
+
+### SBF rebuild (same day, new sources)
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `launch_guard.so` | 111,440 | `68cba8aab86f1001c1774a37897e931db1e7de68c72e93533bf2703f4e70094a` |
+
+Not deployed.

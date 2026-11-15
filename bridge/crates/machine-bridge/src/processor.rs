@@ -35,8 +35,8 @@ pub fn process(
             per_tx_cap,
             daily_cap,
         } => process_initialize(program_id, accounts, relayers, admins, wrapped_mint, per_tx_cap, daily_cap),
-        MachineInstruction::MintWrapped { message, signatures } => {
-            process_mint_wrapped(program_id, accounts, message, signatures)
+        MachineInstruction::MintWrapped { message } => {
+            process_mint_wrapped(program_id, accounts, message)
         }
         MachineInstruction::Burn {
             amount,
@@ -164,12 +164,10 @@ fn process_initialize(
 // MintWrapped
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn process_mint_wrapped(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     message: BridgeMessage,
-    signatures: Vec<RelayerSignature>,
 ) -> ProgramResult {
     let mut iter = accounts.iter();
     let config_account = next_account_info(&mut iter)?;
@@ -180,6 +178,7 @@ fn process_mint_wrapped(
     let payer = next_account_info(&mut iter)?;
     let token_program = next_account_info(&mut iter)?;
     let system_program = next_account_info(&mut iter)?;
+    let instructions_sysvar = next_account_info(&mut iter)?;
 
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
@@ -200,14 +199,12 @@ fn process_mint_wrapped(
     }
 
     let clock = Clock::get()?;
-    verify_attestation(
+    validate_message(&message, CHAIN_SOLANA, CHAIN_MACHINE, clock.slot)?;
+    verify_precompile_attestation(
         &message,
-        &signatures,
         &config.relayers.relayers,
         config.relayers.quorum,
-        CHAIN_SOLANA,
-        CHAIN_MACHINE,
-        clock.slot,
+        instructions_sysvar,
     )?;
 
     // Replay protection: the nonce PDA must not already exist.
@@ -229,13 +226,17 @@ fn process_mint_wrapped(
         return Err(BridgeError::InvalidAccountData.into());
     }
 
-    // Caps, enforced on-chain.
+    // Absolute caps, enforced on-chain (slot-windowed daily total).
     config.daily_minted = config.daily_minted.check_and_record(
         message.amount,
         config.per_tx_cap,
         config.daily_cap,
-        clock.unix_timestamp,
+        clock.slot,
     )?;
+    config.total_outstanding = config
+        .total_outstanding
+        .checked_add(message.amount)
+        .ok_or(BridgeError::ArithmeticOverflow)?;
 
     // Mint via the bridge-authority PDA. This is the ONLY mint path.
     let mint_ix = mint_to(
@@ -316,12 +317,18 @@ fn process_burn(
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
     }
-    let config = load_config(config_account)?;
+    let mut config = load_config(config_account)?;
     // Kill-switch does NOT stop burns: burning is the exit path.
     config.check_burn_allowed()?;
     if amount == 0 {
         return Err(BridgeError::InvalidAmount.into());
     }
+    // Burning more than the tracked outstanding supply would mean the
+    // books no longer balance against the Solana vault — refuse.
+    config.total_outstanding = config
+        .total_outstanding
+        .checked_sub(amount)
+        .ok_or(BridgeError::ArithmeticOverflow)?;
     if !user.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
@@ -381,6 +388,7 @@ fn process_burn(
     data[..bytes.len()].copy_from_slice(&bytes);
     drop(data);
 
+    save_config(config_account, &config)?;
     msg!(
         "Burn nonce={} amount={} destination={} slot={}",
         nonce,

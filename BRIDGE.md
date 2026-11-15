@@ -94,6 +94,14 @@ BridgeMessage {
 
 The message hash is `sha256(domain_separator || canonical_encoding)`. Relayers sign the hash, never the raw fields.
 
+**On-chain verification (as implemented):** the submitting transaction carries an
+ed25519-program (precompile) instruction holding the quorum signatures over the
+message hash; the runtime verifies those signatures before any instruction
+executes. The bridge programs read the attestation back from the instructions
+sysvar and require at least 3 *distinct registered* relayers on exactly this
+hash — the Solana-standard verification path, with no in-program signature
+cryptography.
+
 ### 2.4 Replay protection
 
 - **Nonce registry:** each direction maintains a strictly increasing nonce counter and a set of processed nonces (PDA per nonce). `unlock` / `mint_wrapped` reject any nonce already processed.
@@ -160,10 +168,11 @@ Relayers are off-chain processes that watch one chain, verify finality, sign att
 
 ### 4.4 Rate limits and caps
 
-- **Per-transaction cap** (phase 3 launch value: 1% of the vault's locked supply, exact number set at launch).
-- **Daily cap** (phase 3 launch value: 5% of the vault's locked supply per 24h window).
+Caps are enforced on-chain in the lock and bridge programs, not in the relayer — a compromised relayer cannot bypass them. Two layers, both must pass:
+
+- **Absolute caps** (both programs): per-transaction and daily caps set as exact amounts at initialization (and by multisig `set_cap`). The daily window is **slot-based** (216,000 slots ≈ 24h at the 400ms target), not wall-clock — slot counts cannot be skewed the way validator timestamps can.
+- **Dynamic percentage caps** (Solana-side unlocks): each unlock may move at most **1% of the vault's locked total**, and each window's unlocks at most **5%** — the phase-3 launch values above, enforced dynamically against the live locked total rather than translated to absolutes once. The mint side uses the absolute layer only: the wrapped supply is created by the mints themselves, so a percentage-of-supply rule there has no independent reference (any first mint would be 100% of the supply it creates). The Machine program does track total wrapped supply outstanding on-chain, so either side can be reconciled against the other at any slot.
 - **Vault ceiling:** the vault refuses deposits that would push total locked value above a configured ceiling until the ceiling is raised by multisig + timelock.
-- Caps are enforced on-chain in the lock and bridge programs, not in the relayer — a compromised relayer cannot bypass them.
 
 ---
 

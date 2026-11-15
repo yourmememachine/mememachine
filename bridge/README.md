@@ -120,12 +120,12 @@ When those exist, the deploy path is:
   with real assets until the audit in BRIDGE.md section 5 is done.
 - **No live deployment.** No program is deployed anywhere, no relayer is
   running live, no asset has crossed.
-- **Attestation verification is in-program ed25519 (ed25519-dalek), not
-  the ed25519 precompile + instructions sysvar.** The verification is
-  equivalent (same curve, same hash) and directly unit-testable. The
-  precompile path is a gas optimization for a later review, and the SBF
-  build must be checked for ed25519-dalek compatibility before
-  deployment.
+- **Attestation verification uses the ed25519 precompile +
+  instructions sysvar** (since the 2026-11-14 code-review changes):
+  the runtime verifies the quorum signatures; the programs check
+  distinct registered relayers over the message hash in the sysvar.
+  The relayer still verifies peers' attestations off-chain with
+  ed25519-dalek before aggregating.
 - **Relayer: implemented, never run live.** The off-chain relayer
   (watching for finalized deposits/burns, signing attestations,
   collecting a 3-of-5 quorum, submitting them) is in

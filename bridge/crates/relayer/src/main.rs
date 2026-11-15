@@ -20,7 +20,7 @@ use relayer::config::{parse_pubkey, RelayerConfig};
 use relayer::message::{Direction, ObservedEvent};
 use relayer::rpc::{sender_from_parsed_transaction, RpcClient};
 use relayer::signing::RelayerSigner;
-use relayer::submit::{build_mint_instruction, build_unlock_instruction};
+use relayer::submit::{build_mint_instructions, build_unlock_instructions};
 use relayer::watcher::{poll_once, PollOutcome, RelayerState, SourceChain};
 use relayer::{RelayerError, Result};
 use solana_program::pubkey::Pubkey;
@@ -209,8 +209,8 @@ fn submit(
     let payer_pk = Pubkey::from_str(&payer_pubkey.to_string())
         .map_err(|e| RelayerError::InvalidPubkey(e.to_string()))?;
 
-    let ix = match direction {
-        Direction::SolanaToMachine => build_mint_instruction(
+    let ixs = match direction {
+        Direction::SolanaToMachine => build_mint_instructions(
             &cfg.machine_program_id(),
             &message,
             signatures,
@@ -218,7 +218,7 @@ fn submit(
             destination_token_account,
             &payer_pk,
         ),
-        Direction::MachineToSolana => build_unlock_instruction(
+        Direction::MachineToSolana => build_unlock_instructions(
             &cfg.lock_program_id(),
             &message,
             signatures,
@@ -230,10 +230,10 @@ fn submit(
 
     if !cfg.submit_enabled {
         println!(
-            "dry-run (submit_enabled=false): would submit {} instruction to {} with {} accounts",
+            "dry-run (submit_enabled=false): would submit {} as {} instructions (ed25519 precompile + bridge) to program {}",
             direction.label(),
-            ix.program_id,
-            ix.accounts.len()
+            ixs.len(),
+            ixs[1].program_id
         );
         return Ok(());
     }
@@ -245,21 +245,24 @@ fn submit(
     // solana_program::instruction::Instruction and the sdk's are the
     // same solana-instruction type; convert through the sdk constructor
     // fields to be explicit about it.
-    let sdk_ix = solana_sdk::instruction::Instruction {
-        program_id: solana_sdk::pubkey::Pubkey::from_str(&ix.program_id.to_string()).unwrap(),
-        accounts: ix
-            .accounts
-            .iter()
-            .map(|a| solana_sdk::instruction::AccountMeta {
-                pubkey: solana_sdk::pubkey::Pubkey::from_str(&a.pubkey.to_string()).unwrap(),
-                is_signer: a.is_signer,
-                is_writable: a.is_writable,
-            })
-            .collect(),
-        data: ix.data.clone(),
-    };
+    let sdk_ixs: Vec<solana_sdk::instruction::Instruction> = ixs
+        .iter()
+        .map(|ix| solana_sdk::instruction::Instruction {
+            program_id: solana_sdk::pubkey::Pubkey::from_str(&ix.program_id.to_string()).unwrap(),
+            accounts: ix
+                .accounts
+                .iter()
+                .map(|a| solana_sdk::instruction::AccountMeta {
+                    pubkey: solana_sdk::pubkey::Pubkey::from_str(&a.pubkey.to_string()).unwrap(),
+                    is_signer: a.is_signer,
+                    is_writable: a.is_writable,
+                })
+                .collect(),
+            data: ix.data.clone(),
+        })
+        .collect();
     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
-        &[sdk_ix],
+        &sdk_ixs,
         Some(&payer_pubkey),
         &[&payer],
         blockhash,

@@ -265,12 +265,10 @@ async fn send_mint(
     let (nonce_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
     let (authority_pda, _) = authority_pda(&program_id);
     let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ed25519_ix = build_ed25519_instruction(&message.hash(), &signatures);
     let ix = Instruction::new_with_borsh(
         program_id,
-        &MachineInstruction::MintWrapped {
-            message,
-            signatures,
-        },
+        &MachineInstruction::MintWrapped { message },
         vec![
             AccountMeta::new(config_pda, false),
             AccountMeta::new(nonce_pda, false),
@@ -280,10 +278,11 @@ async fn send_mint(
             AccountMeta::new(env.context.payer.pubkey(), true),
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
         ],
     );
     let tx = Transaction::new_signed_with_payer(
-        &[ix],
+        &[ed25519_ix, ix],
         Some(&env.context.payer.pubkey()),
         &[&env.context.payer],
         blockhash,
@@ -570,4 +569,114 @@ async fn burn_records_event_and_rejects_replay() {
     warp(&mut env).await;
     let again = send_burn(&mut env, 1, 10_000).await;
     assert_custom_error(again, BridgeError::NonceAlreadyProcessed);
+}
+
+#[tokio::test]
+async fn reordered_signatures_still_mint() {
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let mut sigs = sign_attestation(&msg, &env.relayers, 3);
+    sigs.reverse();
+    send_mint(&mut env, msg, sigs).await.unwrap();
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.recipient_token_account).await,
+        50_000
+    );
+}
+
+#[tokio::test]
+async fn duplicate_relayer_signature_counts_once() {
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    // Relayer 0 twice plus relayer 1 once: three signature entries but
+    // only two distinct relayers — quorum (3) must not be reached.
+    let mut sigs = sign_attestation(&msg, &env.relayers[0..1], 1);
+    sigs.extend(sign_attestation(&msg, &env.relayers[0..2], 2));
+    assert_eq!(sigs.len(), 3);
+    let result = send_mint(&mut env, msg, sigs).await;
+    assert_custom_error(result, BridgeError::QuorumNotReached);
+}
+
+#[tokio::test]
+async fn mint_at_expiry_boundary() {
+    let mut env = setup(100_000, 500_000).await;
+    // At the exact expiry slot the attestation is still valid
+    // (rejection is current_slot > expiry_slot).
+    let mut msg = test_message(1, 1_000, env.recipient.pubkey(), env.wrapped_mint);
+    msg.expiry_slot = 500;
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    env.context.warp_to_slot(500).unwrap();
+    send_mint(&mut env, msg, sigs).await.unwrap();
+    // One slot past expiry, the same-shaped attestation is dead.
+    let mut msg2 = test_message(2, 1_000, env.recipient.pubkey(), env.wrapped_mint);
+    msg2.expiry_slot = 500;
+    let sigs2 = sign_attestation(&msg2, &env.relayers, 3);
+    env.context.warp_to_slot(501).unwrap();
+    let result = send_mint(&mut env, msg2, sigs2).await;
+    assert_custom_error(result, BridgeError::ExpiredAttestation);
+}
+
+#[tokio::test]
+async fn large_nonce_gap_mints() {
+    let mut env = setup(100_000, 500_000).await;
+    // Nonces are PDA-keyed, not sequential: a jump from 1 to 1,000,000
+    // is fine (the source chain's relayers own nonce assignment).
+    let msg = test_message(1, 1_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_mint(&mut env, msg, sigs).await.unwrap();
+    let msg2 = test_message(1_000_000, 1_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs2 = sign_attestation(&msg2, &env.relayers, 3);
+    send_mint(&mut env, msg2, sigs2).await.unwrap();
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.recipient_token_account).await,
+        2_000
+    );
+}
+
+#[tokio::test]
+async fn compute_units_mint_wrapped() {
+    // Measurement test: prints the compute units a full MintWrapped
+    // (ed25519 precompile + bridge instruction) consumes, for the
+    // record in bridge/VERIFY.md. The bound is a sanity ceiling, not
+    // a target.
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (nonce_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, msg.nonce);
+    let (authority_pda, _) = authority_pda(&program_id);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ed25519_ix = build_ed25519_instruction(&msg.hash(), &sigs);
+    let ix = Instruction::new_with_borsh(
+        program_id,
+        &MachineInstruction::MintWrapped { message: msg },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(nonce_pda, false),
+            AccountMeta::new(env.wrapped_mint, false),
+            AccountMeta::new(env.recipient_token_account, false),
+            AccountMeta::new_readonly(authority_pda, false),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer],
+        blockhash,
+    );
+    let result = env
+        .context
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await
+        .unwrap();
+    result.result.unwrap();
+    let cu = result.metadata.unwrap().compute_units_consumed;
+    println!("CU MintWrapped (3-of-5, incl. ed25519 precompile): {cu}");
+    assert!(cu < 200_000, "MintWrapped CU unexpectedly high: {cu}");
 }

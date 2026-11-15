@@ -166,3 +166,72 @@ test result: ok. 20 passed  — relayer unit
 test result: ok. 2 passed   — relayer integration
 Total: 56 passed, 0 failed. Exit code 0.
 ```
+
+---
+
+## Update — 2026-11-14 (evening): external code-review changes
+
+Implemented from an external review of the bridge code:
+
+1. **Attestation verification now uses the ed25519 precompile +
+   instructions sysvar** (the Solana-standard path) instead of
+   in-program ed25519-dalek verification. The submitting transaction
+   carries an ed25519-program instruction with the quorum signatures
+   over the message hash; the programs read it back from the sysvar
+   and require >= quorum *distinct registered* relayers on exactly
+   this hash. Signatures no longer travel inside the program
+   instruction payloads. (The relayer still uses dalek off-chain to
+   re-verify peers' attestations before aggregating.)
+2. **Dynamic percentage caps** added on top of the absolute caps, per
+   BRIDGE.md §4.4: on the Solana unlock path each transaction is
+   limited to 1% of the vault's locked total and each window to 5%.
+   The daily window is now **slot-based** (216,000 slots) instead of
+   wall-clock. The mint side keeps absolute caps only — the wrapped
+   supply is created by the mints themselves, so a percentage rule
+   has no independent reference there; the Machine program now tracks
+   total wrapped supply outstanding on-chain for reconciliation.
+3. **Adversarial tests added:** mint at the exact expiry slot passes,
+   one slot later fails; reordered signature sets mint/unlock;
+   a duplicated relayer signature counts once (quorum not reached);
+   a nonce jump 1 -> 1,000,000 mints; unlocks at exactly the dynamic
+   per-tx (1%) and daily (5%) boundaries pass, one unit over fails.
+
+```
+$ cargo test --release        # whole bridge workspace
+test result: ok. 17 passed  — bridge-common unit
+test result: ok. 14 passed  — machine-bridge integration
+test result: ok. 13 passed  — solana-lock integration
+test result: ok. 20 passed  — relayer unit
+test result: ok. 2 passed   — relayer integration
+Total: 66 passed, 0 failed. Exit code 0.
+```
+
+### Compute units (program-test, native execution)
+
+Measured with `process_transaction_with_metadata` (tests
+`compute_units_mint_wrapped`, `compute_units_unlock`):
+
+- Full MintWrapped transaction (ed25519 precompile + bridge
+  instruction, 3-of-5): **409 CU**
+- Full Unlock transaction (same shape): **409 CU**
+
+Program-test executes the programs natively, so these figures are
+not SBF-execution costs; what they show is that the design carries
+almost no on-chain verification overhead of its own — signature
+verification is the runtime precompile's job now. SBF-execution CU
+will be measured on the Phase 1 testnet host and recorded here.
+
+### SBF rebuild (same day, new sources)
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 205,736 | `05ab551aa74d916b886cd77d9d1cbc977437917f6e24b30361d022a67b9be6a6` |
+| `machine_bridge.so` | 206,016 | `eacc1a86a10095e34688487eec019a206ce975ce57bc08610bc019191478da21` |
+
+Both ~41% smaller than the previous build (349,952 / 350,192 bytes)
+— the in-program signature-verification code is gone. Same
+program-only lockfile method as `bridge/deploy/SBF-BUILD-NOTES.md`;
+the scratch tree's lockfile was verified byte-identical to the
+saved `bridge/deploy/sbf-Cargo.lock` (pins: blake3 1.5.5, zeroize
+1.8.1, base64ct 1.6.0, indexmap 2.13.1, proc-macro-crate 3.3.0).
+Still not deployed anywhere.

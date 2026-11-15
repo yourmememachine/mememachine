@@ -16,7 +16,7 @@ chain configuration gates any public chain launch. Both scopes:
 |---|---|---|
 | Solana lock program | `bridge/crates/solana-lock/` | Deposit / unlock, vault ceiling, caps, pause. |
 | Machine bridge program | `bridge/crates/machine-bridge/` | Mint/burn, kill-switch, no admin mint path exists — verify that claim. |
-| Shared logic | `bridge/crates/bridge-common/` | Message format (195-byte canonical encoding), hash, 3-of-5 attestation verification (in-program ed25519-dalek, not the precompile — see bridge/README.md honest limits), nonce replay protection, caps, authority checks. |
+| Shared logic | `bridge/crates/bridge-common/` | Message format (195-byte canonical encoding), hash, 3-of-5 attestation verification via the ed25519 precompile + instructions sysvar (switched from in-program ed25519-dalek in the 2026-11-14 code-review changes; the precompile-instruction parser in `verify_precompile_attestation` is a priority review target), nonce replay protection, absolute + dynamic percentage caps, authority checks. Scope size at those changes: 4,706 lines of Rust across the five in-scope crates (bridge-common 1,168, solana-lock 547, machine-bridge 518, relayer 2,010, LaunchGuard 463; tests excluded). |
 | Off-chain relayer | `bridge/crates/relayer/` | Finalized-only signing rule, deterministic message construction (expiry derived from source slot), quorum collection with disagreement blocking, submitter account ordering. A relayer bug that signs a non-finalized or mis-built message is in scope even though quorum + on-chain checks should contain it. |
 | LaunchGuard launch standard | `programs/crates/launch-guard/` | Added 2026-11-14. Gates LaunchGuard's own mainnet use (it custodies locked creator tokens), not the bridge. Verify: registration truly requires revoked mint+freeze authorities, the ≥10% / ≥30-day (6,480,000-slot) lock floor, no early-release or lock-shortening path, PDA authority over the vault. Spec: `programs/LAUNCH-GUARD.md`. |
 | Key management | `bridge/deploy/DEPLOY-BRIDGE.md` step 2 | Fresh keys on deployment hosts, role separation, multisig + 48h timelock for upgrades. Process review, not code. |
@@ -49,8 +49,9 @@ platform-tools cargo cannot parse the edition2024 crates in the
 unified workspace lock. Method, dependency pins and caveats:
 `bridge/deploy/SBF-BUILD-NOTES.md`, lockfile at
 `bridge/deploy/sbf-Cargo.lock`. Reproducing the build from that
-lockfile and confirming ed25519-dalek's behavior in the SBF artifacts
-remain explicit audit check items, not assumed facts.
+lockfile remains an explicit audit check item, not an assumed fact.
+(On the 2026-11-14 rebuild, the scratch tree's lockfile was verified
+byte-identical to the saved one before building.)
 
 ## Free security checks run (2026-11-14, pre-audit)
 
@@ -97,11 +98,15 @@ starts from what is already known:
   items 17–18.
 - Bridge programs are local-only: not deployed, no asset has
   crossed. SBF build verified locally 2026-11-14 (see above).
-- Attestation verification uses ed25519-dalek in-program rather
-  than the ed25519 precompile + instructions sysvar.
-- Caps are absolute values set at initialization, not percentages
-  of live vault balance.
-- Daily-cap window uses the Clock sysvar's unix timestamp.
+- ~~Attestation verification uses ed25519-dalek in-program rather
+  than the ed25519 precompile + instructions sysvar.~~ Fixed
+  2026-11-14: precompile + sysvar verification.
+- ~~Caps are absolute values set at initialization, not percentages
+  of live vault balance.~~ Fixed 2026-11-14: dynamic 1% per-tx / 5%
+  daily caps on unlocks, enforced against the live locked total, on
+  top of the absolute caps.
+- ~~Daily-cap window uses the Clock sysvar's unix timestamp.~~ Fixed
+  2026-11-14: slot-based window (216,000 slots).
 - The 3-of-5 relayer set is a trust assumption (BRIDGE.md honest
   limits), weaker than validator-set attestation.
 - Dev keys in `keys/` are throwaway and must never hold value.

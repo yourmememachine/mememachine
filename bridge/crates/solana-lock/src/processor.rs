@@ -52,9 +52,7 @@ pub fn process(
             destination,
             nonce,
         } => process_deposit(program_id, accounts, amount, destination, nonce),
-        LockInstruction::Unlock { message, signatures } => {
-            process_unlock(program_id, accounts, message, signatures)
-        }
+        LockInstruction::Unlock { message } => process_unlock(program_id, accounts, message),
         LockInstruction::Pause => process_pause(program_id, accounts, true),
         LockInstruction::Unpause => process_pause(program_id, accounts, false),
         LockInstruction::SetCap {
@@ -316,7 +314,6 @@ fn process_unlock(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     message: BridgeMessage,
-    signatures: Vec<RelayerSignature>,
 ) -> ProgramResult {
     let mut iter = accounts.iter();
     let config_account = next_account_info(&mut iter)?;
@@ -327,6 +324,7 @@ fn process_unlock(
     let payer = next_account_info(&mut iter)?;
     let token_program = next_account_info(&mut iter)?;
     let system_program = next_account_info(&mut iter)?;
+    let instructions_sysvar = next_account_info(&mut iter)?;
 
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
@@ -347,14 +345,12 @@ fn process_unlock(
     }
 
     let clock = Clock::get()?;
-    verify_attestation(
+    validate_message(&message, CHAIN_MACHINE, CHAIN_SOLANA, clock.slot)?;
+    verify_precompile_attestation(
         &message,
-        &signatures,
         &config.relayers.relayers,
         config.relayers.quorum,
-        CHAIN_MACHINE,
-        CHAIN_SOLANA,
-        clock.slot,
+        instructions_sysvar,
     )?;
 
     let (nonce_pda, nonce_bump) = nonce_pda(program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
@@ -380,7 +376,15 @@ fn process_unlock(
         message.amount,
         config.per_tx_cap,
         config.daily_cap,
-        clock.unix_timestamp,
+        clock.slot,
+    )?;
+    // Dynamic percentage layer: at most 1% of the vault's locked total
+    // per unlock, at most 5% per window. `total_locked` here is the
+    // pre-unlock total, which includes this amount.
+    check_dynamic_caps(
+        message.amount,
+        config.daily_unlocked.used,
+        config.total_locked,
     )?;
 
     let transfer_ix = token_transfer(

@@ -387,3 +387,77 @@ async fn stranger_cannot_release() {
     .unwrap_err();
     expect_custom(&err, LaunchError::NotCreator as u32);
 }
+
+#[tokio::test]
+async fn register_rejected_for_token2022_mint() {
+    // A mint account owned by the Token-2022 program, with a byte
+    // layout that would parse as a perfectly registrable classic mint
+    // (authorities revoked, supply present). LaunchGuard must reject
+    // it on ownership alone: Token-2022 extensions are out of scope
+    // for v1 (LaunchError::UnsupportedTokenProgram).
+    let token2022: Pubkey = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        .parse()
+        .unwrap();
+    let mint_state = Mint {
+        mint_authority: solana_program::program_option::COption::None,
+        supply: SUPPLY,
+        decimals: 0,
+        is_initialized: true,
+        freeze_authority: solana_program::program_option::COption::None,
+    };
+    let mut mint_data = vec![0u8; Mint::LEN];
+    mint_state.pack_into_slice(&mut mint_data);
+    let fake_mint = Pubkey::new_unique();
+    let mut test = ProgramTest::new(
+        "launch_guard",
+        program_id(),
+        processor!(launch_guard::process_instruction),
+    );
+    test.add_account(
+        fake_mint,
+        solana_sdk::account::Account {
+            lamports: 1_000_000_000,
+            data: mint_data,
+            owner: token2022,
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+    let mut ctx = test.start_with_context().await;
+    let creator = ctx.payer.pubkey();
+    let creator_token = Pubkey::new_unique();
+    let err = send(
+        &mut ctx,
+        &[register_ix(&creator, &fake_mint, &creator_token, LOCK, MIN_LOCK_SLOTS)],
+        &[],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::UnsupportedTokenProgram as u32);
+}
+
+#[tokio::test]
+async fn compute_units_register() {
+    // Measurement test: prints compute units for RegisterAndLock,
+    // for the record in programs/VERIFY.md.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint(&mut ctx, &creator, true).await;
+    let ix = register_ix(&creator.pubkey(), &mint, &token, LOCK, MIN_LOCK_SLOTS);
+    let payer = ctx.payer.pubkey();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer),
+        &[&ctx.payer, &creator],
+        ctx.last_blockhash,
+    );
+    let result = ctx
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await
+        .unwrap();
+    result.result.unwrap();
+    let cu = result.metadata.unwrap().compute_units_consumed;
+    println!("CU RegisterAndLock: {cu}");
+    assert!(cu < 200_000, "RegisterAndLock CU unexpectedly high: {cu}");
+}

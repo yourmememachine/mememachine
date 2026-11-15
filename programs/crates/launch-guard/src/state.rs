@@ -65,6 +65,13 @@ pub enum LaunchError {
     NotCreator = 9,
     InvalidPda = 10,
     MintMismatch = 11,
+    /// The mint (or a token account) is not owned by the classic SPL
+    /// Token program. Token-2022 mints are rejected outright in v1:
+    /// their extensions (permanent delegate, transfer hooks, mint
+    /// close authority, …) can reintroduce exactly the control this
+    /// standard exists to remove, and the classic Mint layout this
+    /// program parses does not describe them.
+    UnsupportedTokenProgram = 12,
 }
 
 impl From<LaunchError> for ProgramError {

@@ -64,6 +64,7 @@ cd bridge && cargo build --release && cargo test --release
 | P14 | Bridge relayer implemented and tested locally (added 2026-11-14) | `bridge/crates/relayer/` — nonce-cursor watcher with the finalized-only rule (+16 slots Solana side), deterministic message construction, ed25519 signing, 3-of-5 attestation file exchange + collector (disagreement blocks quorum), MintWrapped/Unlock submitters, JSON-RPC client, CLI (sign-once / collect / submit / run, dry-run unless `submit_enabled`). `cargo test --release -p relayer`: **22 passed, 0 failed** (20 unit + 2 integration). Never run live — see N3. |
 | P15 | Repo operability package exists (added 2026-11-14) | All shell scripts executable in git (fork suite: 23 passed, 2 skipped, after the mode fix); `ops/` (host-readiness gate — verified to FAIL with both blockers named on a restricted VM, public-RPC plan, wallet network template, reconciliation job + systemd timer, incident response); `bridge/deploy/` (SBF build script, caps calculator, deploy runbook with the §5 gate); `bridge/drills/` (test-crossing, pause, relayer-outage); `AUDIT.md` audit-readiness package with scope fixed in public. None of these is a live deployment. |
 | P16 | LaunchGuard native launch standard implemented and tested locally (added 2026-11-14) | `programs/crates/launch-guard/` — MemeMachine's original flagship program (spec: `programs/LAUNCH-GUARD.md`): a launch registers only with mint+freeze authorities revoked and ≥10% of supply locked ≥30 days (6,480,000 slots, slot-based by design) in a program-PDA vault; locks can be extended, never shortened; no admin key. `cargo test --release`: **6 passed, 0 failed** (program-test, real SPL token program). In the audit scope (AUDIT.md Scope A); not deployed — see N3. |
+| P17 | External code-review changes implemented (added 2026-11-14) | Attestation verification switched to the ed25519 precompile + instructions sysvar (no in-program signature crypto; SBF binaries ~41% smaller); dynamic caps on unlocks (1% of locked total per tx, 5% per 216,000-slot window) on top of the absolute caps; adversarial tests (expiry boundary, reordered/duplicate signature sets, nonce gap 1→1,000,000, dynamic-cap boundaries); LaunchGuard explicitly rejects Token-2022 mints. Bridge workspace **66 passed, 0 failed**; LaunchGuard **8 passed, 0 failed**; fork suite 23 OK. Details: `bridge/VERIFY.md`, `programs/VERIFY.md`. Still local-only code — deployment gates unchanged (N3). |
 
 ## NEXT
 
@@ -83,7 +84,7 @@ cd bridge && cargo build --release && cargo test --release
   this VM. Everything public-facing is NEXT.
 - **Transfers unverified** (N1). The chain votes and finalizes, but no
   user-transfer signature exists.
-- **Bridge code only, not a live bridge** (N3). 34/34 program tests and 22/22 relayer tests prove the
+- **Bridge code only, not a live bridge** (N3). 66/66 bridge-workspace tests (including 22/22 relayer) and 8/8 LaunchGuard tests prove the
   programs behave as designed in program-test; they prove nothing about
   a live deployment, which does not exist.
 - **Dev keys only.** The keypairs in `keys/` are throwaway test keys
@@ -95,6 +96,5 @@ cd bridge && cargo build --release && cargo test --release
   998,999,000 of 1,000,000,000). It is a throwaway dev genesis. The
   balanced livenet allocation (P10/P11) applies only to the
   not-yet-generated livenet genesis.
-- **Repo state:** local only. Nothing in this file was pushed to
-  GitHub. The public repo still serves the earlier state until a push
-  is explicitly done.
+- **Repo state:** pushed to GitHub (github.com/yourmememachine/mememachine)
+  under the owner's identity; the public repo matches this state.

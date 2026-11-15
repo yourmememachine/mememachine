@@ -26,6 +26,13 @@ Anyone can read a launch's record on-chain and verify both facts
 without trusting the creator, a launchpad, or us. That is the whole
 point: **the guarantee is the program, not a promise.**
 
+**Classic SPL Token only (v1).** Registration rejects Token-2022
+mints outright (`UnsupportedTokenProgram`). Token-2022 extensions —
+permanent delegate, transfer hooks, mint-close authority — can
+reintroduce exactly the control this standard removes, and they get
+their own analysis before any support. A mint whose owning program
+is not the classic SPL Token program is not a LaunchGuard launch.
+
 ## Instructions (v1)
 
 | Instruction | What it does |

@@ -13,7 +13,7 @@ use bridge_common::{
 use relayer::attestation::{AttestationFile, Collector};
 use relayer::message::{build_message, Direction, ObservedEvent};
 use relayer::signing::RelayerSigner;
-use relayer::submit::build_mint_instruction;
+use relayer::submit::build_mint_instructions;
 use solana_program::pubkey::Pubkey;
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
@@ -86,13 +86,14 @@ fn deposit_to_quorum_to_mint_instruction() {
     )
     .unwrap();
 
-    // Build the destination instruction; its data must decode to the
-    // same MintWrapped carrying the same message and signatures.
+    // Build the submission: an ed25519 precompile instruction carrying
+    // the signatures, then the MintWrapped instruction carrying the
+    // same message.
     let machine_program = Pubkey::new_unique();
     let wrapped_mint = Pubkey::new_unique();
     let dest_token_account = Pubkey::new_unique();
     let payer = Pubkey::new_unique();
-    let ix = build_mint_instruction(
+    let ixs = build_mint_instructions(
         &machine_program,
         &collected,
         signatures.clone(),
@@ -100,14 +101,15 @@ fn deposit_to_quorum_to_mint_instruction() {
         &dest_token_account,
         &payer,
     );
-    let decoded = MachineInstruction::try_from_slice(&ix.data).unwrap();
+    assert_eq!(ixs.len(), 2);
+    assert_eq!(ixs[0].program_id, solana_program::ed25519_program::ID);
+    // The precompile instruction's payload ends with the message hash.
+    let hash = collected.hash();
+    assert_eq!(&ixs[0].data[ixs[0].data.len() - 32..], &hash);
+    let decoded = MachineInstruction::try_from_slice(&ixs[1].data).unwrap();
     match decoded {
-        MachineInstruction::MintWrapped {
-            message: m,
-            signatures: s,
-        } => {
+        MachineInstruction::MintWrapped { message: m } => {
             assert_eq!(m, collected);
-            assert_eq!(s, signatures);
         }
         other => panic!("expected MintWrapped, got {other:?}"),
     }

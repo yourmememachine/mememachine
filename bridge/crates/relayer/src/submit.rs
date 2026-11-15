@@ -5,36 +5,44 @@
 //! re-check every PDA, the mint, and the destination owner on-chain.
 
 use bridge_common::{
-    authority_pda, config_pda, nonce_pda, BridgeMessage, LockInstruction, MachineInstruction,
-    RelayerSignature, DIR_MACHINE_TO_SOLANA, DIR_SOLANA_TO_MACHINE,
+    authority_pda, build_ed25519_instruction, config_pda, nonce_pda, BridgeMessage,
+    LockInstruction, MachineInstruction, RelayerSignature, DIR_MACHINE_TO_SOLANA,
+    DIR_SOLANA_TO_MACHINE,
 };
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     system_program,
+    sysvar,
 };
 
+/// The submission for one attested message is TWO instructions in one
+/// transaction: first the ed25519 precompile instruction carrying the
+/// quorum signatures over the message hash (the runtime verifies them
+/// before anything executes), then the bridge instruction, which reads
+/// the attestation back from the instructions sysvar.
+///
 /// MintWrapped on Machine (machine-bridge processor, in order):
 /// config, nonce record, wrapped mint, destination token account,
-/// bridge authority, payer, token program, system program.
-/// `wrapped_mint` comes from the relayer config — the message itself
-/// carries the *original* Solana mint, not the wrapped one.
-pub fn build_mint_instruction(
+/// bridge authority, payer, token program, system program,
+/// instructions sysvar. `wrapped_mint` comes from the relayer config —
+/// the message itself carries the *original* Solana mint, not the
+/// wrapped one.
+pub fn build_mint_instructions(
     machine_program_id: &Pubkey,
     message: &BridgeMessage,
     signatures: Vec<RelayerSignature>,
     wrapped_mint: &Pubkey,
     destination_token_account: &Pubkey,
     payer: &Pubkey,
-) -> Instruction {
+) -> Vec<Instruction> {
     let (config, _) = config_pda(machine_program_id);
     let (nonce, _) = nonce_pda(machine_program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
     let (authority, _) = authority_pda(machine_program_id);
-    Instruction::new_with_borsh(
+    let mint_ix = Instruction::new_with_borsh(
         *machine_program_id,
         &MachineInstruction::MintWrapped {
             message: message.clone(),
-            signatures,
         },
         vec![
             AccountMeta::new(config, false),
@@ -45,29 +53,30 @@ pub fn build_mint_instruction(
             AccountMeta::new(*payer, true),
             AccountMeta::new_readonly(spl_token_id(), false),
             AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new_readonly(sysvar::instructions::ID, false),
         ],
-    )
+    );
+    vec![build_ed25519_instruction(&message.hash(), &signatures), mint_ix]
 }
 
-/// Unlock on Solana (solana-lock processor, in order):
-/// config, vault, destination token account, nonce record,
-/// vault authority, payer, token program, system program.
-pub fn build_unlock_instruction(
+/// Unlock on Solana (solana-lock processor, in order): config, vault,
+/// destination token account, nonce record, vault authority, payer,
+/// token program, system program, instructions sysvar.
+pub fn build_unlock_instructions(
     lock_program_id: &Pubkey,
     message: &BridgeMessage,
     signatures: Vec<RelayerSignature>,
     vault: &Pubkey,
     destination_token_account: &Pubkey,
     payer: &Pubkey,
-) -> Instruction {
+) -> Vec<Instruction> {
     let (config, _) = config_pda(lock_program_id);
     let (nonce, _) = nonce_pda(lock_program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
     let (authority, _) = authority_pda(lock_program_id);
-    Instruction::new_with_borsh(
+    let unlock_ix = Instruction::new_with_borsh(
         *lock_program_id,
         &LockInstruction::Unlock {
             message: message.clone(),
-            signatures,
         },
         vec![
             AccountMeta::new(config, false),
@@ -78,8 +87,10 @@ pub fn build_unlock_instruction(
             AccountMeta::new(*payer, true),
             AccountMeta::new_readonly(spl_token_id(), false),
             AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new_readonly(sysvar::instructions::ID, false),
         ],
-    )
+    );
+    vec![build_ed25519_instruction(&message.hash(), &signatures), unlock_ix]
 }
 
 fn spl_token_id() -> Pubkey {
@@ -130,9 +141,13 @@ mod tests {
         let wrapped = Pubkey::new_unique();
         let dest = Pubkey::new_unique();
         let payer = Pubkey::new_unique();
-        let ix = build_mint_instruction(&program, &m, vec![], &wrapped, &dest, &payer);
+        let ixs = build_mint_instructions(&program, &m, vec![], &wrapped, &dest, &payer);
+        assert_eq!(ixs.len(), 2);
+        // First: the ed25519 precompile instruction.
+        assert_eq!(ixs[0].program_id, solana_program::ed25519_program::ID);
+        let ix = &ixs[1];
         assert_eq!(ix.program_id, program);
-        assert_eq!(ix.accounts.len(), 8);
+        assert_eq!(ix.accounts.len(), 9);
         assert_eq!(ix.accounts[0].pubkey, config_pda(&program).0);
         assert_eq!(
             ix.accounts[1].pubkey,
@@ -143,6 +158,7 @@ mod tests {
         assert_eq!(ix.accounts[4].pubkey, authority_pda(&program).0);
         assert_eq!(ix.accounts[5].pubkey, payer);
         assert!(ix.accounts[5].is_signer);
+        assert_eq!(ix.accounts[8].pubkey, solana_program::sysvar::instructions::ID);
         let decoded = MachineInstruction::try_from_slice(&ix.data).unwrap();
         match decoded {
             MachineInstruction::MintWrapped { message, .. } => assert_eq!(message, m),
@@ -157,8 +173,11 @@ mod tests {
         let vault = Pubkey::new_unique();
         let dest = Pubkey::new_unique();
         let payer = Pubkey::new_unique();
-        let ix = build_unlock_instruction(&program, &m, vec![], &vault, &dest, &payer);
-        assert_eq!(ix.accounts.len(), 8);
+        let ixs = build_unlock_instructions(&program, &m, vec![], &vault, &dest, &payer);
+        assert_eq!(ixs.len(), 2);
+        assert_eq!(ixs[0].program_id, solana_program::ed25519_program::ID);
+        let ix = &ixs[1];
+        assert_eq!(ix.accounts.len(), 9);
         assert_eq!(ix.accounts[0].pubkey, config_pda(&program).0);
         assert_eq!(ix.accounts[1].pubkey, vault);
         assert_eq!(ix.accounts[2].pubkey, dest);
@@ -167,6 +186,7 @@ mod tests {
             nonce_pda(&program, DIR_MACHINE_TO_SOLANA, 9).0
         );
         assert_eq!(ix.accounts[4].pubkey, authority_pda(&program).0);
+        assert_eq!(ix.accounts[8].pubkey, solana_program::sysvar::instructions::ID);
         let decoded = LockInstruction::try_from_slice(&ix.data).unwrap();
         match decoded {
             LockInstruction::Unlock { message, .. } => assert_eq!(message, m),

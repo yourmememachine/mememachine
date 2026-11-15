@@ -111,6 +111,16 @@ fn process_register(
     if !creator.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
+    // Classic SPL Token only (see LaunchError::UnsupportedTokenProgram):
+    // the token program passed in must be the classic one, and the
+    // mint account must be owned by it. A Token-2022 mint's base layout
+    // would otherwise parse while its extensions stayed invisible.
+    if token_program.key != &spl_token::id()
+        || mint_account.owner != &spl_token::id()
+        || creator_token.owner != &spl_token::id()
+    {
+        return Err(LaunchError::UnsupportedTokenProgram.into());
+    }
 
     // PDAs must be exactly the derived addresses.
     let (record_pda, record_bump) = launch_pda(program_id, mint_account.key);
@@ -293,6 +303,9 @@ fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
 
     if !creator.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
+    }
+    if token_program.key != &spl_token::id() {
+        return Err(LaunchError::UnsupportedTokenProgram.into());
     }
     let mut record = load_record(record_account)?;
     if record.creator != *creator.key {

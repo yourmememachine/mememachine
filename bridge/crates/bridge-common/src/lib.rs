@@ -14,14 +14,23 @@
 //!   BRIDGE.md section 3.3 says a faulty relayer "is removed from the set
 //!   by multisig"; there is no separate relayer-change instruction in the
 //!   design, so it follows the same authority model as `set_cap`.
-//! - Caps are absolute amounts set at initialization. BRIDGE.md section 4.4
-//!   gives launch values as percentages of locked supply (1% per-tx, 5%
-//!   daily); those translate to absolute numbers at deployment time.
-//! - Signatures are verified in-program with ed25519-dalek over the
-//!   message hash, rather than via the ed25519 precompile + instructions
-//!   sysvar. The verification is equivalent (same curve, same hash) and
-//!   is directly unit-testable; the precompile path is an optimization
-//!   for a later review, not a security difference.
+//! - Caps are enforced on two layers. Absolute per-tx and daily caps are
+//!   set at initialization (the deployment gate in BRIDGE.md section 5
+//!   requires absolutes). On top of those, BRIDGE.md section 4.4's
+//!   percentages are enforced dynamically on Solana-side unlocks: each
+//!   unlock at most 1% of the vault's locked total, each day's unlocks
+//!   at most 5% (see `check_dynamic_caps` for why the mint side, whose
+//!   supply is created by the mints themselves, uses absolutes only).
+//!   The daily window is slot-based (216,000 slots), not wall-clock,
+//!   so it is as deterministic as the message expiry.
+//! - On-chain attestation verification uses the ed25519 precompile +
+//!   instructions sysvar (the Solana-standard path): the submitting
+//!   transaction carries an ed25519-program instruction whose
+//!   signatures the runtime itself verifies; the bridge programs parse
+//!   that instruction from the sysvar and check that at least a quorum
+//!   of registered relayers signed this message's hash. The dalek-based
+//!   `verify_attestation` remains for off-chain use by the relayer,
+//!   which re-verifies peer attestations before signing.
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use ed25519_dalek::{Signature, VerifyingKey};
@@ -57,8 +66,18 @@ pub const ADMIN_THRESHOLD: u8 = 2;
 //  low threshold for stopping, high threshold for moving funds).
 pub const PAUSE_RELAYER_THRESHOLD: u8 = 2;
 
-/// One day in seconds, for the daily-cap window.
-pub const DAY_SECONDS: i64 = 86_400;
+/// Slots per daily-cap window: 216,000 slots at the 400 ms target slot
+/// time is 24 hours. Slot-based windows are deterministic — unlike the
+/// Clock sysvar's timestamp, a slot cannot be skewed by a validator.
+pub const SLOTS_PER_DAY: u64 = 216_000;
+
+/// Basis-point denominator for the dynamic percentage caps.
+pub const BPS_DENOMINATOR: u64 = 10_000;
+/// Dynamic per-transaction cap: 1% of the reference supply (BRIDGE.md
+/// section 4.4).
+pub const DYNAMIC_PER_TX_BPS: u64 = 100;
+/// Dynamic daily cap: 5% of the reference supply (BRIDGE.md 4.4).
+pub const DYNAMIC_DAILY_BPS: u64 = 500;
 
 /// Cross-chain direction, used in nonce PDA seeds so the two directions
 /// can never share a nonce registry.
@@ -101,6 +120,11 @@ pub enum BridgeError {
     InvalidAccountData,
     InvalidAmount,
     ArithmeticOverflow,
+    AmountExceedsDynamicPerTxCap,
+    AmountExceedsDynamicDailyCap,
+    /// The transaction carries no usable ed25519-precompile instruction
+    /// attesting this message (missing, malformed, or wrong sysvar).
+    MissingAttestation,
 }
 
 impl From<BridgeError> for ProgramError {
@@ -191,17 +215,11 @@ pub struct RelayerSignature {
 // Attestation verification (BRIDGE.md sections 2.4, 3.1)
 // ---------------------------------------------------------------------------
 
-/// Verify a quorum attestation over `message`.
-///
-/// Checks, in order: version, chain binding, expiry against the current
-/// slot, then each signature (relayer must be registered, signature must
-/// verify over the message hash, each relayer counted at most once), and
-/// finally that distinct valid signatures reach `quorum`.
-pub fn verify_attestation(
+/// The non-signature attestation checks, shared by the on-chain
+/// (precompile) and off-chain (dalek) verification paths: version,
+/// chain binding, and expiry against the current slot.
+pub fn validate_message(
     message: &BridgeMessage,
-    signatures: &[RelayerSignature],
-    relayers: &[Pubkey; MAX_RELAYERS],
-    quorum: u8,
     expected_source: u8,
     expected_dest: u8,
     current_slot: u64,
@@ -218,6 +236,26 @@ pub fn verify_attestation(
     if current_slot > message.expiry_slot {
         return Err(BridgeError::ExpiredAttestation);
     }
+    Ok(())
+}
+
+/// Verify a quorum attestation over `message` (off-chain path, used by
+/// the relayer to re-verify peer attestations before signing).
+///
+/// Checks, in order: version, chain binding, expiry against the current
+/// slot, then each signature (relayer must be registered, signature must
+/// verify over the message hash, each relayer counted at most once), and
+/// finally that distinct valid signatures reach `quorum`.
+pub fn verify_attestation(
+    message: &BridgeMessage,
+    signatures: &[RelayerSignature],
+    relayers: &[Pubkey; MAX_RELAYERS],
+    quorum: u8,
+    expected_source: u8,
+    expected_dest: u8,
+    current_slot: u64,
+) -> Result<(), BridgeError> {
+    validate_message(message, expected_source, expected_dest, current_slot)?;
 
     let hash = message.hash();
     let mut distinct_valid: u8 = 0;
@@ -250,26 +288,190 @@ pub fn verify_attestation(
 }
 
 // ---------------------------------------------------------------------------
+// On-chain attestation verification: ed25519 precompile + instructions
+// sysvar (BRIDGE.md sections 2.4, 3.1)
+// ---------------------------------------------------------------------------
+
+/// Build the ed25519-program instruction that carries `signatures` over
+/// `message_hash` for the bridge programs to verify against. One
+/// instruction holds every signature; all entries point at a single
+/// copy of the message. Layout follows the ed25519 program's format:
+/// a 2-byte header (count, padding), one 14-byte offsets record per
+/// signature, then the payload region.
+pub fn build_ed25519_instruction(
+    message_hash: &[u8; 32],
+    signatures: &[RelayerSignature],
+) -> solana_program::instruction::Instruction {
+    use solana_program::instruction::Instruction;
+    let n = signatures.len();
+    let data_start = 2 + 14 * n;
+    let mut data = Vec::with_capacity(data_start + 96 * n + 32);
+    data.push(n as u8);
+    data.push(0);
+    let message_offset = data_start + 96 * n;
+    for i in 0..n {
+        let pubkey_offset = data_start + 96 * i;
+        let signature_offset = pubkey_offset + 32;
+        let fields: [u16; 7] = [
+            signature_offset as u16,
+            u16::MAX,
+            pubkey_offset as u16,
+            u16::MAX,
+            message_offset as u16,
+            32,
+            u16::MAX,
+        ];
+        for f in fields {
+            data.extend_from_slice(&f.to_le_bytes());
+        }
+    }
+    for sig in signatures {
+        data.extend_from_slice(sig.relayer.as_ref());
+        data.extend_from_slice(&sig.signature);
+    }
+    data.extend_from_slice(message_hash);
+    Instruction {
+        program_id: solana_program::ed25519_program::ID,
+        accounts: vec![],
+        data,
+    }
+}
+
+/// Resolve one data slice referenced by an ed25519 offsets record.
+/// Only self-references resolve: index `u16::MAX` or the ed25519
+/// instruction's own index, reading from that instruction's data —
+/// the only layout `build_ed25519_instruction` produces. Cross-
+/// instruction references are rejected rather than half-supported.
+fn ed25519_slice<'a>(
+    own_data: &'a [u8],
+    own_index: usize,
+    index: u16,
+    offset: u16,
+    size: usize,
+) -> Result<&'a [u8], BridgeError> {
+    if index == u16::MAX || index as usize == own_index {
+        let start = offset as usize;
+        return own_data
+            .get(start..start + size)
+            .ok_or(BridgeError::MissingAttestation);
+    }
+    Err(BridgeError::MissingAttestation)
+}
+
+/// On-chain attestation verification (the Solana-standard path).
+///
+/// The transaction must carry, before the bridge instruction, an
+/// ed25519-program instruction attesting `message`'s hash. The runtime
+/// verifies those signatures itself before any instruction executes
+/// (an invalid signature fails the whole transaction), so this function
+/// only establishes the binding: it parses every preceding ed25519
+/// instruction from the instructions sysvar and requires that at least
+/// `quorum` DISTINCT registered relayers signed exactly this message's
+/// hash. Entries by unregistered keys are ignored — they cannot help
+/// reach quorum. Callers run `validate_message` first.
+pub fn verify_precompile_attestation(
+    message: &BridgeMessage,
+    relayers: &[Pubkey; MAX_RELAYERS],
+    quorum: u8,
+    instructions_sysvar: &solana_program::account_info::AccountInfo,
+) -> Result<(), BridgeError> {
+    use solana_program::sysvar::instructions as ix_sysvar;
+    if *instructions_sysvar.key != ix_sysvar::ID {
+        return Err(BridgeError::MissingAttestation);
+    }
+    let current_index = ix_sysvar::load_current_index_checked(instructions_sysvar)
+        .map_err(|_| BridgeError::MissingAttestation)? as usize;
+    let hash = message.hash();
+    let mut seen = [false; MAX_RELAYERS];
+    let mut distinct: u8 = 0;
+    let mut saw_hash_entry = false;
+
+    for idx in 0..current_index {
+        let ix = ix_sysvar::load_instruction_at_checked(idx, instructions_sysvar)
+            .map_err(|_| BridgeError::MissingAttestation)?;
+        if ix.program_id != solana_program::ed25519_program::ID {
+            continue;
+        }
+        let data = ix.data.as_slice();
+        if data.len() < 2 || data[1] != 0 {
+            continue;
+        }
+        let count = data[0] as usize;
+        if data.len() < 2 + 14 * count {
+            continue;
+        }
+        for i in 0..count {
+            let base = 2 + 14 * i;
+            let field = |j: usize| -> u16 {
+                u16::from_le_bytes([data[base + 2 * j], data[base + 2 * j + 1]])
+            };
+            let (sig_off, sig_ix) = (field(0), field(1));
+            let (pk_off, pk_ix) = (field(2), field(3));
+            let (msg_off, msg_size, msg_ix) = (field(4), field(5), field(6));
+            // The signature bytes are the precompile's concern; only
+            // their location must be well-formed.
+            if ed25519_slice(data, idx, sig_ix, sig_off, 64).is_err() {
+                continue;
+            }
+            let Ok(pk_bytes) = ed25519_slice(data, idx, pk_ix, pk_off, 32)
+            else {
+                continue;
+            };
+            let Ok(msg_bytes) =
+                ed25519_slice(data, idx, msg_ix, msg_off, msg_size as usize)
+            else {
+                continue;
+            };
+            if msg_bytes != hash.as_slice() {
+                continue;
+            }
+            saw_hash_entry = true;
+            let pubkey = Pubkey::new_from_array(pk_bytes.try_into().map_err(|_| BridgeError::MissingAttestation)?);
+            if let Some(pos) = relayers.iter().position(|r| r == &pubkey) {
+                if !seen[pos] {
+                    seen[pos] = true;
+                    distinct = distinct.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    if distinct >= quorum {
+        return Ok(());
+    }
+    if distinct > 0 {
+        return Err(BridgeError::QuorumNotReached);
+    }
+    if saw_hash_entry {
+        // Signatures over this hash exist, but none are from the
+        // registered relayer set.
+        return Err(BridgeError::UnknownRelayer);
+    }
+    Err(BridgeError::MissingAttestation)
+}
+
+// ---------------------------------------------------------------------------
 // Caps (BRIDGE.md section 4.4)
 // ---------------------------------------------------------------------------
 
-/// Daily usage tracker. The window is the UTC day number; the first
-/// operation in a new window resets the counter.
+/// Daily usage tracker. The window is the slot-day number
+/// (`slot / SLOTS_PER_DAY`); the first operation in a new window resets
+/// the counter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize, Default)]
 pub struct DailyUsage {
-    pub window_start: i64,
+    pub window_start: u64,
     pub used: u64,
 }
 
 impl DailyUsage {
-    /// Check `amount` against the per-transaction and daily caps and return
-    /// the updated usage. Pure function — fully unit-testable.
+    /// Check `amount` against the absolute caps and return the updated
+    /// usage. Pure function — fully unit-testable.
     pub fn check_and_record(
         &self,
         amount: u64,
         per_tx_cap: u64,
         daily_cap: u64,
-        now: i64,
+        current_slot: u64,
     ) -> Result<DailyUsage, BridgeError> {
         if amount == 0 {
             return Err(BridgeError::InvalidAmount);
@@ -277,7 +479,7 @@ impl DailyUsage {
         if amount > per_tx_cap {
             return Err(BridgeError::AmountExceedsPerTxCap);
         }
-        let window = now / DAY_SECONDS;
+        let window = current_slot / SLOTS_PER_DAY;
         let used = if window == self.window_start {
             self.used
         } else {
@@ -292,6 +494,38 @@ impl DailyUsage {
             used: new_used,
         })
     }
+}
+
+/// The dynamic percentage layer (BRIDGE.md section 4.4): a single
+/// operation may move at most `DYNAMIC_PER_TX_BPS` of the reference
+/// supply, and one window's total at most `DYNAMIC_DAILY_BPS` of it.
+///
+/// Enforced by the Solana-side lock program on unlocks, where the
+/// reference supply is the vault's locked total — an independent
+/// quantity built up by deposits, which are not percentage-capped.
+/// It is deliberately NOT applied to Machine-side mints: the wrapped
+/// supply is created by those very mints, so a percentage-of-supply
+/// rule there has no independent reference (any first mint would be
+/// 100% of the supply it creates). Mint-side flow is bounded by the
+/// absolute caps and the quorum instead. `window_total_after` is the
+/// caller's daily usage including this operation, as returned by
+/// `DailyUsage::check_and_record`.
+pub fn check_dynamic_caps(
+    amount: u64,
+    window_total_after: u64,
+    reference_supply: u64,
+) -> Result<(), BridgeError> {
+    if (amount as u128) * (BPS_DENOMINATOR as u128)
+        > (reference_supply as u128) * (DYNAMIC_PER_TX_BPS as u128)
+    {
+        return Err(BridgeError::AmountExceedsDynamicPerTxCap);
+    }
+    if (window_total_after as u128) * (BPS_DENOMINATOR as u128)
+        > (reference_supply as u128) * (DYNAMIC_DAILY_BPS as u128)
+    {
+        return Err(BridgeError::AmountExceedsDynamicDailyCap);
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -377,11 +611,15 @@ pub struct MachineConfig {
     pub per_tx_cap: u64,
     pub daily_cap: u64,
     pub daily_minted: DailyUsage,
+    /// Wrapped supply currently outstanding (minted minus burned),
+    /// tracked on-chain so the Machine side can be reconciled against
+    /// the Solana vault's locked total at any slot.
+    pub total_outstanding: u64,
     pub bump: u8,
 }
 
 impl MachineConfig {
-    pub const LEN: usize = 1 + 1 + 1 + (32 * 5 + 1) + (32 * 3 + 1) + 32 + 8 + 8 + (8 + 8) + 1;
+    pub const LEN: usize = 1 + 1 + 1 + (32 * 5 + 1) + (32 * 3 + 1) + 32 + 8 + 8 + (8 + 8) + 8 + 1;
 
     pub fn new(
         relayers: [Pubkey; MAX_RELAYERS],
@@ -407,6 +645,7 @@ impl MachineConfig {
             per_tx_cap,
             daily_cap,
             daily_minted: DailyUsage::default(),
+            total_outstanding: 0,
             bump,
         }
     }
@@ -556,9 +795,10 @@ pub enum MachineInstruction {
         per_tx_cap: u64,
         daily_cap: u64,
     },
+    /// Attestation signatures travel in the transaction's ed25519
+    /// precompile instruction, not in this payload.
     MintWrapped {
         message: BridgeMessage,
-        signatures: Vec<RelayerSignature>,
     },
     Burn {
         amount: u64,
@@ -595,9 +835,10 @@ pub enum LockInstruction {
         destination: Pubkey,
         nonce: u64,
     },
+    /// Attestation signatures travel in the transaction's ed25519
+    /// precompile instruction, not in this payload.
     Unlock {
         message: BridgeMessage,
-        signatures: Vec<RelayerSignature>,
     },
     Pause,
     Unpause,
@@ -776,27 +1017,88 @@ mod tests {
     #[test]
     fn daily_cap_window_resets() {
         let usage = DailyUsage::default();
-        // Day 0: use 800 of 1000 daily cap.
+        // Window 0: use 800 of 1000 daily cap.
         let usage = usage.check_and_record(800, 10_000, 1_000, 100).unwrap();
         assert_eq!(usage.used, 800);
-        // Same day: another 300 exceeds the daily cap.
+        // Same window: another 300 exceeds the daily cap.
         assert_eq!(
             usage.check_and_record(300, 10_000, 1_000, 200),
             Err(BridgeError::AmountExceedsDailyCap)
         );
-        // Next day: window resets, 300 is fine.
-        let usage = usage.check_and_record(300, 10_000, 1_000, DAY_SECONDS + 100).unwrap();
+        // Next window (one slot-day later): window resets, 300 is fine.
+        let usage = usage
+            .check_and_record(300, 10_000, 1_000, SLOTS_PER_DAY + 100)
+            .unwrap();
         assert_eq!(usage.used, 300);
         // Per-transaction cap.
         assert_eq!(
-            usage.check_and_record(10_001, 10_000, 1_000_000, DAY_SECONDS + 200),
+            usage.check_and_record(10_001, 10_000, 1_000_000, SLOTS_PER_DAY + 200),
             Err(BridgeError::AmountExceedsPerTxCap)
         );
         // Zero amount.
         assert_eq!(
-            usage.check_and_record(0, 10_000, 1_000_000, DAY_SECONDS + 200),
+            usage.check_and_record(0, 10_000, 1_000_000, SLOTS_PER_DAY + 200),
             Err(BridgeError::InvalidAmount)
         );
+    }
+
+    #[test]
+    fn dynamic_percentage_caps_bind() {
+        // Reference supply 10,000: dynamic per-tx cap is 1% = 100,
+        // dynamic daily cap is 5% = 500.
+        // Exactly 1% in one operation, 100 total for the window: fine.
+        assert!(check_dynamic_caps(100, 100, 10_000).is_ok());
+        // 101 in one operation exceeds 1%.
+        assert_eq!(
+            check_dynamic_caps(101, 101, 10_000),
+            Err(BridgeError::AmountExceedsDynamicPerTxCap)
+        );
+        // A small operation whose window total passes 5% fails on the
+        // daily layer even though the operation itself is under 1%.
+        assert_eq!(
+            check_dynamic_caps(1, 501, 10_000),
+            Err(BridgeError::AmountExceedsDynamicDailyCap)
+        );
+        // Exactly 5% for the window passes.
+        assert!(check_dynamic_caps(100, 500, 10_000).is_ok());
+    }
+
+    #[test]
+    fn ed25519_instruction_layout() {
+        let (_keys, pubs) = make_relayers();
+        let sigs: Vec<RelayerSignature> = pubs[..3]
+            .iter()
+            .map(|p| RelayerSignature {
+                relayer: *p,
+                signature: [7u8; 64],
+            })
+            .collect();
+        let hash = [9u8; 32];
+        let ix = build_ed25519_instruction(&hash, &sigs);
+        assert_eq!(ix.program_id, solana_program::ed25519_program::ID);
+        assert!(ix.accounts.is_empty());
+        // Header: count + padding.
+        assert_eq!(ix.data[0], 3);
+        assert_eq!(ix.data[1], 0);
+        // Data region starts at 2 + 14*3 = 44; message after 3*96 bytes.
+        let data_start = 44usize;
+        let message_offset = data_start + 3 * 96;
+        assert_eq!(ix.data.len(), message_offset + 32);
+        assert_eq!(&ix.data[message_offset..], &hash);
+        for i in 0..3 {
+            let base = 2 + 14 * i;
+            let field =
+                |j: usize| u16::from_le_bytes([ix.data[base + 2 * j], ix.data[base + 2 * j + 1]]);
+            assert_eq!(field(0) as usize, data_start + 96 * i + 32); // signature
+            assert_eq!(field(1), u16::MAX);
+            assert_eq!(field(2) as usize, data_start + 96 * i); // pubkey
+            assert_eq!(field(3), u16::MAX);
+            assert_eq!(field(4) as usize, message_offset);
+            assert_eq!(field(5), 32);
+            assert_eq!(field(6), u16::MAX);
+            let pk_at = data_start + 96 * i;
+            assert_eq!(&ix.data[pk_at..pk_at + 32], pubs[i].as_ref());
+        }
     }
 
     #[test]

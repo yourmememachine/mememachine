@@ -358,12 +358,10 @@ async fn send_unlock(
     let (nonce_pda, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
     let (authority_pda, _) = authority_pda(&program_id);
     let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ed25519_ix = build_ed25519_instruction(&message.hash(), &signatures);
     let ix = Instruction::new_with_borsh(
         program_id,
-        &LockInstruction::Unlock {
-            message,
-            signatures,
-        },
+        &LockInstruction::Unlock { message },
         vec![
             AccountMeta::new(config_pda, false),
             AccountMeta::new(env.vault, false),
@@ -373,10 +371,11 @@ async fn send_unlock(
             AccountMeta::new(env.context.payer.pubkey(), true),
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
         ],
     );
     let tx = Transaction::new_signed_with_payer(
-        &[ix],
+        &[ed25519_ix, ix],
         Some(&env.context.payer.pubkey()),
         &[&env.context.payer],
         blockhash,
@@ -451,15 +450,17 @@ async fn unlock_with_valid_3_of_5_burn_attestation() {
     send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
         .await
         .unwrap();
-    let msg = burn_message(1, 30_000, env.user.pubkey(), env.source_mint);
+    // 500 is exactly 1% of the 50,000 locked — the dynamic per-tx cap
+    // boundary; it must pass.
+    let msg = burn_message(1, 500, env.user.pubkey(), env.source_mint);
     let sigs = sign_attestation(&msg, &env.relayers, 3);
     send_unlock(&mut env, msg, sigs).await.unwrap();
-    assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 20_000);
+    assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 49_500);
     assert_eq!(
         token_balance(&mut env.context.banks_client, &env.user_token_account).await,
-        1_980_000
+        1_950_500
     );
-    assert_eq!(total_locked(&mut env).await, 20_000);
+    assert_eq!(total_locked(&mut env).await, 49_500);
 }
 
 #[tokio::test]
@@ -468,7 +469,7 @@ async fn unlock_replay_fails() {
     send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
         .await
         .unwrap();
-    let msg = burn_message(1, 30_000, env.user.pubkey(), env.source_mint);
+    let msg = burn_message(1, 500, env.user.pubkey(), env.source_mint);
     let sigs = sign_attestation(&msg, &env.relayers, 3);
     send_unlock(&mut env, msg.clone(), sigs.clone())
         .await
@@ -476,6 +477,34 @@ async fn unlock_replay_fails() {
     warp(&mut env).await;
     let again = send_unlock(&mut env, msg, sigs).await;
     assert_custom_error(again, BridgeError::NonceAlreadyProcessed);
+}
+
+#[tokio::test]
+async fn unlock_over_dynamic_per_tx_cap_fails() {
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    // 501 is just over 1% of the 50,000 locked, and far below the
+    // absolute per-tx cap of 100,000 — only the dynamic layer can
+    // reject this.
+    let msg = burn_message(1, 501, env.user.pubkey(), env.source_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_unlock(&mut env, msg, sigs).await;
+    assert_custom_error(result, BridgeError::AmountExceedsDynamicPerTxCap);
+}
+
+#[tokio::test]
+async fn unlock_with_reordered_signatures_succeeds() {
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    let msg = burn_message(1, 500, env.user.pubkey(), env.source_mint);
+    let mut sigs = sign_attestation(&msg, &env.relayers, 3);
+    sigs.reverse();
+    send_unlock(&mut env, msg, sigs).await.unwrap();
+    assert_eq!(total_locked(&mut env).await, 49_500);
 }
 
 #[tokio::test]
@@ -503,18 +532,26 @@ async fn unlock_over_per_tx_cap_fails() {
 }
 
 #[tokio::test]
-async fn unlock_over_daily_cap_fails() {
+async fn unlock_over_dynamic_daily_cap_fails() {
+    // Absolute caps are set high (400k per-tx, 500k daily) so only the
+    // dynamic layer can bind. Each 10,000 unlock is well under 1% of
+    // the ~1.8M locked (per-tx dynamic passes throughout), but the
+    // window total may not pass 5% of the locked total: eight unlocks
+    // total 80,000 (allowance ~86,500); the ninth would reach 90,000
+    // against an allowance of ~86,000.
     let mut env = setup(400_000, 500_000, 2_000_000).await;
-    send_deposit(&mut env, 900_000, Pubkey::new_unique(), 1)
+    send_deposit(&mut env, 1_800_000, Pubkey::new_unique(), 1)
         .await
         .unwrap();
-    let msg1 = burn_message(1, 400_000, env.user.pubkey(), env.source_mint);
-    let sigs1 = sign_attestation(&msg1, &env.relayers, 3);
-    send_unlock(&mut env, msg1, sigs1).await.unwrap();
-    let msg2 = burn_message(2, 200_000, env.user.pubkey(), env.source_mint);
-    let sigs2 = sign_attestation(&msg2, &env.relayers, 3);
-    let result = send_unlock(&mut env, msg2, sigs2).await;
-    assert_custom_error(result, BridgeError::AmountExceedsDailyCap);
+    for nonce in 1..=8u64 {
+        let msg = burn_message(nonce, 10_000, env.user.pubkey(), env.source_mint);
+        let sigs = sign_attestation(&msg, &env.relayers, 3);
+        send_unlock(&mut env, msg, sigs).await.unwrap();
+    }
+    let msg9 = burn_message(9, 10_000, env.user.pubkey(), env.source_mint);
+    let sigs9 = sign_attestation(&msg9, &env.relayers, 3);
+    let result = send_unlock(&mut env, msg9, sigs9).await;
+    assert_custom_error(result, BridgeError::AmountExceedsDynamicDailyCap);
 }
 
 #[tokio::test]
@@ -606,4 +643,53 @@ async fn pause_blocks_deposit_and_unlock() {
         .await
         .unwrap();
     assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 60_000);
+}
+
+#[tokio::test]
+async fn compute_units_unlock() {
+    // Measurement test: prints compute units for a full Unlock
+    // (ed25519 precompile + lock instruction), for bridge/VERIFY.md.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    let msg = burn_message(1, 500, env.user.pubkey(), env.source_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (nonce_pda, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, msg.nonce);
+    let (authority_pda, _) = authority_pda(&program_id);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ed25519_ix = build_ed25519_instruction(&msg.hash(), &sigs);
+    let ix = Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Unlock { message: msg },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(env.vault, false),
+            AccountMeta::new(env.user_token_account, false),
+            AccountMeta::new(nonce_pda, false),
+            AccountMeta::new_readonly(authority_pda, false),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer],
+        blockhash,
+    );
+    let result = env
+        .context
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await
+        .unwrap();
+    result.result.unwrap();
+    let cu = result.metadata.unwrap().compute_units_consumed;
+    println!("CU Unlock (3-of-5, incl. ed25519 precompile): {cu}");
+    assert!(cu < 200_000, "Unlock CU unexpectedly high: {cu}");
 }

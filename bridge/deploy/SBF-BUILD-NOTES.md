@@ -9,6 +9,23 @@ cargo 1.84.0) from commit `6c06d64` plus the docs update that records this.
 | `solana_lock.so` | 349,952 | `a229cb6ff0d3b7992a576891be375429474167c8d11ccca9b17b5ae8ad554090` |
 | `machine_bridge.so` | 350,192 | `672b42a8ca9562ecd6c535833b4a65143f6485f25c12f9fb6dd5e8b417402095` |
 
+**Rebuilt 2026-11-14 (evening)** from the code-review changes
+(ed25519-precompile verification, dynamic caps — see
+`bridge/VERIFY.md`):
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 205,736 | `05ab551aa74d916b886cd77d9d1cbc977437917f6e24b30361d022a67b9be6a6` |
+| `machine_bridge.so` | 206,016 | `eacc1a86a10095e34688487eec019a206ce975ce57bc08610bc019191478da21` |
+
+Build note from the same evening: the scratch tree's manifests must
+keep their `[dev-dependencies]` stripped (step 1) — restoring the
+full workspace manifests makes cargo re-resolve the graph, pulls the
+edition2024 test-only chain back in, and the platform-tools cargo
+fails exactly as described below. With the stripped manifests, the
+scratch lockfile is byte-identical to the saved `sbf-Cargo.lock`
+(pins listed below), and the rebuild above was produced from it.
+
 Both are ELF 64-bit sBPF shared objects (e_machine 0x107), stripped.
 They are **not deployed anywhere** — deployment stays gated on
 BRIDGE.md §5 (audit, fresh production keys, live net).
