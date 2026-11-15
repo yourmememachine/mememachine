@@ -115,6 +115,34 @@ starts from what is already known:
   2.3.0 requires rustc ≥ 1.79. No release since Nov 2022. Dead
   end for Agave 2.3 code; the free pre-audit pass is the cargo
   audit + clippy + cargo-fuzz work above.
+- **External code review (2026-11-15), dispositions** — an
+  independent reviewer's findings, each re-verified against the
+  code before being recorded here:
+  1. *Ed25519 precompile parser is the highest-risk component.*
+     Agreed — it is Scope A's priority target (above) and is
+     fuzz-covered; a real audit should start there.
+  2. *3-of-5 relayer quorum is the largest systemic risk.*
+     Agreed — a documented design choice (BRIDGE.md §3); caps and
+     the kill switch bound the damage, they do not remove the
+     trust assumption.
+  3. *Kill-switch enforcement.* Verified: `check_mint_allowed`
+     rejects mints once `killed` is set and is called before
+     minting; burns remain open as the intentional exit path.
+  4. *Caps bind on unlock, deposits only hit the vault ceiling.*
+     Verified and intentional (BRIDGE.md §4.4): dynamic caps need
+     the locked-total reference that only the unlock side has; a
+     large deposit is constrained on the way out.
+  5. *Nonce replay protection depends on the caller checking.*
+     Accurate about the split — `verify_precompile_attestation`
+     checks signatures only — but both processors check the nonce
+     PDA (address + program ownership) before any value moves, on
+     all four paths, and end-to-end replay tests pass for mint,
+     unlock, burn, and deposit (`NonceAlreadyProcessed`). The
+     residual risk is a future caller forgetting the check, not a
+     present gap.
+  6. *LaunchGuard.* Verified: revoked mint + freeze authorities,
+     classic SPL only, ≥10% / ≥30-day lock, creator-only release
+     after slot expiry, no early-release path.
 
 ## Known limitations (stated up front, from the project's own docs)
 - Single-validator localnet today; transfers unverified on the
