@@ -369,6 +369,60 @@ fn ed25519_slice<'a>(
 /// `quorum` DISTINCT registered relayers signed exactly this message's
 /// hash. Entries by unregistered keys are ignored — they cannot help
 /// reach quorum. Callers run `validate_message` first.
+/// Bounds-checked instructions-sysvar parsing. The upstream
+/// helpers (`load_current_index_checked`,
+/// `load_instruction_at_checked`) slice the sysvar data without
+/// length checks and panic on malformed input — found by fuzzing
+/// (bridge/fuzz, 2026-11-14): empty sysvar data panics inside
+/// `load_current_index` at `data[len - 2..len]`. The sysvar is
+/// transaction-supplied data, so every read here is checked;
+/// malformed shapes return None, which the caller maps to
+/// MissingAttestation. Layout: u16 instruction count, count × u16
+/// offsets, the serialized instructions, and the current
+/// instruction index as a u16 at the very end. A serialized
+/// instruction is: u16 account count, per account (u8 flags +
+/// 32-byte pubkey), 32-byte program id, u16 data length, data.
+fn sysvar_current_index(data: &[u8]) -> Option<usize> {
+    if data.len() < 2 {
+        return None;
+    }
+    let bytes: [u8; 2] = data[data.len() - 2..].try_into().ok()?;
+    Some(u16::from_le_bytes(bytes) as usize)
+}
+
+fn sysvar_instruction_at(data: &[u8], index: usize) -> Option<(Pubkey, &[u8])> {
+    fn take<'a>(data: &'a [u8], pos: &mut usize, n: usize) -> Option<&'a [u8]> {
+        let end = pos.checked_add(n)?;
+        let slice = data.get(*pos..end)?;
+        *pos = end;
+        Some(slice)
+    }
+    if data.len() < 2 {
+        return None;
+    }
+    let count = u16::from_le_bytes(data[0..2].try_into().ok()?) as usize;
+    if index >= count {
+        return None;
+    }
+    let offsets_end = 2usize.checked_add(count.checked_mul(2)?)?;
+    if data.len() < offsets_end {
+        return None;
+    }
+    let off_pos = 2 + index * 2;
+    let start = u16::from_le_bytes(data[off_pos..off_pos + 2].try_into().ok()?) as usize;
+    let mut pos = start;
+    let num_accounts =
+        u16::from_le_bytes(take(data, &mut pos, 2)?.try_into().ok()?) as usize;
+    for _ in 0..num_accounts {
+        take(data, &mut pos, 1)?; // flags
+        take(data, &mut pos, 32)?; // account pubkey
+    }
+    let program_id = Pubkey::new_from_array(take(data, &mut pos, 32)?.try_into().ok()?);
+    let data_len = u16::from_le_bytes(take(data, &mut pos, 2)?.try_into().ok()?) as usize;
+    let ix_data = take(data, &mut pos, data_len)?;
+    Some((program_id, ix_data))
+}
+
 pub fn verify_precompile_attestation(
     message: &BridgeMessage,
     relayers: &[Pubkey; MAX_RELAYERS],
@@ -379,20 +433,23 @@ pub fn verify_precompile_attestation(
     if *instructions_sysvar.key != ix_sysvar::ID {
         return Err(BridgeError::MissingAttestation);
     }
-    let current_index = ix_sysvar::load_current_index_checked(instructions_sysvar)
-        .map_err(|_| BridgeError::MissingAttestation)? as usize;
+    let sysvar_data = instructions_sysvar
+        .try_borrow_data()
+        .map_err(|_| BridgeError::MissingAttestation)?;
+    let current_index =
+        sysvar_current_index(&sysvar_data).ok_or(BridgeError::MissingAttestation)?;
     let hash = message.hash();
     let mut seen = [false; MAX_RELAYERS];
     let mut distinct: u8 = 0;
     let mut saw_hash_entry = false;
 
     for idx in 0..current_index {
-        let ix = ix_sysvar::load_instruction_at_checked(idx, instructions_sysvar)
-            .map_err(|_| BridgeError::MissingAttestation)?;
-        if ix.program_id != solana_program::ed25519_program::ID {
+        let Some((program_id, data)) = sysvar_instruction_at(&sysvar_data, idx) else {
+            return Err(BridgeError::MissingAttestation);
+        };
+        if program_id != solana_program::ed25519_program::ID {
             continue;
         }
-        let data = ix.data.as_slice();
         if data.len() < 2 || data[1] != 0 {
             continue;
         }
@@ -1164,5 +1221,74 @@ mod tests {
         assert_eq!(bytes.len(), MachineConfig::LEN);
         let back = MachineConfig::try_from_slice(&bytes).unwrap();
         assert_eq!(cfg, back);
+    }
+}
+
+#[cfg(test)]
+mod sysvar_parser_tests {
+    use super::*;
+    use solana_program::account_info::AccountInfo;
+    use std::{cell::RefCell, rc::Rc};
+
+    fn verify_with_sysvar(data: Vec<u8>) -> Result<(), BridgeError> {
+        let pubs: [Pubkey; MAX_RELAYERS] = [
+            Pubkey::new_from_array([11u8; 32]),
+            Pubkey::new_from_array([22u8; 32]),
+            Pubkey::new_from_array([33u8; 32]),
+            Pubkey::new_from_array([44u8; 32]),
+            Pubkey::new_from_array([55u8; 32]),
+        ];
+        let message = BridgeMessage {
+            version: MESSAGE_VERSION,
+            source_chain: CHAIN_SOLANA,
+            dest_chain: CHAIN_MACHINE,
+            nonce: 1,
+            source_mint: Pubkey::new_from_array([66u8; 32]),
+            sender: Pubkey::new_from_array([77u8; 32]),
+            recipient: Pubkey::new_from_array([88u8; 32]),
+            amount: 1_000,
+            source_tx: [9u8; 64],
+            source_slot: 100,
+            expiry_slot: 1_000_000,
+        };
+        let key = solana_program::sysvar::instructions::ID;
+        let owner = solana_program::sysvar::ID;
+        let mut lamports = 0u64;
+        let mut data = data;
+        let account = AccountInfo {
+            key: &key,
+            is_signer: false,
+            is_writable: false,
+            lamports: Rc::new(RefCell::new(&mut lamports)),
+            data: Rc::new(RefCell::new(&mut data)),
+            owner: &owner,
+            executable: false,
+            rent_epoch: 0,
+        };
+        verify_precompile_attestation(&message, &pubs, 3, &account)
+    }
+
+    #[test]
+    fn malformed_sysvar_is_missing_attestation_never_a_panic() {
+        // Regression test for the fuzz-found panic (bridge/fuzz,
+        // 2026-11-14): the upstream load_current_index sliced
+        // data[len-2..len] and panicked on short sysvar data. Every
+        // malformed shape must be MissingAttestation instead.
+        let cases: Vec<Vec<u8>> = vec![
+            vec![],                              // empty (the fuzz crash)
+            vec![0],                             // shorter than the count
+            vec![1, 0],                          // count=1, nothing else
+            vec![1, 0, 0, 0],                    // offset present, no body, no index tail
+            vec![0xff, 0xff, 0, 0, 0, 0],        // absurd instruction count
+            vec![0, 0, 5, 0],                    // count=0 but current index 5
+            vec![2, 0, 0xff, 0xff, 0, 0, 1, 0],  // offset points out of bounds
+        ];
+        for data in cases {
+            assert_eq!(
+                verify_with_sysvar(data.clone()),
+                Err(BridgeError::MissingAttestation),
+                "sysvar data {data:?} must be rejected, not panic or pass"
+            );
+        }
     }
 }

@@ -15,8 +15,8 @@ cargo 1.84.0) from commit `6c06d64` plus the docs update that records this.
 
 | Artifact | Size (bytes) | sha256 |
 |---|---|---|
-| `solana_lock.so` | 205,736 | `05ab551aa74d916b886cd77d9d1cbc977437917f6e24b30361d022a67b9be6a6` |
-| `machine_bridge.so` | 206,016 | `eacc1a86a10095e34688487eec019a206ce975ce57bc08610bc019191478da21` |
+| `solana_lock.so` | 201,744 | `2b2beeb682229ae4e9f1296fe540439232506f2ba4ab002ac1583462e049839f` |
+| `machine_bridge.so` | 202,024 | `42cae7f08e9194daafdc01fd30d9940ebba794b026005d9176eaf52be7640edd` |
 
 Build note from the same evening: the scratch tree's manifests must
 keep their `[dev-dependencies]` stripped (step 1) — restoring the

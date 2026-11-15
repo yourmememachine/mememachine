@@ -1,0 +1,39 @@
+name: CI
+
+# Runs the two Rust workspaces' test suites on every push and pull
+# request. The fork suite (tests/run.sh) is not run here: it drives
+# the local validator binaries and ledger under bin/ and ledger/,
+# which are a local environment, not a CI one. `make verify` runs
+# everything locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            bridge
+            programs
+
+      - name: Bridge workspace tests
+        run: cargo test --release --manifest-path bridge/Cargo.toml
+
+      - name: Programs workspace tests (LaunchGuard)
+        run: cargo test --release --manifest-path programs/Cargo.toml
+
+      - name: Clippy (both workspaces)
+        run: |
+          cargo clippy --release --all-targets --manifest-path bridge/Cargo.toml
+          cargo clippy --release --all-targets --manifest-path programs/Cargo.toml

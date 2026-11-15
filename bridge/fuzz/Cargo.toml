@@ -1,0 +1,31 @@
+[package]
+name = "bridge-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "cargo-fuzz targets for bridge-common's parsers: the ed25519 precompile / instructions-sysvar parser (AUDIT.md Scope A priority), BridgeMessage decoding, and the DailyUsage cap arithmetic."
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bridge-common = { path = "../crates/bridge-common" }
+solana-program = "2.3"
+borsh = "1"
+
+# This crate is its own workspace (cargo-fuzz requirement); it is
+# deliberately not a member of the bridge workspace.
+[workspace]
+
+[[bin]]
+name = "precompile_parser"
+path = "fuzz_targets/precompile_parser.rs"
+
+[[bin]]
+name = "message_decode"
+path = "fuzz_targets/message_decode.rs"
+
+[[bin]]
+name = "daily_usage"
+path = "fuzz_targets/daily_usage.rs"

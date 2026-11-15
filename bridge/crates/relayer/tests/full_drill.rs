@@ -528,6 +528,11 @@ async fn full_local_drill() {
         blockhash,
     );
     chains.machine.banks_client.process_transaction(tx).await.unwrap();
+    // Advance the slot before resubmitting the identical mint
+    // transaction: program-test reuses the blockhash within a slot,
+    // and the bank answers a duplicate signature with the cached
+    // (failed) result instead of re-executing.
+    chains.machine.warp_to_slot(200).unwrap();
     submit(&mut chains.machine, &mint_ixs).await.unwrap();
     assert_eq!(
         token_balance(&mut chains.machine, &chains.recipient_token_account).await,

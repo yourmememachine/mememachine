@@ -9,7 +9,7 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **73 passed, 0 failed** (17
+- **Tests:** bridge workspace **74 passed, 0 failed** (18
   bridge-common unit + 19 machine-bridge + 14 solana-lock + 23
   relayer, including the full local end-to-end drill);
   LaunchGuard **10 passed** (`programs/VERIFY.md`); fork suite
@@ -23,8 +23,8 @@ the current state and supersedes their numbers.
   409, Unlock 409, Burn 409, Deposit 409 — full transactions; see
   the CU section in the code-review update below. SBF-execution CU
   is a testnet-host measurement, still outstanding.
-- **SBF:** solana_lock.so `05ab551a…` (205,736 B), machine_bridge.so
-  `eacc1a86…` (206,016 B), launch_guard.so `68cba8aa…` (111,440 B).
+- **SBF:** solana_lock.so `2b2beeb6…` (201,744 B), machine_bridge.so
+  `42cae7f0…` (202,024 B), launch_guard.so `68cba8aa…` (111,440 B).
   Not deployed anywhere; no asset has crossed; no audit.
 
 Toolchain: cargo 1.100.0 (3acc79c0c 2026-11-05), rustc 1.100.0
@@ -302,3 +302,31 @@ Still not deployed anywhere.
   lockfiles; hashes **unchanged** — solana_lock.so `05ab551a…`,
   machine_bridge.so `eacc1a86…`, launch_guard.so `68cba8aa…`.
 - **Bridge workspace total is now 73 passed, 0 failed.**
+
+### Addendum — fuzzing round (2026-11-14, later still)
+
+- **cargo-fuzz targets added** (`bridge/fuzz/`): `precompile_parser`
+  (the AUDIT.md Scope A priority parser), `message_decode`,
+  `daily_usage`. First runs: message_decode 7.35M executions clean;
+  daily_usage 19.1M clean; **precompile_parser found a crash
+  immediately** — empty instructions-sysvar data panicked inside
+  the upstream sysvar helper `load_current_index`
+  (`data[len-2..len]` on an empty slice).
+- **Fix:** bridge-common no longer uses the upstream
+  load_current_index / load_instruction_at helpers in
+  `verify_precompile_attestation`; the sysvar is parsed in-crate
+  with every read bounds-checked, and malformed shapes return
+  `MissingAttestation`. Regression test:
+  `malformed_sysvar_is_missing_attestation_never_a_panic`
+  (bridge-common suite now 18). Post-fix fuzz run: 7.77M
+  executions, no crash. On-chain reachability note: a real
+  runtime always supplies a well-formed sysvar, so this was a
+  robustness/audit-surface bug, not a live exploit path — exactly
+  the class fuzzing exists to catch before an auditor does.
+- **SBF rebuilt** with the parser fix: solana_lock.so
+  `2b2beeb6…` (201,744 B), machine_bridge.so `42cae7f0…`
+  (202,024 B); launch_guard.so unchanged (`68cba8aa…`).
+- **Bridge workspace total is now 74 passed, 0 failed.** A root
+  `Makefile` (`make verify`) and a GitHub Actions CI workflow
+  (`.github/workflows/ci.yml`, both Rust workspaces on push/PR)
+  were added in the same round.

@@ -58,6 +58,19 @@ byte-identical to the saved one before building.)
 Not an audit — automated passes, recorded so the engaged auditor
 starts from what is already known:
 
+- **`cargo fuzz` (libFuzzer) over bridge-common's parsers**
+  (`bridge/fuzz/`): three targets — the Scope A priority
+  precompile/sysvar parser, BridgeMessage decoding, and the
+  DailyUsage cap arithmetic. First session found a real bug: the
+  precompile verifier delegated sysvar reading to upstream
+  helpers that slice without length checks, and empty sysvar
+  data panicked inside `load_current_index`. Fixed the same day:
+  the sysvar is now parsed in-crate with every read
+  bounds-checked (malformed → `MissingAttestation`), with a
+  regression test; post-fix runs are clean (7.77M executions on
+  the parser target; 7.35M and 19.1M on the other two). Details
+  in `bridge/VERIFY.md`.
+
 - **`cargo audit` (RustSec DB) on both workspaces: 10 known
   vulnerabilities, all in transitive dependencies; none in
   MemeMachine code.** Disposition by group:
