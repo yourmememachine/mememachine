@@ -1,7 +1,9 @@
 # MemeMachine — Status: PROVEN vs NEXT
 
 Verified 2026-11-14 ~12:15 UTC against the running local validator and
-the files in this repo. Nothing here is claimed without a run, a file,
+the files in this repo. Last full verification (`make verify`:
+bridge workspace 84 passed, LaunchGuard 10 passed, fork suite
+23 OK) run on 2026-11-15 against commit `b9d98d3`. Nothing here is claimed without a run, a file,
 or a command behind it. "PROVEN" means it exists and was verified.
 "NEXT" means it is not done yet, with the plain blocker stated.
 
