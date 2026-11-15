@@ -7,7 +7,7 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
-- **2026-11-15 — `(pending)`** Three features, each changing the
+- **2026-11-15 — `8369f99`** Three features, each changing the
   audit surface and recorded here per this file's rule: (1)
   **crossing receipts** — MintWrapped and Unlock now create a
   receipt PDA (message hash, source tx, amount, recipient, slot,
