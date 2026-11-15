@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="MemeMachine logo" width="280">
+</p>
+
 # MemeMachine
 Website: https://machinechain.netlify.app/
 
