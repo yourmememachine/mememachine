@@ -134,12 +134,16 @@ starts from what is already known:
      large deposit is constrained on the way out.
   5. *Nonce replay protection depends on the caller checking.*
      Accurate about the split — `verify_precompile_attestation`
-     checks signatures only — but both processors check the nonce
-     PDA (address + program ownership) before any value moves, on
-     all four paths, and end-to-end replay tests pass for mint,
-     unlock, burn, and deposit (`NonceAlreadyProcessed`). The
-     residual risk is a future caller forgetting the check, not a
-     present gap.
+     checks signatures only — but both processors checked the
+     nonce PDA (address + program ownership) before any value
+     moved, on all four paths, and end-to-end replay tests pass
+     for mint, unlock, burn, and deposit
+     (`NonceAlreadyProcessed`). The residual risk was a future
+     caller forgetting the check, not a present gap. Hardened
+     anyway on 2026-11-15 at the project owner's direction: the
+     check now lives in one shared helper
+     (`bridge_common::check_nonce_unprocessed`) used by all four
+     paths, with its own unit tests; behavior unchanged.
   6. *LaunchGuard.* Verified: revoked mint + freeze authorities,
      classic SPL only, ≥10% / ≥30-day lock, creator-only release
      after slot expiry, no early-release path.
@@ -155,10 +159,10 @@ starts from what is already known:
      34 tests, no relayer, and no SBF build; README, STATUS.md,
      bridge/README.md, the relayer README, and STAGED-LAUNCH.md
      carried 22-relayer / 6-and-8-LaunchGuard / 69-workspace
-     counts. All now state the current figures (74 bridge
-     workspace incl. 23 relayer; 10 LaunchGuard). Dated logs in
-     the VERIFY.md files are historical records and were left
-     as written.
+     counts. All now state the current figures (78 bridge
+     workspace incl. 23 relayer, after the nonce-gate tests in
+     item 5; 10 LaunchGuard). Dated logs in the VERIFY.md files
+     are historical records and were left as written.
   10. *Relayer finality and disagreement handling are off-chain.*
       Agreed: a relayer bug can stall the bridge or attempt a bad
       signature; the on-chain attestation, nonce, and cap checks

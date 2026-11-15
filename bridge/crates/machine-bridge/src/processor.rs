@@ -208,13 +208,12 @@ fn process_mint_wrapped(
     )?;
 
     // Replay protection: the nonce PDA must not already exist.
-    let (nonce_pda, nonce_bump) = nonce_pda(program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
-    if *nonce_account.key != nonce_pda {
-        return Err(BridgeError::InvalidAccountData.into());
-    }
-    if *nonce_account.owner == *program_id {
-        return Err(BridgeError::NonceAlreadyProcessed.into());
-    }
+    let nonce_bump = check_nonce_unprocessed(
+        nonce_account,
+        program_id,
+        DIR_SOLANA_TO_MACHINE,
+        message.nonce,
+    )?;
 
     // The destination token account must belong to the message recipient
     // and hold the wrapped mint.
@@ -333,13 +332,12 @@ fn process_burn(
         return Err(ProgramError::MissingRequiredSignature);
     }
 
-    let (record_pda, record_bump) = nonce_pda(program_id, DIR_MACHINE_TO_SOLANA, nonce);
-    if *record_account.key != record_pda {
-        return Err(BridgeError::InvalidAccountData.into());
-    }
-    if *record_account.owner == *program_id {
-        return Err(BridgeError::NonceAlreadyProcessed.into());
-    }
+    let record_bump = check_nonce_unprocessed(
+        record_account,
+        program_id,
+        DIR_MACHINE_TO_SOLANA,
+        nonce,
+    )?;
 
     let user_state = TokenAccount::unpack(&user_token_account.try_borrow_data()?)?;
     if user_state.owner != *user.key || user_state.mint != config.wrapped_mint {

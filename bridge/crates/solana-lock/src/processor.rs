@@ -238,13 +238,12 @@ fn process_deposit(
         return Err(BridgeError::VaultCeilingExceeded.into());
     }
 
-    let (record_pda, record_bump) = nonce_pda(program_id, DIR_SOLANA_TO_MACHINE, nonce);
-    if *record_account.key != record_pda {
-        return Err(BridgeError::InvalidAccountData.into());
-    }
-    if *record_account.owner == *program_id {
-        return Err(BridgeError::NonceAlreadyProcessed.into());
-    }
+    let record_bump = check_nonce_unprocessed(
+        record_account,
+        program_id,
+        DIR_SOLANA_TO_MACHINE,
+        nonce,
+    )?;
 
     let user_state = TokenAccount::unpack(&user_token_account.try_borrow_data()?)?;
     if user_state.owner != *user.key || user_state.mint != config.source_mint {
@@ -353,13 +352,12 @@ fn process_unlock(
         instructions_sysvar,
     )?;
 
-    let (nonce_pda, nonce_bump) = nonce_pda(program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
-    if *nonce_account.key != nonce_pda {
-        return Err(BridgeError::InvalidAccountData.into());
-    }
-    if *nonce_account.owner == *program_id {
-        return Err(BridgeError::NonceAlreadyProcessed.into());
-    }
+    let nonce_bump = check_nonce_unprocessed(
+        nonce_account,
+        program_id,
+        DIR_MACHINE_TO_SOLANA,
+        message.nonce,
+    )?;
 
     let dest_state = TokenAccount::unpack(&destination_account.try_borrow_data()?)?;
     if dest_state.owner != message.recipient {

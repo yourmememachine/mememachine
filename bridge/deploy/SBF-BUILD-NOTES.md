@@ -18,6 +18,16 @@ cargo 1.84.0) from commit `6c06d64` plus the docs update that records this.
 | `solana_lock.so` | 201,744 | `2b2beeb682229ae4e9f1296fe540439232506f2ba4ab002ac1583462e049839f` |
 | `machine_bridge.so` | 202,024 | `42cae7f08e9194daafdc01fd30d9940ebba794b026005d9176eaf52be7640edd` |
 
+**Rebuilt 2026-11-15** from the nonce-gate hardening (the four
+processors' inline nonce-PDA checks moved into the shared
+`bridge_common::check_nonce_unprocessed` helper; behavior
+unchanged, see `bridge/VERIFY.md`):
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 201,704 | `f2bdc178495af0db34298178865fd9c9408f07f152169973c68a5ebd82b8aa41` |
+| `machine_bridge.so` | 202,016 | `9570f07d503092fe586f8212987996274807fbe6d5de6f73558f8ed8cb73abb6` |
+
 Build note from the same evening: the scratch tree's manifests must
 keep their `[dev-dependencies]` stripped (step 1) — restoring the
 full workspace manifests makes cargo re-resolve the graph, pulls the

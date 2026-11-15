@@ -4,12 +4,12 @@ Real commands and their real output. Nothing here is claimed without a
 run behind it. Verified 2026-11-14 ~11:07 UTC, in the bridge workspace
 directory.
 
-## Current state (2026-11-14, latest commits — read this first)
+## Current state (2026-11-15, latest commits — read this first)
 
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **74 passed, 0 failed** (18
+- **Tests:** bridge workspace **78 passed, 0 failed** (22
   bridge-common unit + 19 machine-bridge + 14 solana-lock + 23
   relayer, including the full local end-to-end drill);
   LaunchGuard **10 passed** (`programs/VERIFY.md`); fork suite
@@ -23,8 +23,8 @@ the current state and supersedes their numbers.
   409, Unlock 409, Burn 409, Deposit 409 — full transactions; see
   the CU section in the code-review update below. SBF-execution CU
   is a testnet-host measurement, still outstanding.
-- **SBF:** solana_lock.so `2b2beeb6…` (201,744 B), machine_bridge.so
-  `42cae7f0…` (202,024 B), launch_guard.so `68cba8aa…` (111,440 B).
+- **SBF:** solana_lock.so `f2bdc178…` (201,704 B), machine_bridge.so
+  `9570f07d…` (202,016 B), launch_guard.so `68cba8aa…` (111,440 B).
   Not deployed anywhere; no asset has crossed; no audit.
 
 Toolchain: cargo 1.100.0 (3acc79c0c 2026-11-05), rustc 1.100.0
@@ -330,3 +330,31 @@ Still not deployed anywhere.
   `Makefile` (`make verify`) and a GitHub Actions CI workflow
   (`.github/workflows/ci.yml`, both Rust workspaces on push/PR)
   were added in the same round.
+
+## Update 2026-11-15 — nonce-gate hardening (external review follow-up)
+
+- An external review (recorded in AUDIT.md) noted that replay
+  protection depended on each processor remembering to check the
+  nonce PDA, because `verify_precompile_attestation` verifies
+  signatures only. The check now lives in one shared helper,
+  `bridge_common::check_nonce_unprocessed`, and all four
+  value-moving paths (deposit, burn, mint, unlock) route through
+  it. Behavior is unchanged — same errors
+  (`InvalidAccountData` / `NonceAlreadyProcessed`), same order of
+  checks — but the gate can no longer be half-applied by a future
+  caller.
+- Four unit tests added for the helper (fresh account passes and
+  returns the bump; program-owned account is
+  `NonceAlreadyProcessed`; wrong account is `InvalidAccountData`;
+  the two directions keep separate nonce registries). The existing
+  end-to-end replay tests for mint, unlock, burn, and deposit are
+  unchanged and still pass.
+- **Bridge workspace total is now 78 passed, 0 failed**
+  (bridge-common 22, machine-bridge 19, solana-lock 14,
+  relayer 23).
+- **SBF rebuilt:** solana_lock.so
+  `f2bdc178495af0db34298178865fd9c9408f07f152169973c68a5ebd82b8aa41`
+  (201,704 B), machine_bridge.so
+  `9570f07d503092fe586f8212987996274807fbe6d5de6f73558f8ed8cb73abb6`
+  (202,016 B); launch_guard.so unchanged (`68cba8aa…`,
+  111,440 B).

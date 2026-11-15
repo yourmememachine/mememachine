@@ -36,6 +36,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 use solana_program::{
+    account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::Pubkey,
 };
@@ -834,6 +835,35 @@ pub fn nonce_pda(program_id: &Pubkey, direction: u8, nonce: u64) -> (Pubkey, u8)
     Pubkey::find_program_address(&[SEED_NONCE, &[direction], &nonce.to_le_bytes()], program_id)
 }
 
+/// Replay-protection gate shared by every value-moving path (deposit,
+/// burn, mint, unlock): the account supplied for (direction, nonce)
+/// must be exactly that nonce's PDA, and it must not already be owned
+/// by the program — ownership means a record was created there, i.e.
+/// this nonce has already been processed. Returns the PDA bump for
+/// the caller's create-account seeds.
+///
+/// This check lives in one shared helper on purpose:
+/// `verify_precompile_attestation` verifies signatures only, so the
+/// nonce check is a separate step a caller could forget. An external
+/// review (2026-11-15) flagged that split; the four processors
+/// previously each inlined the check. Routing all of them through
+/// this function makes the gate impossible to half-apply.
+pub fn check_nonce_unprocessed(
+    nonce_account: &AccountInfo,
+    program_id: &Pubkey,
+    direction: u8,
+    nonce: u64,
+) -> Result<u8, BridgeError> {
+    let (pda, bump) = nonce_pda(program_id, direction, nonce);
+    if *nonce_account.key != pda {
+        return Err(BridgeError::InvalidAccountData);
+    }
+    if *nonce_account.owner == *program_id {
+        return Err(BridgeError::NonceAlreadyProcessed);
+    }
+    Ok(bump)
+}
+
 pub fn authority_pda(program_id: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SEED_AUTHORITY], program_id)
 }
@@ -1290,5 +1320,86 @@ mod sysvar_parser_tests {
                 "sysvar data {data:?} must be rejected, not panic or pass"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod nonce_gate_tests {
+    use super::*;
+    use std::{cell::RefCell, rc::Rc};
+
+    fn account<'a>(
+        key: &'a Pubkey,
+        owner: &'a Pubkey,
+        lamports: &'a mut u64,
+        data: &'a mut Vec<u8>,
+    ) -> AccountInfo<'a> {
+        AccountInfo {
+            key,
+            is_signer: false,
+            is_writable: true,
+            lamports: Rc::new(RefCell::new(lamports)),
+            data: Rc::new(RefCell::new(data)),
+            owner,
+            executable: false,
+            rent_epoch: 0,
+        }
+    }
+
+    #[test]
+    fn fresh_nonce_account_passes_and_returns_bump() {
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let (pda, bump) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, 7);
+        let system = solana_program::system_program::ID;
+        let mut lamports = 0u64;
+        let mut data: Vec<u8> = Vec::new();
+        let acct = account(&pda, &system, &mut lamports, &mut data);
+        assert_eq!(
+            check_nonce_unprocessed(&acct, &program_id, DIR_SOLANA_TO_MACHINE, 7),
+            Ok(bump)
+        );
+    }
+
+    #[test]
+    fn program_owned_nonce_account_is_already_processed() {
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let (pda, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, 9);
+        let mut lamports = 1_000_000u64;
+        let mut data: Vec<u8> = vec![0u8; NonceRecord::LEN];
+        let acct = account(&pda, &program_id, &mut lamports, &mut data);
+        assert_eq!(
+            check_nonce_unprocessed(&acct, &program_id, DIR_MACHINE_TO_SOLANA, 9),
+            Err(BridgeError::NonceAlreadyProcessed)
+        );
+    }
+
+    #[test]
+    fn wrong_account_is_invalid_account_data() {
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let wrong = Pubkey::new_from_array([7u8; 32]);
+        let system = solana_program::system_program::ID;
+        let mut lamports = 0u64;
+        let mut data: Vec<u8> = Vec::new();
+        let acct = account(&wrong, &system, &mut lamports, &mut data);
+        assert_eq!(
+            check_nonce_unprocessed(&acct, &program_id, DIR_SOLANA_TO_MACHINE, 7),
+            Err(BridgeError::InvalidAccountData)
+        );
+    }
+
+    #[test]
+    fn directions_have_separate_nonce_registries() {
+        // The PDA for (Solana->Machine, 7) must not satisfy the check
+        // for (Machine->Solana, 7): the registries are independent.
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let (pda_s2m, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, 7);
+        let system = solana_program::system_program::ID;
+        let mut lamports = 0u64;
+        let mut data: Vec<u8> = Vec::new();
+        let acct = account(&pda_s2m, &system, &mut lamports, &mut data);
+        assert_eq!(
+            check_nonce_unprocessed(&acct, &program_id, DIR_MACHINE_TO_SOLANA, 7),
+            Err(BridgeError::InvalidAccountData)
+        );
     }
 }
