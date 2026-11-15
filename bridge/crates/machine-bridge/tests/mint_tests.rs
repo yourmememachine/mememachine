@@ -5,7 +5,6 @@
 //! validation functions in bridge-common): actual SPL minting, nonce PDA
 //! creation, cap enforcement, pause, and the kill-switch.
 
-use borsh::BorshSerialize;
 use bridge_common::*;
 use machine_bridge::processor;
 use solana_program_test::ProgramTest;

@@ -1,7 +1,7 @@
 //! Integration tests for the Solana-side lock program, run against a real
 //! program-test validator with the real SPL token program.
 
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshDeserialize;
 use bridge_common::*;
 use solana_program_test::ProgramTest;
 use solana_sdk::{

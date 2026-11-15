@@ -22,3 +22,7 @@ bridge/target/
 bridge-attestations/
 relayer-state.json
 *.tmp
+
+# build artifacts
+target/
+__pycache__/
