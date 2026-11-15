@@ -461,3 +461,105 @@ async fn compute_units_register() {
     println!("CU RegisterAndLock: {cu}");
     assert!(cu < 200_000, "RegisterAndLock CU unexpectedly high: {cu}");
 }
+
+/// Like make_mint, but revokes ONLY the mint authority — the freeze
+/// authority stays with the creator.
+async fn make_mint_freeze_kept(
+    ctx: &mut ProgramTestContext,
+    creator: &Keypair,
+) -> (Pubkey, Pubkey) {
+    let mint = Keypair::new();
+    let token_acct = Keypair::new();
+    let rent = ctx.banks_client.get_rent().await.unwrap();
+    let ixs = vec![
+        system_instruction::create_account(
+            &creator.pubkey(),
+            &mint.pubkey(),
+            rent.minimum_balance(Mint::LEN),
+            Mint::LEN as u64,
+            &spl_token::id(),
+        ),
+        initialize_mint2(
+            &spl_token::id(),
+            &mint.pubkey(),
+            &creator.pubkey(),
+            Some(&creator.pubkey()),
+            0,
+        )
+        .unwrap(),
+        system_instruction::create_account(
+            &creator.pubkey(),
+            &token_acct.pubkey(),
+            rent.minimum_balance(TokenAccount::LEN),
+            TokenAccount::LEN as u64,
+            &spl_token::id(),
+        ),
+        initialize_account3(
+            &spl_token::id(),
+            &token_acct.pubkey(),
+            &mint.pubkey(),
+            &creator.pubkey(),
+        )
+        .unwrap(),
+        mint_to(
+            &spl_token::id(),
+            &mint.pubkey(),
+            &token_acct.pubkey(),
+            &creator.pubkey(),
+            &[],
+            SUPPLY,
+        )
+        .unwrap(),
+        set_authority(
+            &spl_token::id(),
+            &mint.pubkey(),
+            None,
+            AuthorityType::MintTokens,
+            &creator.pubkey(),
+            &[],
+        )
+        .unwrap(),
+    ];
+    let fund = system_instruction::transfer(&ctx.payer.pubkey(), &creator.pubkey(), 5_000_000_000);
+    let mut all = vec![fund];
+    all.extend(ixs);
+    send(ctx, &all, &[creator, &mint, &token_acct])
+        .await
+        .expect("mint setup");
+    (mint.pubkey(), token_acct.pubkey())
+}
+
+#[tokio::test]
+async fn register_rejected_if_freeze_authority_kept() {
+    // Mint authority revoked, freeze authority still live: the
+    // creator could freeze holders' accounts at will — not a
+    // LaunchGuard launch.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint_freeze_kept(&mut ctx, &creator).await;
+    let err = send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, LOCK, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::FreezeAuthorityNotRevoked as u32);
+}
+
+#[tokio::test]
+async fn register_rejected_at_9_99_percent_lock() {
+    // 99,900 of 1,000,000 is 9.99% — one tenth of a percent under
+    // the 10% floor is still under it.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint(&mut ctx, &creator, true).await;
+    let err = send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, 99_900, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::LockTooSmall as u32);
+}

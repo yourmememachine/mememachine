@@ -77,9 +77,12 @@ cargo test --release -p relayer
 expiry, signing against bridge-common's verifier, attestation
 collection incl. disagreement and 2-of-5 failure, instruction
 account order and data round-trip, sender extraction from parsed
-transactions, watcher cursor behaviour) plus 2 integration tests
+transactions, watcher cursor behaviour) plus 3 integration tests
 (deposit -> 3-of-5 quorum -> MintWrapped instruction; expired
-attestation rejected).
+attestation rejected; and the full local end-to-end drill in
+`tests/full_drill.rs` — both directions executed against the real
+programs, with a forced pause and a forced relayer disagreement;
+see `bridge/drills/LOCAL-DRILL.md`).
 
 ## Honest limits
 - **Phase-1 transport is files.** A peer-to-peer attestation

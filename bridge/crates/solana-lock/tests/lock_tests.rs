@@ -693,3 +693,48 @@ async fn compute_units_unlock() {
     println!("CU Unlock (3-of-5, incl. ed25519 precompile): {cu}");
     assert!(cu < 200_000, "Unlock CU unexpectedly high: {cu}");
 }
+
+#[tokio::test]
+async fn compute_units_deposit() {
+    // Measurement test: prints compute units for a Deposit, for
+    // bridge/VERIFY.md.
+    let env = setup(100_000, 500_000, 2_000_000).await;
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (record_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, 1);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ix = Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Deposit {
+            amount: 10_000,
+            destination: Pubkey::new_unique(),
+            nonce: 1,
+        },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(env.user_token_account, false),
+            AccountMeta::new(env.vault, false),
+            AccountMeta::new(record_pda, false),
+            AccountMeta::new_readonly(env.user.pubkey(), true),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer, &env.user],
+        blockhash,
+    );
+    let result = env
+        .context
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await
+        .unwrap();
+    result.result.unwrap();
+    let cu = result.metadata.unwrap().compute_units_consumed;
+    println!("CU Deposit: {cu}");
+    assert!(cu < 200_000, "Deposit CU unexpectedly high: {cu}");
+}

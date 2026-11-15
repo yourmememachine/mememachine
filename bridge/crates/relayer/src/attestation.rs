@@ -235,11 +235,9 @@ impl Collector {
             }
         }
 
-        let message = message.ok_or_else(|| {
-            RelayerError::QuorumNotReached {
-                have: 0,
-                need: self.quorum,
-            }
+        let message = message.ok_or(RelayerError::QuorumNotReached {
+            have: 0,
+            need: self.quorum,
         })?;
         let signatures: Vec<RelayerSignature> = by_relayer.into_values().collect();
         if (signatures.len() as u8) < self.quorum {

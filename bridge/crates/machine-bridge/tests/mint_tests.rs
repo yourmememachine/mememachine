@@ -639,7 +639,7 @@ async fn compute_units_mint_wrapped() {
     // (ed25519 precompile + bridge instruction) consumes, for the
     // record in bridge/VERIFY.md. The bound is a sanity ceiling, not
     // a target.
-    let mut env = setup(100_000, 500_000).await;
+    let env = setup(100_000, 500_000).await;
     let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
     let sigs = sign_attestation(&msg, &env.relayers, 3);
     let program_id = program_id();
@@ -823,4 +823,86 @@ async fn compute_units_burn() {
     let cu = result.metadata.unwrap().compute_units_consumed;
     println!("CU Burn: {cu}");
     assert!(cu < 200_000, "Burn CU unexpectedly high: {cu}");
+}
+
+fn sign_hash(hash: &[u8; 32], keys: &[Keypair], n: usize) -> Vec<RelayerSignature> {
+    keys.iter()
+        .take(n)
+        .map(|k| {
+            let sig = k.sign_message(hash);
+            let mut bytes = [0u8; 64];
+            bytes.copy_from_slice(sig.as_ref());
+            RelayerSignature {
+                relayer: k.pubkey(),
+                signature: bytes,
+            }
+        })
+        .collect()
+}
+
+async fn send_mint_with_precompile_hash(
+    env: &mut Env,
+    message: BridgeMessage,
+    signatures: Vec<RelayerSignature>,
+    precompile_hash: &[u8; 32],
+) -> Result<(), solana_program_test::BanksClientError> {
+    // Like send_mint, but the ed25519 precompile instruction carries
+    // `precompile_hash` as its message instead of the real message
+    // hash — the shape of an attestation for a *different* message.
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (nonce_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
+    let (authority_pda, _) = authority_pda(&program_id);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ed25519_ix = build_ed25519_instruction(precompile_hash, &signatures);
+    let ix = Instruction::new_with_borsh(
+        program_id,
+        &MachineInstruction::MintWrapped { message },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(nonce_pda, false),
+            AccountMeta::new(env.wrapped_mint, false),
+            AccountMeta::new(env.recipient_token_account, false),
+            AccountMeta::new_readonly(authority_pda, false),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer],
+        blockhash,
+    );
+    env.context.banks_client.process_transaction(tx).await
+}
+
+#[tokio::test]
+async fn attestation_with_wrong_domain_separator_fails() {
+    // A quorum of valid signatures over a hash built with the wrong
+    // domain separator attests some other message, not this one:
+    // the program finds no precompile entries over the real hash.
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let wrong_hash = solana_sdk::hash::hashv(&[b"WRONG-DOMAIN", &msg.canonical_bytes()]).to_bytes();
+    let sigs = sign_hash(&wrong_hash, &env.relayers, 3);
+    let result = send_mint_with_precompile_hash(&mut env, msg, sigs, &wrong_hash).await;
+    assert_custom_error(result, BridgeError::MissingAttestation);
+}
+
+#[tokio::test]
+async fn attestation_with_wrong_message_length_fails() {
+    // Same for signatures over a hash of a truncated canonical
+    // encoding (100 of 195 bytes): not an attestation for this
+    // message.
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let canonical = msg.canonical_bytes();
+    let wrong_hash =
+        solana_sdk::hash::hashv(&[DOMAIN_SEPARATOR, &canonical[..100]]).to_bytes();
+    let sigs = sign_hash(&wrong_hash, &env.relayers, 3);
+    let result = send_mint_with_precompile_hash(&mut env, msg, sigs, &wrong_hash).await;
+    assert_custom_error(result, BridgeError::MissingAttestation);
 }

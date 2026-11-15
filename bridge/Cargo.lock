@@ -3409,11 +3409,16 @@ dependencies = [
  "bridge-common",
  "bs58",
  "ed25519-dalek 2.2.0",
+ "machine-bridge",
  "rand 0.8.8",
  "serde",
  "serde_json",
+ "solana-lock",
  "solana-program",
+ "solana-program-test",
  "solana-sdk",
+ "spl-token",
+ "tokio",
  "ureq",
 ]
 

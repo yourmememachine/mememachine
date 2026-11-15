@@ -23,3 +23,8 @@ ureq = { version = "2", features = ["json"] }
 
 [dev-dependencies]
 rand = "0.8"
+solana-program-test = "2.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+machine-bridge = { path = "../machine-bridge", features = ["no-entrypoint"] }
+solana-lock = { path = "../solana-lock", features = ["no-entrypoint"] }
+spl-token = "4"

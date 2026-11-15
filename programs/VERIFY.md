@@ -90,3 +90,12 @@ execution; SBF-execution figure to be measured on the testnet host).
 | `launch_guard.so` | 111,440 | `68cba8aab86f1001c1774a37897e931db1e7de68c72e93533bf2703f4e70094a` |
 
 Not deployed.
+
+### Addendum — localnet checklist round (2026-11-14, later)
+
+Two adversarial tests added (suite now **10 passed, 0 failed**):
+`register_rejected_if_freeze_authority_kept` (mint authority
+revoked, freeze authority still live → `FreezeAuthorityNotRevoked`)
+and `register_rejected_at_9_99_percent_lock` (99,900 of 1,000,000 →
+`LockTooSmall`). SBF rebuild re-confirmed: launch_guard.so
+`68cba8aa…`, unchanged.

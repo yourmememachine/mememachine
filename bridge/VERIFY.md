@@ -4,6 +4,29 @@ Real commands and their real output. Nothing here is claimed without a
 run behind it. Verified 2026-11-14 ~11:07 UTC, in the bridge workspace
 directory.
 
+## Current state (2026-11-14, latest commits — read this first)
+
+The sections below are the dated verification log; this summary is
+the current state and supersedes their numbers.
+
+- **Tests:** bridge workspace **73 passed, 0 failed** (17
+  bridge-common unit + 19 machine-bridge + 14 solana-lock + 23
+  relayer, including the full local end-to-end drill);
+  LaunchGuard **10 passed** (`programs/VERIFY.md`); fork suite
+  23 OK.
+- **Verification path:** attestation verification uses the ed25519
+  precompile + instructions sysvar (changed 2026-11-14; the original
+  sections below describe the earlier in-program dalek path's runs).
+- **Caps:** absolute caps on both programs plus dynamic caps on
+  unlocks (1% of locked total per tx, 5% per 216,000-slot window).
+- **Compute units (program-test, native execution):** MintWrapped
+  409, Unlock 409, Burn 409, Deposit 409 — full transactions; see
+  the CU section in the code-review update below. SBF-execution CU
+  is a testnet-host measurement, still outstanding.
+- **SBF:** solana_lock.so `05ab551a…` (205,736 B), machine_bridge.so
+  `eacc1a86…` (206,016 B), launch_guard.so `68cba8aa…` (111,440 B).
+  Not deployed anywhere; no asset has crossed; no audit.
+
 Toolchain: cargo 1.100.0 (3acc79c0c 2026-11-05), rustc 1.100.0
 (0ef1bc386 2026-11-09). SDK: `solana-program = "2.3"` (matches Agave
 2.3.13), `spl-token = "4"`, `solana-program-test = "2.3"`.
@@ -252,3 +275,30 @@ Still not deployed anywhere.
 - Top-level docs (BRIDGE.md status line, README.md, ECOSYSTEM.md,
   LAUNCH_CHECKLIST.md, STATUS.md) were synced to the current counts
   and the precompile verification path.
+
+### Addendum — localnet checklist round (2026-11-14, later)
+
+- **Adversarial tests added:** attestations signed over a hash with
+  the wrong domain separator, and over a hash of a truncated
+  (100-of-195-byte) canonical encoding, both rejected with
+  `MissingAttestation` (machine-bridge suite now 19). Dynamic-cap
+  boundary coverage confirmed: exactly 1% of locked total unlocks,
+  1% + 1 unit fails. LaunchGuard gained freeze-authority-kept and
+  9.99%-lock rejections (suite now 10, `programs/VERIFY.md`).
+- **Deposit CU measured:** 409 in program-test native execution —
+  all four bridge instructions now have recorded figures above.
+- **Full local end-to-end drill:** `cargo test --release -p relayer
+  --test full_drill` passes all four phases (deposit→mint,
+  pause-mid-flow, burn→unlock, disagreement blocks quorum). See
+  `bridge/drills/LOCAL-DRILL.md`. Linking both programs into one
+  test binary required gating each program's `entrypoint!` behind
+  a `no-entrypoint` feature (off by default; never used for SBF).
+- **Clippy:** `--release --all-targets` on both workspaces; the
+  easy own-code warnings fixed (needless `mut` in two CU tests,
+  an `ok_or_else` closure, a test helper's name, a deprecated
+  keypair constructor in the drill). Remaining warnings are
+  upstream SDK deprecations and macro cfg notes.
+- **SBF re-confirmed:** all three programs rebuilt with the current
+  lockfiles; hashes **unchanged** — solana_lock.so `05ab551a…`,
+  machine_bridge.so `eacc1a86…`, launch_guard.so `68cba8aa…`.
+- **Bridge workspace total is now 73 passed, 0 failed.**
