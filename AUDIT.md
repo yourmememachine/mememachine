@@ -197,6 +197,16 @@ starts from what is already known:
   2026-11-14: slot-based window (216,000 slots).
 - The 3-of-5 relayer set is a trust assumption (BRIDGE.md honest
   limits), weaker than validator-set attestation.
+- Highest-risk component, in plain language: the ed25519-precompile
+  + instructions-sysvar parser in bridge-common. It interprets
+  transaction-supplied data to decide whether a valid 3-of-5
+  attestation exists, so a parsing mistake there is the most direct
+  path to a forged mint or unlock. That is why it is Scope A's
+  priority review target, why it is fuzzed, and why it carries
+  deterministic adversarial tests (extra instructions around the
+  ed25519 instruction, malformed offsets, cross-instruction
+  references, duplicate signers across instructions, wrong-hash
+  entries — added 2026-11-15).
 - Dev keys in `keys/` are throwaway and must never hold value.
 
 ## Engagement rules the project commits to

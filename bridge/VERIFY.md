@@ -9,7 +9,7 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **78 passed, 0 failed** (22
+- **Tests:** bridge workspace **84 passed, 0 failed** (28
   bridge-common unit + 19 machine-bridge + 14 solana-lock + 23
   relayer, including the full local end-to-end drill);
   LaunchGuard **10 passed** (`programs/VERIFY.md`); fork suite

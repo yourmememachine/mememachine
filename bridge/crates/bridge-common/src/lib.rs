@@ -1260,15 +1260,18 @@ mod sysvar_parser_tests {
     use solana_program::account_info::AccountInfo;
     use std::{cell::RefCell, rc::Rc};
 
-    fn verify_with_sysvar(data: Vec<u8>) -> Result<(), BridgeError> {
-        let pubs: [Pubkey; MAX_RELAYERS] = [
+    fn relayer_pubs() -> [Pubkey; MAX_RELAYERS] {
+        [
             Pubkey::new_from_array([11u8; 32]),
             Pubkey::new_from_array([22u8; 32]),
             Pubkey::new_from_array([33u8; 32]),
             Pubkey::new_from_array([44u8; 32]),
             Pubkey::new_from_array([55u8; 32]),
-        ];
-        let message = BridgeMessage {
+        ]
+    }
+
+    fn test_message() -> BridgeMessage {
+        BridgeMessage {
             version: MESSAGE_VERSION,
             source_chain: CHAIN_SOLANA,
             dest_chain: CHAIN_MACHINE,
@@ -1280,7 +1283,54 @@ mod sysvar_parser_tests {
             source_tx: [9u8; 64],
             source_slot: 100,
             expiry_slot: 1_000_000,
-        };
+        }
+    }
+
+    /// Serialize instructions into instructions-sysvar bytes: u16
+    /// count, count x u16 offsets, each instruction as (u16 account
+    /// count = 0, 32-byte program id, u16 data length, data), and the
+    /// current instruction index as a trailing u16.
+    fn sysvar_bytes(ixs: &[(Pubkey, Vec<u8>)], current_index: u16) -> Vec<u8> {
+        let mut offsets = Vec::with_capacity(ixs.len());
+        let mut pos = 2 + 2 * ixs.len();
+        for (_, data) in ixs {
+            offsets.push(pos as u16);
+            pos += 2 + 32 + 2 + data.len();
+        }
+        let mut out = Vec::with_capacity(pos + 2);
+        out.extend_from_slice(&(ixs.len() as u16).to_le_bytes());
+        for off in offsets {
+            out.extend_from_slice(&off.to_le_bytes());
+        }
+        for (program_id, data) in ixs {
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(program_id.as_ref());
+            out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+            out.extend_from_slice(data);
+        }
+        out.extend_from_slice(&current_index.to_le_bytes());
+        out
+    }
+
+    /// ed25519-program instruction data carrying dummy signatures
+    /// from the given relayers (indices into `relayer_pubs()`) over
+    /// `hash`. The parser never sees real signature validity — the
+    /// runtime checks signatures on-chain — so dummy bytes suffice.
+    fn ed25519_data(hash: &[u8; 32], relayers: &[usize]) -> Vec<u8> {
+        let pubs = relayer_pubs();
+        let sigs: Vec<RelayerSignature> = relayers
+            .iter()
+            .map(|&i| RelayerSignature {
+                relayer: pubs[i],
+                signature: [7u8; 64],
+            })
+            .collect();
+        build_ed25519_instruction(hash, &sigs).data
+    }
+
+    fn verify_with_sysvar(data: Vec<u8>) -> Result<(), BridgeError> {
+        let pubs = relayer_pubs();
+        let message = test_message();
         let key = solana_program::sysvar::instructions::ID;
         let owner = solana_program::sysvar::ID;
         let mut lamports = 0u64;
@@ -1320,6 +1370,185 @@ mod sysvar_parser_tests {
                 "sysvar data {data:?} must be rejected, not panic or pass"
             );
         }
+    }
+
+    #[test]
+    fn valid_attestation_through_sysvar_passes() {
+        // The positive path for the sysvar parser itself: one ed25519
+        // instruction at index 0 carrying 3 distinct relayers over
+        // the message hash, current index 1 (the bridge instruction).
+        let hash = test_message().hash();
+        let data = sysvar_bytes(
+            &[(
+                solana_program::ed25519_program::ID,
+                ed25519_data(&hash, &[0, 1, 2]),
+            )],
+            1,
+        );
+        assert_eq!(verify_with_sysvar(data), Ok(()));
+    }
+
+    #[test]
+    fn extra_instructions_around_ed25519_are_ignored() {
+        // Unrelated instructions before and after the ed25519
+        // instruction must not disturb verification.
+        let hash = test_message().hash();
+        let ed = (
+            solana_program::ed25519_program::ID,
+            ed25519_data(&hash, &[0, 1, 2]),
+        );
+        let before = (solana_program::system_program::ID, vec![2, 0, 0, 0]);
+        let after = (
+            Pubkey::new_from_array([3u8; 32]), // memo-program-shaped
+            b"hello".to_vec(),
+        );
+        let data = sysvar_bytes(&[before, ed.clone(), after], 3);
+        assert_eq!(verify_with_sysvar(data), Ok(()));
+
+        // But an ed25519 instruction AT or AFTER the current index is
+        // not a preceding instruction and must not be scanned: here
+        // the bridge instruction is at index 1 and the ed25519
+        // instruction sits at index 1, so nothing precedes it.
+        let data = sysvar_bytes(&[(solana_program::system_program::ID, vec![2, 0, 0, 0]), ed], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::MissingAttestation)
+        );
+    }
+
+    #[test]
+    fn duplicate_relayer_across_instructions_counts_once() {
+        let hash = test_message().hash();
+        let ed = solana_program::ed25519_program::ID;
+        // Relayer 1 appears in both instructions; the union is
+        // {0, 1, 2} — quorum reached exactly once per distinct key.
+        let data = sysvar_bytes(
+            &[
+                (ed, ed25519_data(&hash, &[0, 1])),
+                (ed, ed25519_data(&hash, &[1, 2])),
+            ],
+            2,
+        );
+        assert_eq!(verify_with_sysvar(data), Ok(()));
+        // The same pair repeated in a second instruction is still
+        // only 2 distinct relayers — no double counting.
+        let data = sysvar_bytes(
+            &[
+                (ed, ed25519_data(&hash, &[0, 1])),
+                (ed, ed25519_data(&hash, &[0, 1])),
+            ],
+            2,
+        );
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::QuorumNotReached)
+        );
+    }
+
+    #[test]
+    fn entries_over_a_different_hash_do_not_count() {
+        let ed = solana_program::ed25519_program::ID;
+        // Three registered relayers, but over the wrong hash: the
+        // entries are not attestations of this message at all.
+        let data = sysvar_bytes(&[(ed, ed25519_data(&[1u8; 32], &[0, 1, 2]))], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::MissingAttestation)
+        );
+        // Signatures over THIS hash exist, but from a key that is not
+        // a registered relayer.
+        let sigs = vec![RelayerSignature {
+            relayer: Pubkey::new_from_array([99u8; 32]),
+            signature: [7u8; 64],
+        }];
+        let hash = test_message().hash();
+        let data = sysvar_bytes(&[(ed, build_ed25519_instruction(&hash, &sigs).data)], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::UnknownRelayer)
+        );
+    }
+
+    #[test]
+    fn malformed_offsets_are_skipped_never_counted() {
+        let hash = test_message().hash();
+        let ed = solana_program::ed25519_program::ID;
+        let valid = ed25519_data(&hash, &[0, 1, 2]);
+        // Corrupt one field of entry 0's offsets record (base = 2,
+        // field j at base + 2*j, u16 little-endian). The entry must
+        // be skipped, leaving 2 of 3 — QuorumNotReached, never a
+        // panic and never a pass.
+        let corrupt = |field: usize, value: u16| -> Vec<u8> {
+            let mut d = valid.clone();
+            d[2 + 2 * field..2 + 2 * field + 2].copy_from_slice(&value.to_le_bytes());
+            d
+        };
+        // Signature offset far beyond the instruction data.
+        let data = sysvar_bytes(&[(ed, corrupt(0, 0xff00))], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::QuorumNotReached)
+        );
+        // Message offset beyond the data.
+        let data = sysvar_bytes(&[(ed, corrupt(4, 0xff00))], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::QuorumNotReached)
+        );
+        // Message size (64) larger than the 32-byte hash slice
+        // actually present at the message offset.
+        let data = sysvar_bytes(&[(ed, corrupt(5, 64))], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::QuorumNotReached)
+        );
+        // A header count the data cannot back at all (30 records
+        // claimed, room for 3): the whole instruction is skipped.
+        let mut d = valid.clone();
+        d[0] = 30;
+        let data = sysvar_bytes(&[(ed, d)], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::MissingAttestation)
+        );
+        // A count that overruns the real records but stays inside
+        // the data (9 claimed, 3 real) scans garbage "records" out
+        // of the payload bytes — and still passes on the 3 real
+        // entries alone. That is safe, and pinned here deliberately:
+        // a garbage record can only re-point at pubkey/hash bytes
+        // already in the payload, duplicates are deduplicated by
+        // the seen-set, and on-chain the ed25519 precompile itself
+        // rejects a count that does not match its layout before
+        // this program ever runs.
+        let mut d = valid.clone();
+        d[0] = 9;
+        let data = sysvar_bytes(&[(ed, d)], 1);
+        assert_eq!(verify_with_sysvar(data), Ok(()));
+    }
+
+    #[test]
+    fn cross_instruction_references_are_rejected() {
+        // Offsets records may only reference their own instruction
+        // (index u16::MAX or the instruction's own index). Pointing
+        // an entry's message or signature at another instruction
+        // must not let it count.
+        let hash = test_message().hash();
+        let ed = solana_program::ed25519_program::ID;
+        let valid = ed25519_data(&hash, &[0, 1, 2]);
+        let mut by_msg_ix = valid.clone();
+        by_msg_ix[2 + 2 * 6..2 + 2 * 6 + 2].copy_from_slice(&1u16.to_le_bytes());
+        let data = sysvar_bytes(&[(ed, by_msg_ix)], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::QuorumNotReached)
+        );
+        let mut by_sig_ix = valid;
+        by_sig_ix[2 + 2 * 1..2 + 2 * 1 + 2].copy_from_slice(&2u16.to_le_bytes());
+        let data = sysvar_bytes(&[(ed, by_sig_ix)], 1);
+        assert_eq!(
+            verify_with_sysvar(data),
+            Err(BridgeError::QuorumNotReached)
+        );
     }
 }
 
