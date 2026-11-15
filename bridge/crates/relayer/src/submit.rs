@@ -5,7 +5,7 @@
 //! re-check every PDA, the mint, and the destination owner on-chain.
 
 use bridge_common::{
-    authority_pda, build_ed25519_instruction, config_pda, nonce_pda, BridgeMessage,
+    authority_pda, build_ed25519_instruction, config_pda, nonce_pda, receipt_pda, BridgeMessage,
     LockInstruction, MachineInstruction, RelayerSignature, DIR_MACHINE_TO_SOLANA,
     DIR_SOLANA_TO_MACHINE,
 };
@@ -39,6 +39,7 @@ pub fn build_mint_instructions(
     let (config, _) = config_pda(machine_program_id);
     let (nonce, _) = nonce_pda(machine_program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
     let (authority, _) = authority_pda(machine_program_id);
+    let (receipt, _) = receipt_pda(machine_program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
     let mint_ix = Instruction::new_with_borsh(
         *machine_program_id,
         &MachineInstruction::MintWrapped {
@@ -54,6 +55,7 @@ pub fn build_mint_instructions(
             AccountMeta::new_readonly(spl_token_id(), false),
             AccountMeta::new_readonly(system_program::id(), false),
             AccountMeta::new_readonly(sysvar::instructions::ID, false),
+            AccountMeta::new(receipt, false),
         ],
     );
     vec![build_ed25519_instruction(&message.hash(), &signatures), mint_ix]
@@ -73,6 +75,7 @@ pub fn build_unlock_instructions(
     let (config, _) = config_pda(lock_program_id);
     let (nonce, _) = nonce_pda(lock_program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
     let (authority, _) = authority_pda(lock_program_id);
+    let (receipt, _) = receipt_pda(lock_program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
     let unlock_ix = Instruction::new_with_borsh(
         *lock_program_id,
         &LockInstruction::Unlock {
@@ -88,6 +91,7 @@ pub fn build_unlock_instructions(
             AccountMeta::new_readonly(spl_token_id(), false),
             AccountMeta::new_readonly(system_program::id(), false),
             AccountMeta::new_readonly(sysvar::instructions::ID, false),
+            AccountMeta::new(receipt, false),
         ],
     );
     vec![build_ed25519_instruction(&message.hash(), &signatures), unlock_ix]
@@ -147,7 +151,7 @@ mod tests {
         assert_eq!(ixs[0].program_id, solana_program::ed25519_program::ID);
         let ix = &ixs[1];
         assert_eq!(ix.program_id, program);
-        assert_eq!(ix.accounts.len(), 9);
+        assert_eq!(ix.accounts.len(), 10);
         assert_eq!(ix.accounts[0].pubkey, config_pda(&program).0);
         assert_eq!(
             ix.accounts[1].pubkey,
@@ -177,7 +181,7 @@ mod tests {
         assert_eq!(ixs.len(), 2);
         assert_eq!(ixs[0].program_id, solana_program::ed25519_program::ID);
         let ix = &ixs[1];
-        assert_eq!(ix.accounts.len(), 9);
+        assert_eq!(ix.accounts.len(), 10);
         assert_eq!(ix.accounts[0].pubkey, config_pda(&program).0);
         assert_eq!(ix.accounts[1].pubkey, vault);
         assert_eq!(ix.accounts[2].pubkey, dest);

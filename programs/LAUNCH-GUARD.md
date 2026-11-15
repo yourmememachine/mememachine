@@ -54,6 +54,26 @@ exactly computable from the registration slot.
 | Minimum lock period | 30 days = 6,480,000 slots (400 ms target slot time) |
 | Maximum lock period | 5 years = 394,200,000 slots |
 
+## Creator reputation (on-chain)
+
+Every creator has a **reputation account**: a PDA derived from
+`["reputation", creator]`, created by their first registration and
+updated by the program only:
+
+| Field | Meaning |
+|---|---|
+| `launches_registered` | Protected launches this creator has registered. Incremented only by a successful `RegisterAndLock`. |
+| `locks_completed` | Locks this creator held for their **full** period and released. Incremented only by `Release`, which the program refuses before expiry — a completion is proof the wait happened. |
+| `first_launch_slot` / `last_completed_slot` | When the record started / when the latest completion happened. |
+
+Any wallet, explorer, or other program can read this account —
+it's the creator's public track record, written by the chain, not
+by a website. Two honest limits: reputation is **per key** (a
+creator can always start over with a fresh keypair at zero, so a
+long history is meaningful precisely because it can't be bought or
+transferred), and it counts only what LaunchGuard can see —
+launches and completions inside this standard.
+
 ## What LaunchGuard does NOT do (honest limits)
 
 - It does not lock **liquidity-pool** positions, team wallets beyond
@@ -70,6 +90,33 @@ exactly computable from the registration slot.
   not just the creator, can execute an expired release) are v2
   candidates — deliberately out of v1 to keep the audited surface
   small, the way Bitcoin kept its script small.
+
+## Verify a launch yourself (the exact accounts to inspect)
+
+Don't trust a "LaunchGuard-protected" claim — check the chain.
+For a mint `M` and the LaunchGuard program `P`, inspect:
+
+1. **The mint account `M` itself.** `mint_authority` and
+   `freeze_authority` must both be **None**. If either is set, the
+   token is not protected, whatever anyone says — the creator can
+   still mint or freeze.
+2. **The launch record PDA** — seeds `["launch", M]` under `P`.
+   It must exist and show: `state` = locked (or released, after a
+   completed lock), `locked_amount` ≥ 10% of `total_supply`,
+   `lock_until_slot` in the future for an active lock, and
+   `creator` = the wallet that registered.
+3. **The vault token account PDA** — seeds `["vault", M]` under
+   `P`. Its balance must equal the record's `locked_amount`, and
+   its owner must be the authority PDA (next item), never a wallet.
+4. **The authority PDA** — seeds `["launch-authority", M]` under
+   `P`. This program-derived address is the only authority that
+   can move vault funds, and the program moves them only to the
+   recorded creator, only after `lock_until_slot`.
+
+If all four check out, the lock is real: the supply cannot grow,
+accounts cannot be frozen by the creator, and the locked tokens
+cannot move early — those are SPL- and program-level facts, not
+promises.
 
 ## How it fits the chain
 

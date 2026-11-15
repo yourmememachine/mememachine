@@ -99,3 +99,20 @@ revoked, freeze authority still live → `FreezeAuthorityNotRevoked`)
 and `register_rejected_at_9_99_percent_lock` (99,900 of 1,000,000 →
 `LockTooSmall`). SBF rebuild re-confirmed: launch_guard.so
 `68cba8aa…`, unchanged.
+
+### Addendum — reputation PDA (2026-11-15, later)
+
+LaunchGuard gained a per-creator **reputation PDA**
+(seeds `["reputation", creator]`): `launches_registered` counts
+RegisterAndLock completions, `locks_completed` counts releases —
+reachable only after a lock's full period elapsed. No instruction
+decrements or edits the counters; there is no admin key. Suite now
+**13 passed, 0 failed**, including
+`creator_reputation_counts_registrations_and_completions` (two
+launches by one creator share one PDA: 2 registered; an extend
+moves nothing; a release after the full period records 1
+completion; a stranger has no reputation account).
+RegisterAndLock CU (program-test, native execution): 9,508 →
+**9,775**. SBF rebuilt: launch_guard.so
+`405a0075790224ee2e00c34762d2e561d5ac401bb29c0420030afce1f51dd367`
+(115,208 B). Not deployed.

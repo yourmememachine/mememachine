@@ -6,6 +6,11 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
+Last verified commit: `b9d98d3` (2026-11-15; `make verify` green —
+bridge workspace 93 passed, LaunchGuard 13 passed, fork suite
+23 OK). The pin is refreshed after every full verification run;
+STATUS.md and BRIDGE.md carry the same pin.
+
 ## What must be audited before real value moves
 
 Per BRIDGE.md section 5 item 5, the audit gates the bridge. The
@@ -21,6 +26,15 @@ chain configuration gates any public chain launch. Both scopes:
 | LaunchGuard launch standard | `programs/crates/launch-guard/` | Added 2026-11-14. Gates LaunchGuard's own mainnet use (it custodies locked creator tokens), not the bridge. Verify: registration truly requires revoked mint+freeze authorities, the ≥10% / ≥30-day (6,480,000-slot) lock floor, no early-release or lock-shortening path, PDA authority over the vault. Spec: `programs/LAUNCH-GUARD.md`. |
 | Key management | `bridge/deploy/DEPLOY-BRIDGE.md` step 2 | Fresh keys on deployment hosts, role separation, multisig + 48h timelock for upgrades. Process review, not code. |
 | Deployment + drills | `bridge/deploy/`, `bridge/drills/` | Caps translation (`caps.py`), initialization parameters, test-crossing / pause / outage drill results. |
+
+> **Scope update (2026-11-15, after the first inquiries were sent):**
+> three features were added to the in-scope programs — crossing
+> receipts (a receipt PDA written by MintWrapped and Unlock),
+> automatic cap tightening (tightened dynamic caps for one window
+> after any unpause of the lock program), and the LaunchGuard
+> creator reputation PDA. All are part of Scope A. Auditors should
+> quote and review against the current `main` HEAD (pinned at the
+> top of this file), not the tree as of the first inquiry.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |

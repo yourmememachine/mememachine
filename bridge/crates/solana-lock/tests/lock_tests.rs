@@ -356,6 +356,7 @@ async fn send_unlock(
     let program_id = program_id();
     let (config_pda, _) = config_pda(&program_id);
     let (nonce_pda, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
+    let (receipt_pda, _) = receipt_pda(&program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
     let (authority_pda, _) = authority_pda(&program_id);
     let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
     let ed25519_ix = build_ed25519_instruction(&message.hash(), &signatures);
@@ -372,6 +373,7 @@ async fn send_unlock(
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+            AccountMeta::new(receipt_pda, false),
         ],
     );
     let tx = Transaction::new_signed_with_payer(
@@ -658,6 +660,7 @@ async fn compute_units_unlock() {
     let program_id = program_id();
     let (config_pda, _) = config_pda(&program_id);
     let (nonce_pda, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, msg.nonce);
+    let (receipt_pda, _) = receipt_pda(&program_id, DIR_MACHINE_TO_SOLANA, msg.nonce);
     let (authority_pda, _) = authority_pda(&program_id);
     let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
     let ed25519_ix = build_ed25519_instruction(&msg.hash(), &sigs);
@@ -674,6 +677,7 @@ async fn compute_units_unlock() {
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+            AccountMeta::new(receipt_pda, false),
         ],
     );
     let tx = Transaction::new_signed_with_payer(
@@ -737,4 +741,100 @@ async fn compute_units_deposit() {
     let cu = result.metadata.unwrap().compute_units_consumed;
     println!("CU Deposit: {cu}");
     assert!(cu < 200_000, "Deposit CU unexpectedly high: {cu}");
+}
+
+#[tokio::test]
+async fn unpause_tightens_dynamic_caps_for_one_window() {
+    // Automatic cap tightening: a pause/unpause cycle reopens the
+    // bridge at a quarter of its normal dynamic limits (0.25% per
+    // tx instead of 1%) for one full cap window, then relaxes on
+    // its own. Vault holds 2,000,000, so the normal per-tx dynamic
+    // cap is 20,000 and the tightened one is 5,000.
+    let mut env = setup(2_000_000, 4_000_000, 2_000_000).await;
+    send_deposit(&mut env, 2_000_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+
+    // Pause with 2 relayers, unpause with 2 admins.
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let pause_ix = Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Pause,
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new_readonly(env.relayers[0].pubkey(), true),
+            AccountMeta::new_readonly(env.relayers[1].pubkey(), true),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[pause_ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer, &env.relayers[0], &env.relayers[1]],
+        blockhash,
+    );
+    env.context.banks_client.process_transaction(tx).await.unwrap();
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let unpause_ix = Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Unpause,
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new_readonly(env.admins[0].pubkey(), true),
+            AccountMeta::new_readonly(env.admins[1].pubkey(), true),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[unpause_ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer, &env.admins[0], &env.admins[1]],
+        blockhash,
+    );
+    env.context.banks_client.process_transaction(tx).await.unwrap();
+
+    // The unpause recorded a tightening deadline one window out.
+    let acc = env.context.banks_client.get_account(config_pda).await.unwrap().unwrap();
+    let cfg = LockConfig::try_from_slice(&acc.data).unwrap();
+    let clock: solana_sdk::clock::Clock =
+        env.context.banks_client.get_sysvar().await.unwrap();
+    assert!(cfg.tightened_until_slot > clock.slot);
+    assert!(cfg.tightened_until_slot <= clock.slot + 216_000);
+
+    // 10,000 is 0.5% of the locked total: fine at normal caps,
+    // too much while tightened.
+    let msg = burn_message(1, 10_000, env.user.pubkey(), env.source_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_unlock(&mut env, msg, sigs).await;
+    assert_custom_error(result, BridgeError::AmountExceedsDynamicPerTxCap);
+
+    // 5,000 is exactly the tightened 0.25%: it goes through, and
+    // the unlock leaves its crossing receipt.
+    let msg = burn_message(1, 5_000, env.user.pubkey(), env.source_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_unlock(&mut env, msg.clone(), sigs).await.unwrap();
+    let (receipt_addr, _) = receipt_pda(&program_id, DIR_MACHINE_TO_SOLANA, 1);
+    let acc = env
+        .context
+        .banks_client
+        .get_account(receipt_addr)
+        .await
+        .unwrap()
+        .expect("receipt PDA must exist after a successful unlock");
+    let receipt = CrossingReceipt::try_from_slice(&acc.data).unwrap();
+    assert_eq!(receipt.discriminator, DISCRIMINATOR_RECEIPT);
+    assert_eq!(receipt.direction, DIR_MACHINE_TO_SOLANA);
+    assert_eq!(receipt.nonce, 1);
+    assert_eq!(receipt.message_hash, msg.hash());
+    assert_eq!(receipt.source_tx, msg.source_tx);
+    assert_eq!(receipt.amount, 5_000);
+    assert_eq!(receipt.recipient, env.user.pubkey());
+
+    // Warp past the tightening deadline: the same 10,000 unlock
+    // that was rejected now passes under the normal 1% cap.
+    env.context.warp_to_slot(cfg.tightened_until_slot + 10).unwrap();
+    let msg = burn_message(2, 10_000, env.user.pubkey(), env.source_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_unlock(&mut env, msg, sigs).await.unwrap();
+    assert_eq!(total_locked(&mut env).await, 2_000_000 - 5_000 - 10_000);
 }

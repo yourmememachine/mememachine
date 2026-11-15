@@ -5,6 +5,7 @@
 //! validation functions in bridge-common): actual SPL minting, nonce PDA
 //! creation, cap enforcement, pause, and the kill-switch.
 
+use borsh::BorshDeserialize;
 use bridge_common::*;
 use machine_bridge::processor;
 use solana_program_test::ProgramTest;
@@ -263,6 +264,7 @@ async fn send_mint(
     let program_id = program_id();
     let (config_pda, _) = config_pda(&program_id);
     let (nonce_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
+    let (receipt_pda, _) = receipt_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
     let (authority_pda, _) = authority_pda(&program_id);
     let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
     let ed25519_ix = build_ed25519_instruction(&message.hash(), &signatures);
@@ -279,6 +281,7 @@ async fn send_mint(
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+            AccountMeta::new(receipt_pda, false),
         ],
     );
     let tx = Transaction::new_signed_with_payer(
@@ -645,6 +648,7 @@ async fn compute_units_mint_wrapped() {
     let program_id = program_id();
     let (config_pda, _) = config_pda(&program_id);
     let (nonce_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, msg.nonce);
+    let (receipt_pda, _) = receipt_pda(&program_id, DIR_SOLANA_TO_MACHINE, msg.nonce);
     let (authority_pda, _) = authority_pda(&program_id);
     let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
     let ed25519_ix = build_ed25519_instruction(&msg.hash(), &sigs);
@@ -661,6 +665,7 @@ async fn compute_units_mint_wrapped() {
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+            AccountMeta::new(receipt_pda, false),
         ],
     );
     let tx = Transaction::new_signed_with_payer(
@@ -690,6 +695,7 @@ async fn send_mint_to(
     let program_id = program_id();
     let (config_pda, _) = config_pda(&program_id);
     let (nonce_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
+    let (receipt_pda, _) = receipt_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
     let (authority_pda, _) = authority_pda(&program_id);
     let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
     let ed25519_ix = build_ed25519_instruction(&message.hash(), &signatures);
@@ -706,6 +712,7 @@ async fn send_mint_to(
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+            AccountMeta::new(receipt_pda, false),
         ],
     );
     let tx = Transaction::new_signed_with_payer(
@@ -852,6 +859,7 @@ async fn send_mint_with_precompile_hash(
     let program_id = program_id();
     let (config_pda, _) = config_pda(&program_id);
     let (nonce_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
+    let (receipt_pda, _) = receipt_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
     let (authority_pda, _) = authority_pda(&program_id);
     let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
     let ed25519_ix = build_ed25519_instruction(precompile_hash, &signatures);
@@ -868,6 +876,7 @@ async fn send_mint_with_precompile_hash(
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+            AccountMeta::new(receipt_pda, false),
         ],
     );
     let tx = Transaction::new_signed_with_payer(
@@ -890,6 +899,121 @@ async fn attestation_with_wrong_domain_separator_fails() {
     let sigs = sign_hash(&wrong_hash, &env.relayers, 3);
     let result = send_mint_with_precompile_hash(&mut env, msg, sigs, &wrong_hash).await;
     assert_custom_error(result, BridgeError::MissingAttestation);
+}
+
+#[tokio::test]
+async fn relayer_rotation_requires_admin_multisig_and_takes_effect() {
+    // Rotation path (BRIDGE.md section 4.3): the relayer set can be
+    // replaced, but only by the admin multisig — never by relayers
+    // themselves, never by a single admin — and the new set is the
+    // only one that counts from that moment on.
+    let mut env = setup(100_000, 500_000).await;
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let new_relayers: [Keypair; 5] = std::array::from_fn(|_| Keypair::new());
+    let new_pubkeys = relayer_pubkeys(&new_relayers);
+
+    fn set_relayers_ix(
+        program_id: Pubkey,
+        config: Pubkey,
+        admin_pubs: &[Pubkey],
+        relayers: [Pubkey; 5],
+    ) -> Instruction {
+        let mut metas = vec![AccountMeta::new(config, false)];
+        for p in admin_pubs {
+            metas.push(AccountMeta::new_readonly(*p, true));
+        }
+        Instruction::new_with_borsh(
+            program_id,
+            &MachineInstruction::SetRelayers { relayers },
+            metas,
+        )
+    }
+    async fn send_admin_ix(
+        env: &mut Env,
+        ix: Instruction,
+        admin_idx: &[usize],
+    ) -> Result<(), solana_program_test::BanksClientError> {
+        let blockhash = env
+            .context
+            .banks_client
+            .get_latest_blockhash()
+            .await
+            .unwrap();
+        let mut all: Vec<&Keypair> = vec![&env.context.payer];
+        for &i in admin_idx {
+            all.push(&env.admins[i]);
+        }
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&env.context.payer.pubkey()),
+            &all,
+            blockhash,
+        );
+        env.context.banks_client.process_transaction(tx).await
+    }
+    let admin_pubs: Vec<Pubkey> = env.admins.iter().map(|k| k.pubkey()).collect();
+
+    // One admin is below the 2-of-3 threshold.
+    let ix = set_relayers_ix(program_id, config_pda, &admin_pubs[..1], new_pubkeys);
+    let result = send_admin_ix(&mut env, ix, &[0]).await;
+    assert_custom_error(result, BridgeError::Unauthorized);
+
+    // Two admins, but the proposed set repeats a key.
+    let mut dup = new_pubkeys;
+    dup[4] = dup[0];
+    let ix = set_relayers_ix(program_id, config_pda, &admin_pubs[..2], dup);
+    let result = send_admin_ix(&mut env, ix, &[0, 1]).await;
+    assert_custom_error(result, BridgeError::DuplicateRelayerSignature);
+
+    // Two admins and a clean set: rotation succeeds.
+    let ix = set_relayers_ix(program_id, config_pda, &admin_pubs[..2], new_pubkeys);
+    send_admin_ix(&mut env, ix, &[0, 1]).await.unwrap();
+
+    // The old set's attestations no longer count.
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_mint(&mut env, msg.clone(), sigs).await;
+    assert_custom_error(result, BridgeError::UnknownRelayer);
+
+    // The new set's attestations mint.
+    let sigs = sign_attestation(&msg, &new_relayers, 3);
+    send_mint(&mut env, msg, sigs).await.unwrap();
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.recipient_token_account).await,
+        50_000
+    );
+}
+
+#[tokio::test]
+async fn mint_writes_a_crossing_receipt() {
+    // Every completed crossing leaves a permanent receipt PDA,
+    // derived from (direction, nonce) so anyone can find and verify
+    // it: if this account exists with these fields, this exact
+    // message was minted, for this recipient, at this slot.
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_mint(&mut env, msg.clone(), sigs).await.unwrap();
+
+    let (receipt_addr, _) = receipt_pda(&program_id(), DIR_SOLANA_TO_MACHINE, 1);
+    let acc = env
+        .context
+        .banks_client
+        .get_account(receipt_addr)
+        .await
+        .unwrap()
+        .expect("receipt PDA must exist after a successful mint");
+    assert_eq!(acc.data.len(), CrossingReceipt::LEN);
+    let receipt = CrossingReceipt::try_from_slice(&acc.data).unwrap();
+    assert_eq!(receipt.discriminator, DISCRIMINATOR_RECEIPT);
+    assert_eq!(receipt.direction, DIR_SOLANA_TO_MACHINE);
+    assert_eq!(receipt.nonce, 1);
+    assert_eq!(receipt.message_hash, msg.hash());
+    assert_eq!(receipt.source_tx, msg.source_tx);
+    assert_eq!(receipt.amount, 50_000);
+    assert_eq!(receipt.recipient, env.recipient.pubkey());
+    assert!(receipt.slot > 0);
 }
 
 #[tokio::test]

@@ -12,7 +12,7 @@ gate allows.
 
 ## Phase 0 — Public proof of work ($0) — *current*
 
-- Everything in the open: code, tests (84 bridge + 23 fork +
+- Everything in the open: code, tests (93 bridge + 23 fork +
   10 LaunchGuard), SBF hashes, runbooks, drills, honest status docs.
 - Free security passes: `cargo audit`, clippy, cargo-fuzz, plus a
   documented self-review checklist. (Sec3 X-Ray turned out to be

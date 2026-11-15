@@ -7,8 +7,10 @@ use solana_program::{program_error::ProgramError, pubkey::Pubkey};
 pub const SEED_LAUNCH: &[u8] = b"launch";
 pub const SEED_VAULT: &[u8] = b"vault";
 pub const SEED_AUTHORITY: &[u8] = b"launch-authority";
+pub const SEED_REPUTATION: &[u8] = b"reputation";
 
 pub const DISCRIMINATOR_LAUNCH: u8 = 1;
+pub const DISCRIMINATOR_REPUTATION: u8 = 2;
 
 pub const STATE_LOCKED: u8 = 1;
 pub const STATE_RELEASED: u8 = 2;
@@ -39,6 +41,30 @@ pub struct LaunchRecord {
 
 impl LaunchRecord {
     pub const LEN: usize = 1 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 1;
+}
+
+/// A creator's public track record, one PDA per creator, readable
+/// by anyone and by any other program. Counters only ever move in
+/// RegisterAndLock (registered += 1) and Release (completed += 1,
+/// which the program only reaches after the full lock period has
+/// elapsed) — there is no instruction that decrements, resets, or
+/// edits them, and no admin key. A creator with completions has
+/// provably waited out every lock they finished.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
+pub struct CreatorReputation {
+    pub discriminator: u8,
+    pub creator: Pubkey,
+    /// Protected launches registered under LaunchGuard.
+    pub launches_registered: u64,
+    /// Locks held for their full period and released.
+    pub locks_completed: u64,
+    pub first_launch_slot: u64,
+    /// Slot of the most recent completion (0 = none yet).
+    pub last_completed_slot: u64,
+}
+
+impl CreatorReputation {
+    pub const LEN: usize = 1 + 32 + 8 + 8 + 8 + 8;
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]

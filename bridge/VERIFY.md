@@ -9,22 +9,28 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **84 passed, 0 failed** (28
-  bridge-common unit + 19 machine-bridge + 14 solana-lock + 23
-  relayer, including the full local end-to-end drill);
-  LaunchGuard **10 passed** (`programs/VERIFY.md`); fork suite
-  23 OK.
+- **Tests:** bridge workspace **93 passed, 0 failed** (33
+  bridge-common unit + 21 machine-bridge + 15 solana-lock + 24
+  relayer, including the full local end-to-end drill and the
+  45-crossing volume drill); LaunchGuard **13 passed**
+  (`programs/VERIFY.md`); fork suite 23 OK.
 - **Verification path:** attestation verification uses the ed25519
   precompile + instructions sysvar (changed 2026-11-14; the original
   sections below describe the earlier in-program dalek path's runs).
 - **Caps:** absolute caps on both programs plus dynamic caps on
-  unlocks (1% of locked total per tx, 5% per 216,000-slot window).
+  unlocks (1% of locked total per tx, 5% per 216,000-slot window),
+  tightened to a quarter of those limits for one window after any
+  unpause (added 2026-11-15).
+- **Crossing receipts:** every successful MintWrapped / Unlock now
+  also writes a permanent receipt PDA (message hash, source tx,
+  amount, recipient, slot, timestamp), derived from
+  (direction, nonce) — see the 2026-11-15 addendum below.
 - **Compute units (program-test, native execution):** MintWrapped
-  409, Unlock 409, Burn 409, Deposit 409 — full transactions; see
+  676, Unlock 676, Burn 409, Deposit 409 — full transactions; see
   the CU section in the code-review update below. SBF-execution CU
   is a testnet-host measurement, still outstanding.
-- **SBF:** solana_lock.so `f2bdc178…` (201,704 B), machine_bridge.so
-  `9570f07d…` (202,016 B), launch_guard.so `68cba8aa…` (111,440 B).
+- **SBF:** solana_lock.so `1bc7c3a9…` (204,288 B), machine_bridge.so
+  `eccd1686…` (204,024 B), launch_guard.so `405a0075…` (115,208 B).
   Not deployed anywhere; no asset has crossed; no audit.
 
 Toolchain: cargo 1.100.0 (3acc79c0c 2026-11-05), rustc 1.100.0
@@ -358,3 +364,37 @@ Still not deployed anywhere.
   `9570f07d503092fe586f8212987996274807fbe6d5de6f73558f8ed8cb73abb6`
   (202,016 B); launch_guard.so unchanged (`68cba8aa…`,
   111,440 B).
+
+### Addendum — hardening + features round (2026-11-15, later)
+
+Two external improvement lists and a feature request were actioned
+in one round. Bridge workspace **93 passed, 0 failed**
+(bridge-common 33, machine-bridge 21, solana-lock 15, relayer 24);
+LaunchGuard **13 passed**; fork suite 23 OK; `make verify` green.
+
+- **Tests added:** hash-binding (every BridgeMessage field is
+  covered by the attested hash), cap-overflow boundaries, relayer
+  rotation end-to-end (below-threshold rejection, duplicate-key
+  rejection, old set fails / new set mints after rotation),
+  LaunchGuard stranger-cannot-extend and cannot-regain-authorities,
+  and a 45-crossing volume drill that reconciles exactly
+  (`bridge/drills/last-drill.md`, written by the drill itself).
+- **Crossing receipts:** MintWrapped and Unlock each create a
+  receipt PDA (BRIDGE.md §4.5) in the same transaction;
+  integration tests read the receipt back and verify every field.
+- **Automatic cap tightening:** unpause sets
+  `tightened_until_slot = slot + 216,000` in the lock config;
+  unlocks inside the window are held to 0.25% / 1.25% dynamic
+  caps. Tested end to end: a 0.5% unlock is rejected while
+  tightened, exactly-0.25% passes, and after warping past the
+  deadline the same 0.5% unlock passes.
+- **Compute units changed** (program-test, native execution):
+  MintWrapped 409 → **676**, Unlock 409 → **676** (the receipt
+  account creation); Deposit and Burn unchanged at 409.
+- **SBF rebuilt:** solana_lock.so
+  `1bc7c3a904d73ee83ea021f209677f130135fe7c62058a9049047e7ad90cfd9b`
+  (204,288 B), machine_bridge.so
+  `eccd1686af3fda6a07d98f9be9b385401396289e79a6243624c5ea3f530276a8`
+  (204,024 B), launch_guard.so
+  `405a0075790224ee2e00c34762d2e561d5ac401bb29c0420030afce1f51dd367`
+  (115,208 B). Not deployed.

@@ -179,6 +179,7 @@ fn process_mint_wrapped(
     let token_program = next_account_info(&mut iter)?;
     let system_program = next_account_info(&mut iter)?;
     let instructions_sysvar = next_account_info(&mut iter)?;
+    let receipt_account = next_account_info(&mut iter)?;
 
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
@@ -278,6 +279,40 @@ fn process_mint_wrapped(
     };
     let mut data = nonce_account.try_borrow_mut_data()?;
     let bytes = borsh::to_vec(&record).map_err(|_| ProgramError::AccountDataTooSmall)?;
+    data[..bytes.len()].copy_from_slice(&bytes);
+    drop(data);
+
+    // Crossing receipt: a permanent, public proof this crossing
+    // completed, written in the same transaction as the mint. The
+    // nonce gate above already guarantees this (direction, nonce)
+    // is fresh, so the receipt PDA cannot exist yet; verify the
+    // caller passed the right account and create it.
+    let (expected_receipt, receipt_bump) =
+        receipt_pda(program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
+    if *receipt_account.key != expected_receipt {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    create_pda_account(
+        payer,
+        receipt_account,
+        system_program,
+        program_id,
+        CrossingReceipt::LEN,
+        &[SEED_RECEIPT, &[DIR_SOLANA_TO_MACHINE], &message.nonce.to_le_bytes(), &[receipt_bump]],
+    )?;
+    let receipt = CrossingReceipt {
+        discriminator: DISCRIMINATOR_RECEIPT,
+        direction: DIR_SOLANA_TO_MACHINE,
+        nonce: message.nonce,
+        message_hash: message.hash(),
+        source_tx: message.source_tx,
+        amount: message.amount,
+        recipient: message.recipient,
+        slot: clock.slot,
+        timestamp: clock.unix_timestamp,
+    };
+    let mut data = receipt_account.try_borrow_mut_data()?;
+    let bytes = borsh::to_vec(&receipt).map_err(|_| ProgramError::AccountDataTooSmall)?;
     data[..bytes.len()].copy_from_slice(&bytes);
     drop(data);
 

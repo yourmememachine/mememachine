@@ -87,6 +87,24 @@ fn vault_pda(program_id: &Pubkey, mint: &Pubkey) -> (Pubkey, u8) {
 fn authority_pda(program_id: &Pubkey, mint: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SEED_AUTHORITY, mint.as_ref()], program_id)
 }
+fn reputation_pda(program_id: &Pubkey, creator: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_REPUTATION, creator.as_ref()], program_id)
+}
+
+fn load_reputation(account: &AccountInfo) -> Result<CreatorReputation, ProgramError> {
+    let data = account.try_borrow_data()?;
+    if data.is_empty() || data[0] != DISCRIMINATOR_REPUTATION {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    CreatorReputation::try_from_slice(&data).map_err(|_| ProgramError::InvalidAccountData)
+}
+
+fn save_reputation(account: &AccountInfo, reputation: &CreatorReputation) -> ProgramResult {
+    let mut data = account.try_borrow_mut_data()?;
+    let bytes = borsh::to_vec(reputation).map_err(|_| ProgramError::AccountDataTooSmall)?;
+    data[..bytes.len()].copy_from_slice(&bytes);
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // RegisterAndLock
@@ -107,6 +125,7 @@ fn process_register(
     let authority_account = next_account_info(iter)?;
     let token_program = next_account_info(iter)?;
     let system_program = next_account_info(iter)?;
+    let reputation_account = next_account_info(iter)?;
 
     if !creator.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
@@ -237,6 +256,45 @@ fn process_register(
         state: STATE_LOCKED,
     };
     save_record(record_account, &record)?;
+
+    // Reputation: create the creator's PDA on their first launch,
+    // load it on later ones, and count this registration. Runs
+    // after the record exists, so a rejected registration can
+    // never inflate the count (the transaction would roll back
+    // regardless — account writes are atomic with the rest).
+    let (rep_pda, rep_bump) = reputation_pda(program_id, creator.key);
+    if reputation_account.key != &rep_pda {
+        return Err(LaunchError::InvalidPda.into());
+    }
+    let mut reputation = if reputation_account.owner == program_id {
+        load_reputation(reputation_account)?
+    } else {
+        create_pda_account(
+            creator,
+            reputation_account,
+            system_program,
+            program_id,
+            CreatorReputation::LEN,
+            &[SEED_REPUTATION, creator.key.as_ref(), &[rep_bump]],
+        )?;
+        CreatorReputation {
+            discriminator: DISCRIMINATOR_REPUTATION,
+            creator: *creator.key,
+            launches_registered: 0,
+            locks_completed: 0,
+            first_launch_slot: clock.slot,
+            last_completed_slot: 0,
+        }
+    };
+    if reputation.creator != *creator.key {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    reputation.launches_registered = reputation
+        .launches_registered
+        .checked_add(1)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    save_reputation(reputation_account, &reputation)?;
+
     msg!(
         "LaunchGuard: registered mint {} — {} of {} locked until {}",
         record.mint,
@@ -300,6 +358,7 @@ fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
     let creator_token = next_account_info(iter)?;
     let authority_account = next_account_info(iter)?;
     let token_program = next_account_info(iter)?;
+    let reputation_account = next_account_info(iter)?;
 
     if !creator.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
@@ -350,6 +409,27 @@ fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
 
     record.state = STATE_RELEASED;
     save_record(record_account, &record)?;
+
+    // Reputation: this release was only reachable after the full
+    // lock period elapsed, so it counts as a completed lock. The
+    // PDA was created by this creator's registration and must
+    // exist; a missing or foreign account fails the release
+    // rather than silently skipping the record.
+    let (rep_pda, _) = reputation_pda(program_id, creator.key);
+    if reputation_account.key != &rep_pda || reputation_account.owner != program_id {
+        return Err(LaunchError::InvalidPda.into());
+    }
+    let mut reputation = load_reputation(reputation_account)?;
+    if reputation.creator != *creator.key {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    reputation.locks_completed = reputation
+        .locks_completed
+        .checked_add(1)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    reputation.last_completed_slot = clock.slot;
+    save_reputation(reputation_account, &reputation)?;
+
     msg!(
         "LaunchGuard: released {} of {} to creator",
         record.locked_amount,

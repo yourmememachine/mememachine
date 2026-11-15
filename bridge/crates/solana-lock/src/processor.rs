@@ -324,6 +324,7 @@ fn process_unlock(
     let token_program = next_account_info(&mut iter)?;
     let system_program = next_account_info(&mut iter)?;
     let instructions_sysvar = next_account_info(&mut iter)?;
+    let receipt_account = next_account_info(&mut iter)?;
 
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
@@ -377,12 +378,17 @@ fn process_unlock(
         clock.slot,
     )?;
     // Dynamic percentage layer: at most 1% of the vault's locked total
-    // per unlock, at most 5% per window. `total_locked` here is the
-    // pre-unlock total, which includes this amount.
-    check_dynamic_caps(
+    // per unlock, at most 5% per window — or the tightened limits
+    // (a quarter of those) while the post-unpause recovery window is
+    // running. `total_locked` here is the pre-unlock total, which
+    // includes this amount.
+    let (per_tx_bps, daily_bps) = config.dynamic_bps(clock.slot);
+    check_dynamic_caps_with_bps(
         message.amount,
         config.daily_unlocked.used,
         config.total_locked,
+        per_tx_bps,
+        daily_bps,
     )?;
 
     let transfer_ix = token_transfer(
@@ -427,6 +433,37 @@ fn process_unlock(
     data[..bytes.len()].copy_from_slice(&bytes);
     drop(data);
 
+    // Crossing receipt, the mirror of the Machine side's: permanent
+    // public proof this unlock completed, in the same transaction.
+    let (expected_receipt, receipt_bump) =
+        receipt_pda(program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
+    if *receipt_account.key != expected_receipt {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    create_pda_account(
+        payer,
+        receipt_account,
+        system_program,
+        program_id,
+        CrossingReceipt::LEN,
+        &[SEED_RECEIPT, &[DIR_MACHINE_TO_SOLANA], &message.nonce.to_le_bytes(), &[receipt_bump]],
+    )?;
+    let receipt = CrossingReceipt {
+        discriminator: DISCRIMINATOR_RECEIPT,
+        direction: DIR_MACHINE_TO_SOLANA,
+        nonce: message.nonce,
+        message_hash: message.hash(),
+        source_tx: message.source_tx,
+        amount: message.amount,
+        recipient: message.recipient,
+        slot: clock.slot,
+        timestamp: clock.unix_timestamp,
+    };
+    let mut data = receipt_account.try_borrow_mut_data()?;
+    let bytes = borsh::to_vec(&receipt).map_err(|_| ProgramError::AccountDataTooSmall)?;
+    data[..bytes.len()].copy_from_slice(&bytes);
+    drop(data);
+
     config.total_locked = config
         .total_locked
         .checked_sub(message.amount)
@@ -465,10 +502,19 @@ fn process_pause(program_id: &Pubkey, accounts: &[AccountInfo], pause: bool) -> 
         config.paused = true;
         msg!("Lock program paused");
     } else {
-        // Unpause is multisig-only (BRIDGE.md 4.3).
+        // Unpause is multisig-only (BRIDGE.md 4.3). Every unpause
+        // also starts the tightened-cap recovery window: whatever
+        // caused the pause, the bridge reopens at a quarter of its
+        // normal dynamic limits for one full cap window and then
+        // relaxes on its own — no second decision to forget.
         verify_admins(&signers, &config.admins.admins, config.admins.threshold)?;
         config.paused = false;
-        msg!("Lock program unpaused");
+        let now = Clock::get()?.slot;
+        config.tightened_until_slot = now + TIGHTENING_WINDOW_SLOTS;
+        msg!(
+            "Lock program unpaused; dynamic caps tightened until slot {}",
+            config.tightened_until_slot
+        );
     }
     save_config(config_account, &config)?;
     Ok(())

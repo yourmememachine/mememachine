@@ -656,7 +656,193 @@ async fn full_local_drill() {
     );
     println!("drill D ok: disagreement blocked quorum; nothing minted");
 
+    write_drill_result(
+        "full_local_drill",
+        &[
+            "crossings succeeded: 3 (deposit->mint x2, burn->unlock x1)".to_string(),
+            "crossings blocked as designed: 2 (mint while paused, relayer disagreement)".to_string(),
+            "crossings failed unexpectedly: 0".to_string(),
+            "final state: vault 6,950,000 locked == 6,950,000 wrapped outstanding".to_string(),
+        ],
+    );
+
     for d in [dir_a, dir_b, dir_c, dir_d] {
         let _ = std::fs::remove_dir_all(d);
     }
+}
+
+/// Record a drill outcome in bridge/drills/last-drill.md so the
+/// repo always shows the most recent drill's numbers (the ops
+/// metrics habit: slots/crossings are only claimed with a run
+/// behind them). Last writer wins; the header says which drill ran.
+fn write_drill_result(drill: &str, lines: &[String]) {
+    let unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut out = String::from("# Last local drill result\n\n");
+    out.push_str(
+        "Written by the drill test itself at the end of a passing run.\n\
+         Program-test localnet only — no live chain is involved.\n\n",
+    );
+    out.push_str(&format!("- drill: `{drill}`\n- unix time: {unix}\n"));
+    for line in lines {
+        out.push_str(&format!("- {line}\n"));
+    }
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../drills/last-drill.md");
+    let _ = std::fs::write(path, out);
+}
+
+/// One full Solana -> Machine crossing through the file-based
+/// attestation exchange, exactly as a relayer round would do it.
+async fn cross_to_machine(chains: &mut Chains, nonce: u64, amount: u64) {
+    let lock_pid = lock_program_id();
+    let machine_pid = machine_program_id();
+    let machine_payer = chains.machine.payer.pubkey();
+    deposit(chains, nonce, amount, chains.recipient.pubkey()).await;
+    let record = read_event(&mut chains.sol, &lock_pid, DIR_SOLANA_TO_MACHINE, nonce).await;
+    let event = ObservedEvent {
+        record,
+        sender: chains.user.pubkey(),
+        source_tx: [nonce as u8; 64],
+    };
+    let message = build_message(
+        Direction::SolanaToMachine,
+        &event,
+        chains.source_mint,
+        EXPIRY_WINDOW,
+    )
+    .unwrap();
+    let dir = drill_dir(&format!("vm{nonce}"));
+    attest(&dir, Direction::SolanaToMachine, &message, &chains.signers, &[0, 1, 2]);
+    let (collected, sigs) = chains
+        .collector
+        .collect(&dir, Direction::SolanaToMachine, nonce, DEST_SLOT)
+        .unwrap();
+    let mint_ixs = build_mint_instructions(
+        &machine_pid,
+        &collected,
+        sigs,
+        &chains.wrapped_mint,
+        &chains.recipient_token_account,
+        &machine_payer,
+    );
+    submit(&mut chains.machine, &mint_ixs).await.unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// One full Machine -> Solana crossing (burn -> attest -> unlock).
+async fn cross_to_solana(chains: &mut Chains, nonce: u64, amount: u64) {
+    let lock_pid = lock_program_id();
+    let machine_pid = machine_program_id();
+    let machine_payer = chains.machine.payer.pubkey();
+    let sol_payer = chains.sol.payer.pubkey();
+    let (machine_config, _) = config_pda(&machine_pid);
+    let (burn_record_pda, _) = nonce_pda(&machine_pid, DIR_MACHINE_TO_SOLANA, nonce);
+    let blockhash = chains.machine.banks_client.get_latest_blockhash().await.unwrap();
+    let burn_ix = Instruction::new_with_borsh(
+        machine_pid,
+        &MachineInstruction::Burn {
+            amount,
+            destination: chains.user.pubkey(),
+            nonce,
+        },
+        vec![
+            AccountMeta::new(machine_config, false),
+            AccountMeta::new(chains.recipient_token_account, false),
+            AccountMeta::new(chains.wrapped_mint, false),
+            AccountMeta::new(burn_record_pda, false),
+            AccountMeta::new_readonly(chains.recipient.pubkey(), true),
+            AccountMeta::new(machine_payer, true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[burn_ix],
+        Some(&machine_payer),
+        &[&chains.machine.payer, &chains.recipient],
+        blockhash,
+    );
+    chains.machine.banks_client.process_transaction(tx).await.unwrap();
+    let record = read_event(&mut chains.machine, &machine_pid, DIR_MACHINE_TO_SOLANA, nonce).await;
+    let event = ObservedEvent {
+        record,
+        sender: chains.recipient.pubkey(),
+        source_tx: [100 + nonce as u8; 64],
+    };
+    let message = build_message(
+        Direction::MachineToSolana,
+        &event,
+        chains.source_mint,
+        EXPIRY_WINDOW,
+    )
+    .unwrap();
+    let dir = drill_dir(&format!("vs{nonce}"));
+    attest(&dir, Direction::MachineToSolana, &message, &chains.signers, &[0, 1, 2]);
+    let (collected, sigs) = chains
+        .collector
+        .collect(&dir, Direction::MachineToSolana, nonce, DEST_SLOT)
+        .unwrap();
+    let unlock_ixs = build_unlock_instructions(
+        &lock_pid,
+        &collected,
+        sigs,
+        &chains.vault,
+        &chains.user_token_account,
+        &sol_payer,
+    );
+    submit(&mut chains.sol, &unlock_ixs).await.unwrap();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn volume_drill_many_crossings_reconcile() {
+    // The soak item's local slice: volume through the real programs
+    // and the real relayer path, ending in the reconciliation
+    // invariant (locked == wrapped outstanding). Unlocks are sized
+    // to respect the dynamic caps — 1% of the live locked total per
+    // transaction, 5% per window — which is why the return leg is
+    // smaller than the outbound leg in a single window.
+    let mut chains = setup_chains().await;
+    const DEPOSITS: u64 = 40;
+    const DEPOSIT_AMOUNT: u64 = 250_000;
+    const UNLOCKS: u64 = 5;
+    const UNLOCK_AMOUNT: u64 = 90_000;
+
+    for nonce in 1..=DEPOSITS {
+        cross_to_machine(&mut chains, nonce, DEPOSIT_AMOUNT).await;
+    }
+    let locked = DEPOSITS * DEPOSIT_AMOUNT;
+    assert_eq!(token_balance(&mut chains.sol, &chains.vault).await, locked);
+    assert_eq!(
+        token_balance(&mut chains.machine, &chains.recipient_token_account).await,
+        locked
+    );
+
+    for nonce in 1..=UNLOCKS {
+        cross_to_solana(&mut chains, nonce, UNLOCK_AMOUNT).await;
+    }
+    let returned = UNLOCKS * UNLOCK_AMOUNT;
+    let vault_final = token_balance(&mut chains.sol, &chains.vault).await;
+    let wrapped_final =
+        token_balance(&mut chains.machine, &chains.recipient_token_account).await;
+    // Reconciliation: every wrapped token is backed, 1:1, always.
+    assert_eq!(vault_final, locked - returned);
+    assert_eq!(wrapped_final, vault_final);
+    assert_eq!(
+        token_balance(&mut chains.sol, &chains.user_token_account).await,
+        20_000_000 - locked + returned
+    );
+    println!(
+        "volume drill ok: {DEPOSITS} crossings in, {UNLOCKS} back, reconciled at {vault_final}"
+    );
+    write_drill_result(
+        "volume_drill_many_crossings_reconcile",
+        &[
+            format!("crossings succeeded: {} ({} in, {} back)", DEPOSITS + UNLOCKS, DEPOSITS, UNLOCKS),
+            "crossings failed unexpectedly: 0".to_string(),
+            format!("final state: vault {vault_final} locked == {wrapped_final} wrapped outstanding"),
+        ],
+    );
 }

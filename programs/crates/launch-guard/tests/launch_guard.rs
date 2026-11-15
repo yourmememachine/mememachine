@@ -177,6 +177,7 @@ fn register_ix(
             AccountMeta::new_readonly(pda(&[SEED_AUTHORITY, mint.as_ref()]), false),
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_program::system_program::id(), false),
+            AccountMeta::new(pda(&[SEED_REPUTATION, creator.as_ref()]), false),
         ],
         data,
     }
@@ -192,6 +193,7 @@ fn release_ix(creator: &Pubkey, mint: &Pubkey, creator_token: &Pubkey) -> Instru
             AccountMeta::new(*creator_token, false),
             AccountMeta::new_readonly(pda(&[SEED_AUTHORITY, mint.as_ref()]), false),
             AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new(pda(&[SEED_REPUTATION, creator.as_ref()]), false),
         ],
         data: borsh::to_vec(&LaunchInstruction::Release {}).unwrap(),
     }
@@ -562,4 +564,173 @@ async fn register_rejected_at_9_99_percent_lock() {
     .await
     .unwrap_err();
     expect_custom(&err, LaunchError::LockTooSmall as u32);
+}
+
+#[tokio::test]
+async fn stranger_cannot_extend() {
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let stranger = Keypair::new();
+    let (mint, token) = make_mint(&mut ctx, &creator, true).await;
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, LOCK, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+    // Extending is creator-only, like releasing: a longer lock is
+    // the creator's commitment to change, not anyone else's.
+    let err = send(
+        &mut ctx,
+        &[extend_ix(&stranger.pubkey(), &mint, 100_000)],
+        &[&stranger],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::NotCreator as u32);
+}
+
+#[tokio::test]
+async fn registered_token_cannot_regain_authorities() {
+    // The property LaunchGuard exists for: once a mint's mint and
+    // freeze authorities are revoked (the only registrable state),
+    // there is no path back — not for the creator, not for anyone.
+    // SPL Token itself enforces this (a revoked authority is
+    // COption::None and can never sign again); this test pins that
+    // the registered state really is that irreversible state.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let attacker = Keypair::new();
+    let (mint, token) = make_mint(&mut ctx, &creator, true).await;
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, LOCK, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+
+    for authority_type in [AuthorityType::MintTokens, AuthorityType::FreezeAccount] {
+        let err = send(
+            &mut ctx,
+            &[set_authority(
+                &spl_token::id(),
+                &mint,
+                Some(&attacker.pubkey()),
+                authority_type,
+                &creator.pubkey(),
+                &[],
+            )
+            .unwrap()],
+            &[&creator],
+        )
+        .await
+        .unwrap_err();
+        // The exact token-program error is SPL's business; what
+        // matters is that the attempt fails.
+        let _ = err;
+        // Warp a slot so the next attempt is a distinct transaction.
+        let clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
+        ctx.warp_to_slot(clock.slot + 1).unwrap();
+    }
+
+    // And the mint is untouched: both authorities still revoked.
+    let a = ctx.banks_client.get_account(mint).await.unwrap().unwrap();
+    let mint_state = Mint::unpack(&a.data).unwrap();
+    assert_eq!(
+        mint_state.mint_authority,
+        solana_program::program_option::COption::None
+    );
+    assert_eq!(
+        mint_state.freeze_authority,
+        solana_program::program_option::COption::None
+    );
+}
+
+#[tokio::test]
+async fn creator_reputation_counts_registrations_and_completions() {
+    // The reputation PDA is the creator's public, on-chain track
+    // record: registrations increment one counter, releases after
+    // the full lock period increment the other. Nothing else moves
+    // them.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+
+    async fn read_reputation(
+        ctx: &mut ProgramTestContext,
+        creator: &Pubkey,
+    ) -> Option<CreatorReputation> {
+        let addr = pda(&[SEED_REPUTATION, creator.as_ref()]);
+        let acc = ctx.banks_client.get_account(addr).await.unwrap()?;
+        assert_eq!(acc.data.len(), CreatorReputation::LEN);
+        Some(CreatorReputation::try_from_slice(&acc.data).unwrap())
+    }
+
+    // No launches yet: no reputation account exists for anyone.
+    assert!(read_reputation(&mut ctx, &creator.pubkey()).await.is_none());
+    assert!(read_reputation(&mut ctx, &Pubkey::new_unique()).await.is_none());
+
+    // First launch creates the PDA with 1 registered, 0 completed.
+    let (mint_a, token_a) = make_mint(&mut ctx, &creator, true).await;
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint_a, &token_a, LOCK, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+    let rep = read_reputation(&mut ctx, &creator.pubkey()).await.unwrap();
+    assert_eq!(rep.discriminator, DISCRIMINATOR_REPUTATION);
+    assert_eq!(rep.creator, creator.pubkey());
+    assert_eq!(rep.launches_registered, 1);
+    assert_eq!(rep.locks_completed, 0);
+    assert!(rep.first_launch_slot > 0);
+    assert_eq!(rep.last_completed_slot, 0);
+
+    // A second launch by the same creator loads the same PDA and
+    // increments — it does not reset or duplicate the record.
+    let (mint_b, token_b) = make_mint(&mut ctx, &creator, true).await;
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint_b, &token_b, LOCK, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+    let rep = read_reputation(&mut ctx, &creator.pubkey()).await.unwrap();
+    assert_eq!(rep.launches_registered, 2);
+    assert_eq!(rep.locks_completed, 0);
+
+    // Extending a lock changes neither counter.
+    send(
+        &mut ctx,
+        &[extend_ix(&creator.pubkey(), &mint_a, 100_000)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+    let rep = read_reputation(&mut ctx, &creator.pubkey()).await.unwrap();
+    assert_eq!(rep.launches_registered, 2);
+    assert_eq!(rep.locks_completed, 0);
+
+    // Releasing launch A after its full period (including the
+    // extension) records exactly one completion.
+    let clock: Clock = ctx.banks_client.get_sysvar().await.unwrap();
+    ctx.warp_to_slot(clock.slot + MIN_LOCK_SLOTS + 100_000 + 100).unwrap();
+    send(
+        &mut ctx,
+        &[release_ix(&creator.pubkey(), &mint_a, &token_a)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+    let rep = read_reputation(&mut ctx, &creator.pubkey()).await.unwrap();
+    assert_eq!(rep.launches_registered, 2);
+    assert_eq!(rep.locks_completed, 1);
+    assert!(rep.last_completed_slot > 0);
+
+    // Launch B is still locked and uncounted as completed; a
+    // stranger still has no reputation account at all.
+    assert!(read_reputation(&mut ctx, &Pubkey::new_unique()).await.is_none());
 }

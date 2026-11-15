@@ -79,6 +79,16 @@ pub const BPS_DENOMINATOR: u64 = 10_000;
 pub const DYNAMIC_PER_TX_BPS: u64 = 100;
 /// Dynamic daily cap: 5% of the reference supply (BRIDGE.md 4.4).
 pub const DYNAMIC_DAILY_BPS: u64 = 500;
+/// Tightened dynamic caps (BRIDGE.md 4.4): after any unpause, the
+/// bridge reopens at a quarter of the normal dynamic limits for one
+/// cap window, then relaxes automatically. An anomaly that was
+/// serious enough to pause the bridge should not be followed by a
+/// full-speed reopening.
+pub const TIGHTENED_PER_TX_BPS: u64 = 25;
+pub const TIGHTENED_DAILY_BPS: u64 = 125;
+/// How long the tightened caps apply after an unpause: one full
+/// dynamic-cap window.
+pub const TIGHTENING_WINDOW_SLOTS: u64 = SLOTS_PER_DAY;
 
 /// Cross-chain direction, used in nonce PDA seeds so the two directions
 /// can never share a nonce registry.
@@ -89,11 +99,13 @@ pub const DIR_MACHINE_TO_SOLANA: u8 = 1;
 pub const SEED_CONFIG: &[u8] = b"config";
 pub const SEED_NONCE: &[u8] = b"nonce";
 pub const SEED_AUTHORITY: &[u8] = b"bridge-authority";
+pub const SEED_RECEIPT: &[u8] = b"receipt";
 
 /// Account discriminators (first byte of every account's data).
 pub const DISCRIMINATOR_CONFIG: u8 = 1;
 pub const DISCRIMINATOR_NONCE_RECORD: u8 = 2;
 pub const DISCRIMINATOR_EVENT_RECORD: u8 = 3;
+pub const DISCRIMINATOR_RECEIPT: u8 = 4;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -573,13 +585,32 @@ pub fn check_dynamic_caps(
     window_total_after: u64,
     reference_supply: u64,
 ) -> Result<(), BridgeError> {
+    check_dynamic_caps_with_bps(
+        amount,
+        window_total_after,
+        reference_supply,
+        DYNAMIC_PER_TX_BPS,
+        DYNAMIC_DAILY_BPS,
+    )
+}
+
+/// The dynamic-cap check with explicit limits, so the unlock path
+/// can pass the tightened post-unpause limits (see
+/// `LockConfig::dynamic_bps`) without a second implementation.
+pub fn check_dynamic_caps_with_bps(
+    amount: u64,
+    window_total_after: u64,
+    reference_supply: u64,
+    per_tx_bps: u64,
+    daily_bps: u64,
+) -> Result<(), BridgeError> {
     if (amount as u128) * (BPS_DENOMINATOR as u128)
-        > (reference_supply as u128) * (DYNAMIC_PER_TX_BPS as u128)
+        > (reference_supply as u128) * (per_tx_bps as u128)
     {
         return Err(BridgeError::AmountExceedsDynamicPerTxCap);
     }
     if (window_total_after as u128) * (BPS_DENOMINATOR as u128)
-        > (reference_supply as u128) * (DYNAMIC_DAILY_BPS as u128)
+        > (reference_supply as u128) * (daily_bps as u128)
     {
         return Err(BridgeError::AmountExceedsDynamicDailyCap);
     }
@@ -743,12 +774,15 @@ pub struct LockConfig {
     pub vault_ceiling: u64,
     pub total_locked: u64,
     pub daily_unlocked: DailyUsage,
+    /// Slot until which the tightened dynamic caps apply (set by
+    /// every unpause; 0 = not tightened). See `dynamic_bps`.
+    pub tightened_until_slot: u64,
     pub bump: u8,
 }
 
 impl LockConfig {
     pub const LEN: usize =
-        1 + 1 + (32 * 5 + 1) + (32 * 3 + 1) + 32 + 32 + 1 + 8 + 8 + 8 + 8 + (8 + 8) + 1;
+        1 + 1 + (32 * 5 + 1) + (32 * 3 + 1) + 32 + 32 + 1 + 8 + 8 + 8 + 8 + (8 + 8) + 8 + 1;
 
     pub fn new(
         relayers: [Pubkey; MAX_RELAYERS],
@@ -780,6 +814,7 @@ impl LockConfig {
             vault_ceiling,
             total_locked: 0,
             daily_unlocked: DailyUsage::default(),
+            tightened_until_slot: 0,
             bump,
         }
     }
@@ -789,6 +824,18 @@ impl LockConfig {
             return Err(BridgeError::BridgePaused);
         }
         Ok(())
+    }
+
+    /// The dynamic-cap limits in force at `slot`: the tightened
+    /// pair while the post-unpause recovery window is running, the
+    /// normal pair afterwards. Pure function of the stored deadline,
+    /// so the relaxation needs no transaction and cannot be skipped.
+    pub fn dynamic_bps(&self, slot: u64) -> (u64, u64) {
+        if slot < self.tightened_until_slot {
+            (TIGHTENED_PER_TX_BPS, TIGHTENED_DAILY_BPS)
+        } else {
+            (DYNAMIC_PER_TX_BPS, DYNAMIC_DAILY_BPS)
+        }
     }
 }
 
@@ -823,6 +870,40 @@ impl EventRecord {
     pub const LEN: usize = 1 + 8 + 8 + 32 + 8;
 }
 
+/// A permanent, non-transferable proof that one crossing completed,
+/// written by the destination-side program (MintWrapped on Machine,
+/// Unlock on Solana) as part of the same transaction that moves the
+/// value. The PDA is derived from (direction, nonce), so anyone can
+/// locate the receipt for any crossing and verify it against the
+/// message: if this account exists with these fields, the crossing
+/// happened. The destination transaction's own signature cannot be
+/// stored — a program cannot observe it — so the binding to the
+/// destination transaction is made off-chain by indexers, which can
+/// resolve this PDA's creating transaction. Everything the program
+/// itself can prove is here.
+#[derive(Debug, Clone, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct CrossingReceipt {
+    pub discriminator: u8,
+    /// Direction of the crossing (DIR_* constants).
+    pub direction: u8,
+    pub nonce: u64,
+    /// Hash of the canonical BridgeMessage that was attested.
+    pub message_hash: [u8; 32],
+    /// Source-chain transaction identifier carried by the message.
+    pub source_tx: [u8; 64],
+    pub amount: u64,
+    /// Who received the minted / unlocked tokens.
+    pub recipient: Pubkey,
+    /// Destination-chain slot at completion.
+    pub slot: u64,
+    /// Destination-chain unix timestamp at completion.
+    pub timestamp: i64,
+}
+
+impl CrossingReceipt {
+    pub const LEN: usize = 1 + 1 + 8 + 32 + 64 + 8 + 32 + 8 + 8;
+}
+
 // ---------------------------------------------------------------------------
 // PDA helpers
 // ---------------------------------------------------------------------------
@@ -833,6 +914,10 @@ pub fn config_pda(program_id: &Pubkey) -> (Pubkey, u8) {
 
 pub fn nonce_pda(program_id: &Pubkey, direction: u8, nonce: u64) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SEED_NONCE, &[direction], &nonce.to_le_bytes()], program_id)
+}
+
+pub fn receipt_pda(program_id: &Pubkey, direction: u8, nonce: u64) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_RECEIPT, &[direction], &nonce.to_le_bytes()], program_id)
 }
 
 /// Replay-protection gate shared by every value-moving path (deposit,
@@ -1130,6 +1215,31 @@ mod tests {
     }
 
     #[test]
+    fn max_amounts_and_overflow_are_rejected() {
+        let usage = DailyUsage::default();
+        // u64::MAX against ordinary caps dies at the per-tx layer.
+        assert_eq!(
+            usage.check_and_record(u64::MAX, 10_000, 1_000_000, 200),
+            Err(BridgeError::AmountExceedsPerTxCap)
+        );
+        // Even with maximal caps, the window accumulator must not
+        // wrap: MAX - 10 already used, +11 overflows, +10 lands
+        // exactly on u64::MAX and is allowed by a u64::MAX cap.
+        let usage = DailyUsage {
+            window_start: 7,
+            used: u64::MAX - 10,
+        };
+        assert_eq!(
+            usage.check_and_record(11, u64::MAX, u64::MAX, 7 * SLOTS_PER_DAY),
+            Err(BridgeError::ArithmeticOverflow)
+        );
+        let updated = usage
+            .check_and_record(10, u64::MAX, u64::MAX, 7 * SLOTS_PER_DAY)
+            .unwrap();
+        assert_eq!(updated.used, u64::MAX);
+    }
+
+    #[test]
     fn dynamic_percentage_caps_bind() {
         // Reference supply 10,000: dynamic per-tx cap is 1% = 100,
         // dynamic daily cap is 5% = 500.
@@ -1148,6 +1258,76 @@ mod tests {
         );
         // Exactly 5% for the window passes.
         assert!(check_dynamic_caps(100, 500, 10_000).is_ok());
+    }
+
+    #[test]
+    fn receipt_serializes_to_declared_len() {
+        let receipt = CrossingReceipt {
+            discriminator: DISCRIMINATOR_RECEIPT,
+            direction: DIR_SOLANA_TO_MACHINE,
+            nonce: 42,
+            message_hash: [9u8; 32],
+            source_tx: [7u8; 64],
+            amount: 1_000,
+            recipient: Pubkey::new_from_array([5u8; 32]),
+            slot: 123_456,
+            timestamp: 1_700_000_000,
+        };
+        let bytes = borsh::to_vec(&receipt).unwrap();
+        assert_eq!(bytes.len(), CrossingReceipt::LEN);
+        let back = CrossingReceipt::try_from_slice(&bytes).unwrap();
+        assert_eq!(receipt, back);
+    }
+
+    #[test]
+    fn tightened_dynamic_caps_bind_at_a_quarter() {
+        // Reference supply 10,000: tightened per-tx is 0.25% = 25,
+        // tightened window total is 1.25% = 125.
+        let (ptx, daily) = (TIGHTENED_PER_TX_BPS, TIGHTENED_DAILY_BPS);
+        assert!(check_dynamic_caps_with_bps(25, 25, 10_000, ptx, daily).is_ok());
+        assert_eq!(
+            check_dynamic_caps_with_bps(26, 26, 10_000, ptx, daily),
+            Err(BridgeError::AmountExceedsDynamicPerTxCap)
+        );
+        assert_eq!(
+            check_dynamic_caps_with_bps(1, 126, 10_000, ptx, daily),
+            Err(BridgeError::AmountExceedsDynamicDailyCap)
+        );
+        // The same amounts pass under the normal limits — the
+        // tightening is a real restriction, not a relabeling.
+        assert!(check_dynamic_caps(26, 126, 10_000).is_ok());
+    }
+
+    #[test]
+    fn lock_config_tightening_window_selects_bps() {
+        let (_keys, relayers) = make_relayers();
+        let admins = [Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique()];
+        let mut cfg = LockConfig::new(
+            relayers,
+            admins,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            255,
+            1000,
+            10_000,
+            1_000_000,
+            254,
+        );
+        // The config still serializes to exactly its declared LEN
+        // with the new field included.
+        let bytes = borsh::to_vec(&cfg).unwrap();
+        assert_eq!(bytes.len(), LockConfig::LEN);
+        // Not tightened: normal limits at every slot.
+        assert_eq!(cfg.dynamic_bps(0), (DYNAMIC_PER_TX_BPS, DYNAMIC_DAILY_BPS));
+        assert_eq!(
+            cfg.dynamic_bps(u64::MAX),
+            (DYNAMIC_PER_TX_BPS, DYNAMIC_DAILY_BPS)
+        );
+        // Tightened until slot 500: tightened limits before it,
+        // normal limits from it on — relaxation is automatic.
+        cfg.tightened_until_slot = 500;
+        assert_eq!(cfg.dynamic_bps(499), (TIGHTENED_PER_TX_BPS, TIGHTENED_DAILY_BPS));
+        assert_eq!(cfg.dynamic_bps(500), (DYNAMIC_PER_TX_BPS, DYNAMIC_DAILY_BPS));
     }
 
     #[test]
@@ -1329,8 +1509,11 @@ mod sysvar_parser_tests {
     }
 
     fn verify_with_sysvar(data: Vec<u8>) -> Result<(), BridgeError> {
+        verify_msg_with_sysvar(&test_message(), data)
+    }
+
+    fn verify_msg_with_sysvar(message: &BridgeMessage, data: Vec<u8>) -> Result<(), BridgeError> {
         let pubs = relayer_pubs();
-        let message = test_message();
         let key = solana_program::sysvar::instructions::ID;
         let owner = solana_program::sysvar::ID;
         let mut lamports = 0u64;
@@ -1345,7 +1528,7 @@ mod sysvar_parser_tests {
             executable: false,
             rent_epoch: 0,
         };
-        verify_precompile_attestation(&message, &pubs, 3, &account)
+        verify_precompile_attestation(message, &pubs, 3, &account)
     }
 
     #[test]
@@ -1524,6 +1707,78 @@ mod sysvar_parser_tests {
         d[0] = 9;
         let data = sysvar_bytes(&[(ed, d)], 1);
         assert_eq!(verify_with_sysvar(data), Ok(()));
+    }
+
+    #[test]
+    fn hash_binding_every_message_field_is_covered() {
+        // The attestation binds to the message hash, and the hash
+        // binds to every field of the canonical message. Mutating
+        // ANY single field must change the hash, and a mutated
+        // message must not verify against attestations made over
+        // the original message — this is what stops a relayer (or
+        // anyone) from reusing a valid attestation for a different
+        // amount, recipient, nonce, or chain.
+        let original = test_message();
+        let hash = original.hash();
+        let sysvar = sysvar_bytes(
+            &[(
+                solana_program::ed25519_program::ID,
+                ed25519_data(&hash, &[0, 1, 2]),
+            )],
+            1,
+        );
+        assert_eq!(verify_msg_with_sysvar(&original, sysvar.clone()), Ok(()));
+        let mutations: Vec<(&str, BridgeMessage)> = {
+            let mut v = Vec::new();
+            let mut m = original.clone();
+            m.version += 1;
+            v.push(("version", m));
+            let mut m = original.clone();
+            m.source_chain = CHAIN_MACHINE;
+            v.push(("source_chain", m));
+            let mut m = original.clone();
+            m.dest_chain = CHAIN_SOLANA;
+            v.push(("dest_chain", m));
+            let mut m = original.clone();
+            m.nonce += 1;
+            v.push(("nonce", m));
+            let mut m = original.clone();
+            m.source_mint = Pubkey::new_from_array([1u8; 32]);
+            v.push(("source_mint", m));
+            let mut m = original.clone();
+            m.sender = Pubkey::new_from_array([2u8; 32]);
+            v.push(("sender", m));
+            let mut m = original.clone();
+            m.recipient = Pubkey::new_from_array([3u8; 32]);
+            v.push(("recipient", m));
+            let mut m = original.clone();
+            m.amount += 1;
+            v.push(("amount", m));
+            let mut m = original.clone();
+            m.source_tx[0] ^= 1;
+            v.push(("source_tx", m));
+            let mut m = original.clone();
+            m.source_slot += 1;
+            v.push(("source_slot", m));
+            let mut m = original.clone();
+            m.expiry_slot += 1;
+            v.push(("expiry_slot", m));
+            v
+        };
+        // Every field of BridgeMessage is mutated exactly once.
+        assert_eq!(mutations.len(), 11);
+        for (field, mutated) in mutations {
+            assert_ne!(
+                mutated.hash(),
+                hash,
+                "field {field} must feed the message hash"
+            );
+            assert_eq!(
+                verify_msg_with_sysvar(&mutated, sysvar.clone()),
+                Err(BridgeError::MissingAttestation),
+                "attestation over the original message must not verify a message with a changed {field}"
+            );
+        }
     }
 
     #[test]

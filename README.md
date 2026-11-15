@@ -149,4 +149,4 @@ not a claim.
 
 ## Bridge
 
-Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 55 program tests passing, plus the off-chain relayer in `bridge/crates/relayer/` (23 tests passing). Local only, not deployed, not audited, nothing has crossed.
+Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 69 program tests passing, plus the off-chain relayer in `bridge/crates/relayer/` (24 tests passing). Local only, not deployed, not audited, nothing has crossed.

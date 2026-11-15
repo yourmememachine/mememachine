@@ -70,7 +70,7 @@ relayer exists (`bridge/crates/relayer/`) but has never run live;
 no asset has crossed, nothing here holds real funds.
 
 **Proven.** Built and tested locally only. Re-verified 2026-11-15:
-`cargo test --release` in `bridge/` — **84 passed, 0 failed**
+`cargo test --release` in `bridge/` — **93 passed, 0 failed**
 (22 bridge-common unit, 19 machine-bridge integration, 14
 solana-lock integration, 23 relayer including the full end-to-end
 drill). Full output in `bridge/VERIFY.md`.
@@ -179,7 +179,7 @@ What does **not** connect today:
   live data is Solana mainnet, and the chain they belong to is a
   local testnet.
 - Saying "the bridge is built" is true of the **programs and their
-  tests** (51/51 locally, plus 23/23 relayer). It is not a claim that bridging works —
+  tests** (69/69 locally, plus 24/24 relayer). It is not a claim that bridging works —
   nothing is deployed, nothing has crossed, and no relayer exists.
 - Saying "Machine is multi-chain ready" is not true. The registry
   **lists** Machine as a network; listing is a configuration entry
