@@ -91,11 +91,18 @@ test pause_blocks_deposit_and_unlock ... ok
 
 ## What was NOT verified
 
-- **No SBF build.** `cargo build --release` produces host libraries.
-  The deployable `.so` files need `cargo build-sbf` (the toolchain is
-  present in the Agave release directory, but the build was not run —
-  deployment is out of scope until the BRIDGE.md section 5 prerequisites
-  exist).
+- **SBF build: done 2026-11-14** (after the original verification).
+  Both programs compile to deployable sBPF binaries with the Agave
+  2.3.13 toolchain: `solana_lock.so` sha256
+  `a229cb6ff0d3b7992a576891be375429474167c8d11ccca9b17b5ae8ad554090`,
+  `machine_bridge.so` sha256
+  `672b42a8ca9562ecd6c535833b4a65143f6485f25c12f9fb6dd5e8b417402095`.
+  The build needs a program-only lockfile (the platform-tools cargo
+  1.84 cannot parse the edition2024 crates in the unified workspace
+  lock) — full method, pins and caveats in
+  `bridge/deploy/SBF-BUILD-NOTES.md`, lockfile saved as
+  `bridge/deploy/sbf-Cargo.lock`. The binaries are not deployed
+  anywhere; deployment remains gated on BRIDGE.md section 5.
 - **No deployment.** Neither program is deployed anywhere; no relayer
   exists; no asset has crossed.
 - **No audit.** See README.md honest limits.
@@ -145,7 +152,8 @@ above.
 ### What was NOT verified (relayer)
 - **No live run.** No relayer has watched a real deposit or burn:
   there is no deployed bridge and no public Machine RPC yet.
-- **No SBF build** (unchanged from above).
+- **SBF build** — done for the programs 2026-11-14, see above; the
+  relayer is an off-chain binary and has no SBF target.
 - **No deployment, no audit** (unchanged from above).
 Full bridge workspace, same day:
 

@@ -40,17 +40,22 @@ cd bridge && cargo test --release # bridge workspace: programs + relayer
 Expected results are recorded in `bridge/VERIFY.md` for the
 programs; the relayer's results join it after its first full run.
 Known build caveat: `cargo build` produces host libraries; the
-deployable SBF artifacts come from `bridge/deploy/build-sbf.sh`,
-which was **not** run for the original programs verification — the
-SBF build, and ed25519-dalek's SBF compatibility, are explicit audit
-check items, not assumed facts.
+deployable SBF artifacts come from `cargo build-sbf`. The SBF build
+was run on 2026-11-14 and both programs compiled (hashes in
+`bridge/VERIFY.md`) — against a program-only lockfile, because the
+platform-tools cargo cannot parse the edition2024 crates in the
+unified workspace lock. Method, dependency pins and caveats:
+`bridge/deploy/SBF-BUILD-NOTES.md`, lockfile at
+`bridge/deploy/sbf-Cargo.lock`. Reproducing the build from that
+lockfile and confirming ed25519-dalek's behavior in the SBF artifacts
+remain explicit audit check items, not assumed facts.
 
 ## Known limitations (stated up front, from the project's own docs)
 - Single-validator localnet today; transfers unverified on the
   current VM class (UDP blocked, fd limit) — LAUNCH_CHECKLIST.md
   items 17–18.
-- Bridge programs are local-only: not deployed, no SBF build
-  verified, no asset has crossed.
+- Bridge programs are local-only: not deployed, no asset has
+  crossed. SBF build verified locally 2026-11-14 (see above).
 - Attestation verification uses ed25519-dalek in-program rather
   than the ed25519 precompile + instructions sysvar.
 - Caps are absolute values set at initialization, not percentages
