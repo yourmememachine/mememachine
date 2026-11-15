@@ -102,8 +102,19 @@ starts from what is already known:
   style only, in code paths covered by the 56 passing tests;
   accepted as-is rather than refactoring tested code for lint
   cosmetics, and flagged here for the auditor.
-- **Sec3 X-Ray free tier**: to be run against the programs as the
-  Phase 0 self-review step (STAGED-LAUNCH.md).
+- **Sec3 X-Ray**: attempted 2026-11-15 — there is no free tier.
+  A Sec3 Pro account's plan page lists only paid plans (Basic
+  $99/mo and up) and the scanner is paywalled, so no scan was run;
+  the project does not pay for tooling pre-audit.
+- **Soteria** (Sec3's original scanner, free, run locally
+  2026-11-15): the tool itself works — verified against a bundled
+  example program, where it correctly flagged a missing signer
+  check — but it cannot analyze this codebase. Its frozen 2022
+  toolchain (rustc/cargo 1.56, Solana 1.9.5-era) cannot parse
+  Cargo.lock v4 or modern crate manifests, and solana-program
+  2.3.0 requires rustc ≥ 1.79. No release since Nov 2022. Dead
+  end for Agave 2.3 code; the free pre-audit pass is the cargo
+  audit + clippy + cargo-fuzz work above.
 
 ## Known limitations (stated up front, from the project's own docs)
 - Single-validator localnet today; transfers unverified on the
