@@ -135,9 +135,11 @@ When those exist, the deploy path is:
 - **No upgrade path in the programs.** Program upgrades go through a
   multisig with a timelock (BRIDGE.md 4.2); the upgrade authority is a
   deployment concern, not program code.
-- **Caps are absolute, not percentage-of-vault.** The design's launch
-  values are percentages; the programs enforce the absolute numbers set
-  at initialization. A percentage-of-vault cap would need the vault
-  balance read at mint time and is a possible later change.
-- **Daily-cap window uses the Clock sysvar's unix timestamp.** If the
-  chain's clock is ever wrong, the window boundary moves with it.
+- **Caps: absolute plus dynamic.** Both programs enforce absolute
+  per-tx/daily caps set at initialization; unlocks additionally enforce
+  dynamic caps of 1% of the vault's locked total per transaction and
+  5% per window (BRIDGE.md §4.4). The mint side has no dynamic layer —
+  the wrapped supply is created by the mints themselves, so a
+  percentage rule has no independent reference there.
+- **Daily-cap window is slot-based** (216,000 slots ≈ 24h), not
+  wall-clock — it cannot be skewed by validator timestamp drift.

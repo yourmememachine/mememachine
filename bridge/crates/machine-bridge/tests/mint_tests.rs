@@ -680,3 +680,147 @@ async fn compute_units_mint_wrapped() {
     println!("CU MintWrapped (3-of-5, incl. ed25519 precompile): {cu}");
     assert!(cu < 200_000, "MintWrapped CU unexpectedly high: {cu}");
 }
+
+async fn send_mint_to(
+    env: &mut Env,
+    message: BridgeMessage,
+    signatures: Vec<RelayerSignature>,
+    destination: Pubkey,
+) -> Result<(), solana_program_test::BanksClientError> {
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (nonce_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, message.nonce);
+    let (authority_pda, _) = authority_pda(&program_id);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ed25519_ix = build_ed25519_instruction(&message.hash(), &signatures);
+    let ix = Instruction::new_with_borsh(
+        program_id,
+        &MachineInstruction::MintWrapped { message },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(nonce_pda, false),
+            AccountMeta::new(env.wrapped_mint, false),
+            AccountMeta::new(destination, false),
+            AccountMeta::new_readonly(authority_pda, false),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer],
+        blockhash,
+    );
+    env.context.banks_client.process_transaction(tx).await
+}
+
+#[tokio::test]
+async fn mint_to_wrong_owner_account_fails_and_nonce_survives() {
+    // The relayer supplies the destination token account. If it is not
+    // owned by the message recipient, the mint must fail on-chain —
+    // and the failure must not consume the nonce, so the crossing can
+    // be retried with the correct account.
+    let mut env = setup(100_000, 500_000).await;
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let payer = env.context.payer.insecure_clone();
+    let stranger = Keypair::new();
+    let wrong_account = create_token_account(
+        &mut env.context.banks_client,
+        &payer,
+        &blockhash,
+        &env.wrapped_mint,
+        &stranger.pubkey(),
+    )
+    .await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_mint_to(&mut env, msg.clone(), sigs.clone(), wrong_account).await;
+    assert_custom_error(result, BridgeError::Unauthorized);
+    // Retry with the correct destination account: succeeds.
+    send_mint(&mut env, msg, sigs).await.unwrap();
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.recipient_token_account).await,
+        50_000
+    );
+}
+
+#[tokio::test]
+async fn mint_to_wrong_mint_account_fails() {
+    // Destination account owned by the recipient but for a different
+    // mint: also rejected on-chain.
+    let mut env = setup(100_000, 500_000).await;
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let payer = env.context.payer.insecure_clone();
+    let other_mint = create_mint(
+        &mut env.context.banks_client,
+        &payer,
+        &blockhash,
+        &payer.pubkey(),
+        None,
+        6,
+    )
+    .await;
+    let wrong_account = create_token_account(
+        &mut env.context.banks_client,
+        &payer,
+        &blockhash,
+        &other_mint,
+        &env.recipient.pubkey(),
+    )
+    .await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_mint_to(&mut env, msg, sigs, wrong_account).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}
+
+#[tokio::test]
+async fn compute_units_burn() {
+    // Measurement test: prints compute units for a Burn, for the
+    // record in bridge/VERIFY.md.
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_mint(&mut env, msg, sigs).await.unwrap();
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (record_pda, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, 1);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let burn_ix = Instruction::new_with_borsh(
+        program_id,
+        &MachineInstruction::Burn {
+            amount: 10_000,
+            destination: Pubkey::new_unique(),
+            nonce: 1,
+        },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(env.recipient_token_account, false),
+            AccountMeta::new(env.wrapped_mint, false),
+            AccountMeta::new(record_pda, false),
+            AccountMeta::new_readonly(env.recipient.pubkey(), true),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[burn_ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer, &env.recipient],
+        blockhash,
+    );
+    let result = env
+        .context
+        .banks_client
+        .process_transaction_with_metadata(tx)
+        .await
+        .unwrap();
+    result.result.unwrap();
+    let cu = result.metadata.unwrap().compute_units_consumed;
+    println!("CU Burn: {cu}");
+    assert!(cu < 200_000, "Burn CU unexpectedly high: {cu}");
+}

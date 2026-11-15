@@ -87,8 +87,16 @@ attestation rejected).
   interface (`AttestationFile`) is the seam where it plugs in.
 - **One destination token account per submission** is supplied by
   the operator. Deriving/creating recipients' associated token
-  accounts automatically is future work, and must be reviewed —
-  sending a mint to the wrong account is a user-visible failure.
+  accounts automatically is future work, and must be reviewed.
+  The failure mode for a wrong account is safe and explicit: the
+  bridge program checks on-chain that the destination account is
+  owned by the message recipient and holds the wrapped mint, so a
+  wrong-owner account fails with `Unauthorized` and a wrong-mint
+  account with `InvalidAccountData`; the transaction fails, no
+  funds move, and the nonce is not consumed, so the crossing can
+  be retried with the correct account. Both cases are covered by
+  program tests (`mint_to_wrong_owner_account_fails_and_nonce_survives`,
+  `mint_to_wrong_mint_account_fails`).
 - **No live run has happened.** No relayer has watched a real
   deposit, because there is no deployed bridge and no public
   Machine RPC yet. The first live exercise is the worthless-amount

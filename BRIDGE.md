@@ -1,6 +1,6 @@
 # Machine Bridge — Design Document
 
-**Status: programs built and tested locally (see `bridge/` — `cargo test --release`: 34 passed, 0 failed); NOT deployed, NOT audited. Nothing has been bridged, and no asset may cross until the prerequisites in §5 are met.**
+**Status: programs built and tested locally (see `bridge/` — bridge workspace `cargo test --release`: 69 passed, 0 failed, including the relayer's 22; LaunchGuard 8 passed in `programs/`); NOT deployed, NOT audited. Nothing has been bridged, and no asset may cross until the prerequisites in §5 are met.**
 
 - **Chains:** Solana mainnet ↔ Machine
 - **Machine identity:** Solana fork (Agave 2.3.13), custom genesis `32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb`, native gas token **$MACHINE**, fixed supply 1,000,000,000, no inflation.
@@ -135,6 +135,7 @@ Relayers are off-chain processes that watch one chain, verify finality, sign att
 
 ### 3.3 Later phases
 
+- **Relayer transport (production requirement):** phase 1 exchanges signed attestation files through a shared directory — acceptable for local work and testnet drills, where the collector re-verifies every signature and any disagreement blocks quorum. Before any real value moves, the transport must become an authenticated channel (or the file exchange must gain equivalent authentication, validation, and monitoring). This is Phase-2 production work and part of the §5 gate in spirit: an unauthenticated transport is not a production transport.
 - **Phase 3+:** move attestation toward the Machine validator set itself — validators sign attestations as part of their duties, with the independent relayers kept as a second quorum. This removes the separate relayer trust assumption but only after the validator set is larger than 3 and stake is meaningfully distributed.
 - **Slashing / removal:** a relayer that signs two conflicting messages for the same nonce is provably faulty and is removed from the set by multisig. Bonded stake for relayers is a later-phase addition, not a phase-1 requirement.
 

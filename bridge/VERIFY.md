@@ -235,3 +235,20 @@ the scratch tree's lockfile was verified byte-identical to the
 saved `bridge/deploy/sbf-Cargo.lock` (pins: blake3 1.5.5, zeroize
 1.8.1, base64ct 1.6.0, indexmap 2.13.1, proc-macro-crate 3.3.0).
 Still not deployed anywhere.
+
+### Addendum — same evening, follow-up review items
+
+- **Burn CU measured:** full Burn transaction reports **409 CU**
+  under the same program-test native execution (test
+  `compute_units_burn`) — the mint/unlock/burn figures are now all
+  recorded above; SBF-execution measurement remains a testnet-host
+  task.
+- **Wrong-destination-account tests** (machine-bridge suite now 17):
+  `mint_to_wrong_owner_account_fails_and_nonce_survives` and
+  `mint_to_wrong_mint_account_fails` prove the on-chain checks the
+  relayer's operator-supplied destination account relies on.
+- **Bridge workspace total is now 69 passed, 0 failed** (17
+  bridge-common + 17 machine-bridge + 13 solana-lock + 22 relayer).
+- Top-level docs (BRIDGE.md status line, README.md, ECOSYSTEM.md,
+  LAUNCH_CHECKLIST.md, STATUS.md) were synced to the current counts
+  and the precompile verification path.
