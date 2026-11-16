@@ -7,6 +7,16 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-16 — `e14c539`** Relayer watcher trust audit (Coreum
+  lesson, Aug 2026): the watcher's sender extraction only scanned
+  top-level instructions, but the deposit's token transfer is a CPI
+  of the Deposit instruction — on a real deposit transaction it
+  found no transfer and refused to sign, and a batched transaction
+  with an unrelated top-level transfer would have yielded the wrong
+  sender. The watcher now verifies the source transfer behind each
+  event (into the vault for a deposit, burning the wrapped mint
+  for a burn, exactly the record's amount) before signing, and
+  fails closed otherwise. Off-chain only; no program change.
 - **2026-11-15 — `8369f99`** Three features, each changing the
   audit surface and recorded here per this file's rule: (1)
   **crossing receipts** — MintWrapped and Unlock now create a

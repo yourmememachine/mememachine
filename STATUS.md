@@ -2,8 +2,8 @@
 
 Verified 2026-11-16 ~00:25 Vancouver against the running local validator and
 the files in this repo. Last full verification (`make verify`:
-bridge workspace 93 passed, LaunchGuard 23 passed, fork suite
-23 OK) run on 2026-11-16 against commit `a6eefcc`. Nothing here is claimed without a run, a file,
+bridge workspace 99 passed, LaunchGuard 23 passed, fork suite
+23 OK) run on 2026-11-16 against commit `e14c539`. Nothing here is claimed without a run, a file,
 or a command behind it. "PROVEN" means it exists and was verified.
 "NEXT" means it is not done yet, with the plain blocker stated.
 

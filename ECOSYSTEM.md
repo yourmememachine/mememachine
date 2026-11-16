@@ -179,7 +179,7 @@ What does **not** connect today:
   live data is Solana mainnet, and the chain they belong to is a
   local testnet.
 - Saying "the bridge is built" is true of the **programs and their
-  tests** (69/69 locally, plus 24/24 relayer). It is not a claim that bridging works —
+  tests** (69/69 locally, plus 30/30 relayer). It is not a claim that bridging works —
   nothing is deployed, nothing has crossed, and no relayer exists.
 - Saying "Machine is multi-chain ready" is not true. The registry
   **lists** Machine as a network; listing is a configuration entry
