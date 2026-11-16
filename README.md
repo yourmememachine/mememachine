@@ -151,6 +151,17 @@ not a claim.
 | `bin/` | Agave binaries (not committed — `install.sh` fetches them) |
 | `ledger-test/` | Working copy of the ledger (not committed — created at runtime) |
 
+## Demo: LaunchGuard in action
+
+A token launched under LaunchGuard on localnet (2026-11-16) —
+authorities revoked, 10% of supply locked for 30 days — then
+attacked seven ways. Every rug attempt fails. Full record in
+[programs/DEMO-LAUNCH.md](programs/DEMO-LAUNCH.md); the video
+file also lives in this repo at
+[assets/demo-launch-live.mp4](assets/demo-launch-live.mp4).
+
+https://github.com/user-attachments/assets/4d53b2b1-aca7-4ca3-9d70-caad256bb3a9
+
 ## Bridge
 
 Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 69 program tests passing, plus the off-chain relayer in `bridge/crates/relayer/` (30 tests passing). Local only, not deployed, not audited, nothing has crossed.
