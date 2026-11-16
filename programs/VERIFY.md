@@ -166,3 +166,24 @@ result instead of executing, so a repeated attempt needs a slot
 warp first; and `warp_to_slot` rejects a target at or behind the
 current slot, so expiries that coincide must warp to
 `max(target, current + 1)`.
+
+### Addendum — demo launch (2026-11-16)
+
+A third test file, `crates/launch-guard/tests/demo_launch.rs`
+(1 test, `demo_launch_full_story`), performs the LaunchGuard demo
+launch recorded in `programs/DEMO-LAUNCH.md`: a fresh demo token
+(mint `AjTP23T2HhMryZVDPpzVYrTsWHgH6jKkMt9b8cLdn7hc`, supply
+1,000,000,000, fixed demo-only keypairs so every run reproduces
+the same addresses), both authorities revoked, registered with
+100,000,000 (10%) locked from slot 3 until slot 6,480,003
+(LaunchRecord PDA `E6CttVSzy3Le4eHaxVWRyeR68HRqHnEkV6GSgUbBqRQi`,
+vault PDA `7AQtQMVajVMezY8xUutptYPqyyxo27rFcXLzpVMFim7f`,
+reputation PDA `4dnv3qqvVCwBibkpkTLrJr6AN5V6SekECNRofdiZNoH5`).
+The rug paths are then attempted live and all fail: mint more
+(SPL Token `FixedSupply`), release early (`StillLocked`), shorten
+the lock via a zero-slot extend (`LockPeriodTooShort`), release
+as a stranger (`NotCreator`); the final state is asserted
+unchanged. Suite now **23 passed, 0 failed** (13 integration +
+9 adversarial + 1 demo launch). Tests only — no program change,
+so no SBF rebuild and no audit-scope change. Localnet
+program-test only; the demo token is worthless by construction.

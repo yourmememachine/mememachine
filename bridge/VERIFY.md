@@ -12,7 +12,7 @@ the current state and supersedes their numbers.
 - **Tests:** bridge workspace **93 passed, 0 failed** (33
   bridge-common unit + 21 machine-bridge + 15 solana-lock + 24
   relayer, including the full local end-to-end drill and the
-  45-crossing volume drill); LaunchGuard **22 passed**
+  45-crossing volume drill); LaunchGuard **23 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
 - **Verification path:** attestation verification uses the ed25519
   precompile + instructions sysvar (changed 2026-11-14; the original
