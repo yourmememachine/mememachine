@@ -17,7 +17,8 @@ the project, the repo, and the $MACHINE token are unchanged.)*
 - **Token:** **$MACHINE** — the native gas token, 1,000,000,000 supply,
   minted at genesis. See `GENESIS.md` for the hash, the distribution,
   the validator keys, and the fee schedule.
-- **Status:** local single-node testnet, voting and finalizing.
+- **Status:** local single-node testnet — currently **stalled at slot
+  29,100** since ~22:11 PST 2026-11-14 (see `STATUS.md` P3).
   Not a public chain yet — see "Honest limits" and
   `LAUNCH_CHECKLIST.md`.
 
@@ -90,7 +91,7 @@ not a claim.
 | Distribution | **Shipped (distribution).** MACHINE distribution is published in `GENESIS.md`: founder 998,999,000 / stake 1,000,000 / faucet 1,000. No hidden allocation. Price history doesn't exist yet — the token is not trading. |
 | Audit and bug bounty | **NEXT.** Audit + bug bounty are dated roadmap items. |
 | Published genesis, fees, whitepaper | **Shipped.** Genesis hash, validator keys, and the full fee schedule are in `GENESIS.md`. This README is the positioning doc; a whitepaper is NEXT. |
-| Block speed | **Shipped.** Observed ~3 slots/second on the localnet, confirming and finalizing continuously. |
+| Block speed | **Shipped (historical).** Observed ~3 slots/second on the localnet, confirming and finalizing continuously — until the chain stalled at slot 29,100 on 2026-11-14 (see `STATUS.md` P3). |
 | Native token as gas from genesis | **Shipped.** MACHINE is the gas token from genesis, distribution in `GENESIS.md`. |
 | Technical deltas with measurements | **Shipped (partially).** The vote-authority patch + the localnet measurements (slot rate, confirmation, finalization, vote credits) are documented in `GENESIS.md`. More deltas are NEXT. |
 
@@ -120,8 +121,9 @@ not a claim.
   single-validator chains until it is.
 - **User transfers are not verified on this VM.** The container blocks
   UDP send (`sendto` returns EPERM), which breaks the RPC → TPU
-  forwarding that user transactions need. The chain votes, confirms,
-  and finalizes (votes are created in-process, so they are unaffected),
+  forwarding that user transactions need. The chain voted, confirmed,
+  and finalized (votes are created in-process, so they are unaffected)
+  until it stalled at slot 29,100 on 2026-11-14 (see `STATUS.md` P3),
   but a transfer between two fresh keypairs has not been confirmed
   here. It is the first thing to verify on a host where UDP works.
   The faucet also fails here (`TransactionDataTooLarge(30061)` on
@@ -161,7 +163,7 @@ https://github.com/user-attachments/assets/4d53b2b1-aca7-4ca3-9d70-caad256bb3a9
 
 ## Bridge
 
-Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 69 program tests passing, plus the off-chain relayer in `bridge/crates/relayer/` (39 tests passing). Local only, not deployed, not audited, nothing has crossed.
+Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 70 program tests passing (109 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (39 tests passing). SBF-measured: MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
 
 ## Support
 
