@@ -19,6 +19,7 @@ use solana_program::{
 };
 use solana_program_test::{processor, BanksClientError, ProgramTest, ProgramTestContext};
 use solana_sdk::{
+    account::Account,
     signature::{Keypair, Signer},
     transaction::{Transaction, TransactionError},
 };
@@ -42,11 +43,21 @@ fn pda(seeds: &[&[u8]]) -> Pubkey {
 }
 
 async fn start() -> ProgramTestContext {
-    let test = ProgramTest::new(
+    start_with(vec![]).await
+}
+
+/// Start the test validator with extra genesis accounts (used to plant
+/// forged record accounts: the test framework cannot write arbitrary
+/// data into an account after genesis, so the forgery is injected here).
+async fn start_with(extra: Vec<(Pubkey, Account)>) -> ProgramTestContext {
+    let mut test = ProgramTest::new(
         "launch_guard",
         program_id(),
         processor!(launch_guard::process_instruction),
     );
+    for (addr, acc) in extra {
+        test.add_account(addr, acc);
+    }
     test.start_with_context().await
 }
 
@@ -73,13 +84,26 @@ fn expect_custom(err: &BanksClientError, code: u32) {
     assert_eq!(*c, code);
 }
 
+fn expect_instruction_error(
+    err: &BanksClientError,
+    expected: solana_program::instruction::InstructionError,
+) {
+    let BanksClientError::TransactionError(TransactionError::InstructionError(_, actual)) = err
+    else {
+        panic!("expected InstructionError, got {err:?}");
+    };
+    assert_eq!(*actual, expected);
+}
+
 /// Create a mint + creator token account holding SUPPLY, with both
-/// authorities revoked (the only registrable state).
-async fn make_mint(
+/// authorities revoked (the only registrable state). The mint keypair
+/// is chosen by the caller so its address (and its PDAs) are known
+/// before the test validator starts.
+async fn make_mint_keyed(
     ctx: &mut ProgramTestContext,
     creator: &Keypair,
+    mint: &Keypair,
 ) -> (Pubkey, Pubkey) {
-    let mint = Keypair::new();
     let token_acct = Keypair::new();
     let rent = ctx.banks_client.get_rent().await.unwrap();
     let ixs = vec![
@@ -144,10 +168,19 @@ async fn make_mint(
     let fund = system_instruction::transfer(&ctx.payer.pubkey(), &creator.pubkey(), 5_000_000_000);
     let mut all = vec![fund];
     all.extend(ixs);
-    send(ctx, &all, &[creator, &mint, &token_acct])
+    send(ctx, &all, &[creator, mint, &token_acct])
         .await
         .expect("mint setup");
     (mint.pubkey(), token_acct.pubkey())
+}
+
+/// Create a mint + creator token account holding SUPPLY, with both
+/// authorities revoked (the only registrable state).
+async fn make_mint(
+    ctx: &mut ProgramTestContext,
+    creator: &Keypair,
+) -> (Pubkey, Pubkey) {
+    make_mint_keyed(ctx, creator, &Keypair::new()).await
 }
 
 /// An empty token account for `owner` on `mint`, funded by the payer.
@@ -249,6 +282,32 @@ fn release_ix(creator: &Pubkey, mint: &Pubkey, creator_token: &Pubkey) -> Instru
     )
 }
 
+/// Release naming an explicit record/vault/authority/reputation instead
+/// of deriving them from the mint — the forged-record attacks need to
+/// point the record slot at an account the program never created.
+fn release_ix_record(
+    creator: &Pubkey,
+    record: &Pubkey,
+    vault: &Pubkey,
+    creator_token: &Pubkey,
+    authority: &Pubkey,
+    reputation: &Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: program_id(),
+        accounts: vec![
+            AccountMeta::new(*creator, true),
+            AccountMeta::new(*record, false),
+            AccountMeta::new(*vault, false),
+            AccountMeta::new(*creator_token, false),
+            AccountMeta::new_readonly(*authority, false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new(*reputation, false),
+        ],
+        data: borsh::to_vec(&LaunchInstruction::Release {}).unwrap(),
+    }
+}
+
 fn extend_ix(creator: &Pubkey, mint: &Pubkey, additional_slots: u64) -> Instruction {
     Instruction {
         program_id: program_id(),
@@ -258,6 +317,36 @@ fn extend_ix(creator: &Pubkey, mint: &Pubkey, additional_slots: u64) -> Instruct
         ],
         data: borsh::to_vec(&LaunchInstruction::ExtendLock { additional_slots }).unwrap(),
     }
+}
+
+/// ExtendLock naming an explicit record account.
+fn extend_ix_record(creator: &Pubkey, record: &Pubkey, additional_slots: u64) -> Instruction {
+    Instruction {
+        program_id: program_id(),
+        accounts: vec![
+            AccountMeta::new(*creator, true),
+            AccountMeta::new(*record, false),
+        ],
+        data: borsh::to_vec(&LaunchInstruction::ExtendLock { additional_slots }).unwrap(),
+    }
+}
+
+/// A hand-built launch record: creator = the attacker, mint/vault = the
+/// victim's, lock already expired. Only the bytes are forged — whether
+/// the program trusts them depends on the account that carries them.
+fn forged_record(mint: &Pubkey, creator: &Pubkey, vault: &Pubkey) -> Vec<u8> {
+    borsh::to_vec(&LaunchRecord {
+        discriminator: DISCRIMINATOR_LAUNCH,
+        mint: *mint,
+        creator: *creator,
+        vault: *vault,
+        total_supply: SUPPLY,
+        locked_amount: LOCK,
+        lock_until_slot: 0,
+        registered_slot: 0,
+        state: STATE_LOCKED,
+    })
+    .unwrap()
 }
 
 async fn token_balance(ctx: &mut ProgramTestContext, acct: &Pubkey) -> u64 {
@@ -302,6 +391,31 @@ async fn register(
     .await
     .expect("register");
     (mint, token)
+}
+
+/// Register a mint whose keypair the caller chose (so its address and
+/// PDAs are known before the validator starts — the forged-record
+/// attacks plant their forgery at genesis).
+async fn register_keyed(
+    ctx: &mut ProgramTestContext,
+    creator: &Keypair,
+    mint: &Keypair,
+) -> (Pubkey, Pubkey) {
+    let (mint_pubkey, token) = make_mint_keyed(ctx, creator, mint).await;
+    send(
+        ctx,
+        &[register_ix(
+            &creator.pubkey(),
+            &mint_pubkey,
+            &token,
+            LOCK,
+            MIN_LOCK_SLOTS,
+        )],
+        &[creator],
+    )
+    .await
+    .expect("register");
+    (mint_pubkey, token)
 }
 
 // ---------------------------------------------------------------------------
@@ -699,4 +813,125 @@ async fn attack_failed_registration_does_not_create_reputation() {
             .launches_registered,
         1
     );
+}
+
+#[tokio::test]
+async fn attack_release_with_forged_record_fails() {
+    // The drain attempt: the attacker hand-builds a launch record —
+    // creator = themselves, mint/vault = the victim's, lock already
+    // expired — and plants it in an account owned by some other
+    // program, then calls Release naming it as the record. The
+    // program must reject the account for ownership before the
+    // transfer runs, not rely on the runtime to roll the write back
+    // at the end of the instruction.
+    let victim = Keypair::new();
+    let attacker = Keypair::new();
+    let mint = Keypair::new();
+    let vault = pda(&[SEED_VAULT, mint.pubkey().as_ref()]);
+    let forged = Keypair::new();
+    let mut forged_account = Account::new(1_000_000, 0, &Pubkey::new_unique());
+    forged_account.data = forged_record(&mint.pubkey(), &attacker.pubkey(), &vault);
+    let mut ctx = start_with(vec![(forged.pubkey(), forged_account)]).await;
+    let (_mint, _token) = register_keyed(&mut ctx, &victim, &mint).await;
+    let attacker_token = make_token_account(&mut ctx, &attacker.pubkey(), &mint.pubkey()).await;
+    let authority = pda(&[SEED_AUTHORITY, mint.pubkey().as_ref()]);
+    let reputation = pda(&[SEED_REPUTATION, attacker.pubkey().as_ref()]);
+
+    let err = send(
+        &mut ctx,
+        &[release_ix_record(
+            &attacker.pubkey(),
+            &forged.pubkey(),
+            &vault,
+            &attacker_token,
+            &authority,
+            &reputation,
+        )],
+        &[&attacker],
+    )
+    .await
+    .unwrap_err();
+    expect_instruction_error(
+        &err,
+        solana_program::instruction::InstructionError::InvalidAccountData,
+    );
+    // Nothing moved: the victim's vault still holds the lock and the
+    // victim's record is still sealed.
+    assert_eq!(token_balance(&mut ctx, &vault).await, LOCK);
+    assert_eq!(token_balance(&mut ctx, &attacker_token).await, 0);
+    assert_eq!(record(&mut ctx, &mint.pubkey()).await.state, STATE_LOCKED);
+}
+
+#[tokio::test]
+async fn attack_release_with_record_at_wrong_address_fails() {
+    // Same forged bytes, but this time the account IS owned by the
+    // program — it just is not the mint's record PDA (the attacker
+    // planted a valid-looking record at an address they chose). The
+    // program must bind the record to its derived PDA, not merely to
+    // ownership and a valid discriminator.
+    //
+    // The attacker first registers a launch of their own, so they
+    // hold a real reputation account: without the PDA check the
+    // forged release would run to completion and drain the victim's
+    // vault (the planted account is program-owned, so the write back
+    // would succeed too). The PDA check is the only thing stopping it.
+    let victim = Keypair::new();
+    let attacker = Keypair::new();
+    let mint = Keypair::new();
+    let vault = pda(&[SEED_VAULT, mint.pubkey().as_ref()]);
+    let wrong_address = Keypair::new();
+    let mut planted = Account::new(1_000_000, 0, &program_id());
+    planted.data = forged_record(&mint.pubkey(), &attacker.pubkey(), &vault);
+    let mut ctx = start_with(vec![(wrong_address.pubkey(), planted)]).await;
+    let (_mint, _token) = register_keyed(&mut ctx, &victim, &mint).await;
+    let (_attacker_mint, _attacker_token) = register(&mut ctx, &attacker).await;
+    let attacker_token = make_token_account(&mut ctx, &attacker.pubkey(), &mint.pubkey()).await;
+    let authority = pda(&[SEED_AUTHORITY, mint.pubkey().as_ref()]);
+    let reputation = pda(&[SEED_REPUTATION, attacker.pubkey().as_ref()]);
+
+    let err = send(
+        &mut ctx,
+        &[release_ix_record(
+            &attacker.pubkey(),
+            &wrong_address.pubkey(),
+            &vault,
+            &attacker_token,
+            &authority,
+            &reputation,
+        )],
+        &[&attacker],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::InvalidPda as u32);
+    assert_eq!(token_balance(&mut ctx, &vault).await, LOCK);
+    assert_eq!(token_balance(&mut ctx, &attacker_token).await, 0);
+    assert_eq!(record(&mut ctx, &mint.pubkey()).await.state, STATE_LOCKED);
+}
+
+#[tokio::test]
+async fn attack_extend_with_record_at_wrong_address_fails() {
+    // The same wrong-address record, through ExtendLock: extending a
+    // record that is not the mint's derived PDA must fail instead of
+    // rewriting a launch the program never registered at that address.
+    let victim = Keypair::new();
+    let attacker = Keypair::new();
+    let mint = Keypair::new();
+    let vault = pda(&[SEED_VAULT, mint.pubkey().as_ref()]);
+    let wrong_address = Keypair::new();
+    let mut planted = Account::new(1_000_000, 0, &program_id());
+    planted.data = forged_record(&mint.pubkey(), &attacker.pubkey(), &vault);
+    let mut ctx = start_with(vec![(wrong_address.pubkey(), planted)]).await;
+    let (_mint, _token) = register_keyed(&mut ctx, &victim, &mint).await;
+    let until = record(&mut ctx, &mint.pubkey()).await.lock_until_slot;
+
+    let err = send(
+        &mut ctx,
+        &[extend_ix_record(&attacker.pubkey(), &wrong_address.pubkey(), 100_000)],
+        &[&attacker],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::InvalidPda as u32);
+    assert_eq!(record(&mut ctx, &mint.pubkey()).await.lock_until_slot, until);
 }
