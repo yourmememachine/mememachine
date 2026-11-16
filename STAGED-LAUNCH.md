@@ -1,6 +1,6 @@
 # Staged launch plan — value last, proof first
 
-Adopted 2026-11-14. MemeMachine does not wait for a full audit budget
+Adopted 2026-11-14. Machine does not wait for a full audit budget
 to exist in public — and no real asset crosses the bridge before an
 independent audit, no matter how long that takes. The phases below
 separate **proving the system** (cheap, starts now) from **trusting

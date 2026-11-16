@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fork-script tests for MemeMachine (Agave 2.3.13 fork).
+"""Fork-script tests for Machine (Agave 2.3.13 fork).
 
 Covers the repo's own shell scripts and the vote-authority patcher —
 NOT the bridge programs (those have their own suite in bridge/,

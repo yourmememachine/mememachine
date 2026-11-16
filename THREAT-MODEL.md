@@ -1,4 +1,4 @@
-# MemeMachine — Threat Model
+# Machine — Threat Model
 
 One page, in plain language: what the bridge and LaunchGuard are
 built to withstand, what they are not, and what they assume. The
@@ -8,7 +8,7 @@ current limitations are in LIMITATIONS.md.
 ## Assets being protected
 
 - SPL tokens locked in the bridge vault on Solana.
-- The wrapped supply on MemeMachine (must never exceed what is
+- The wrapped supply on Machine (must never exceed what is
   locked — reconciliation, `ops/reconcile.py`, checks exactly this).
 - $MACHINE itself is **never** bridged and is not at risk from the
   bridge.
@@ -92,7 +92,7 @@ current limitations are in LIMITATIONS.md.
   deployment-gate decision (with the audit's input) rather than a
   hardcoded constant.
 - **Solana itself.** If Solana's runtime or the SPL Token program
-  fails, the lock side inherits that failure. MemeMachine inherits
+  fails, the lock side inherits that failure. Machine inherits
   Agave's risk profile for the same reason it inherits its testing.
 
 ## Assumptions the design relies on

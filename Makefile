@@ -1,4 +1,4 @@
-# MemeMachine — one-command local checks.
+# Machine — one-command local checks.
 #
 # `make verify` runs everything that can be proven locally:
 # the bridge workspace tests, the programs workspace tests

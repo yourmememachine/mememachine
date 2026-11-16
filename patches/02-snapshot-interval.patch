@@ -18,7 +18,7 @@
  
  pub const DEFAULT_FULL_SNAPSHOT_ARCHIVE_INTERVAL_SLOTS: Slot = 50_000;
 -pub const DEFAULT_INCREMENTAL_SNAPSHOT_ARCHIVE_INTERVAL_SLOTS: Slot = 100;
-+// MemeMachine: incremental snapshots every 500 slots (~200s at
++// Machine: incremental snapshots every 500 slots (~200s at
 +// 400ms/slot) instead of the stock 100 slots (~40s). A small
 +// single-validator chain writes far fewer incremental archives this way,
 +// at the cost of a coarser restart point. Operational default only: it

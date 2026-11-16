@@ -1,4 +1,4 @@
-# MemeMachine Livenet — Ports and Firewall
+# Machine Livenet — Ports and Firewall
 
 Every port the livenet needs, per validator. On a 3-VPS setup each host
 opens only its own validator's ports. On a single host, open all three

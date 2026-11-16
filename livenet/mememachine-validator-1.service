@@ -1,5 +1,5 @@
 [Unit]
-Description=MemeMachine livenet validator 1 (bootstrap, public RPC)
+Description=Machine livenet validator 1 (bootstrap, public RPC)
 After=network-online.target
 Wants=network-online.target
 

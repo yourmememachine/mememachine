@@ -1,7 +1,7 @@
 # Patch 03: Startup log line — name the chain when the validator starts
 # File: validator/src/commands/run/execute.rs (Agave 2.3.13)
 # What: adds one `info!` line after the existing version log line in
-# `execute()`: `Chain: MemeMachine (Agave 2.3.13 fork)`.
+# `execute()`: `Chain: Machine (Agave 2.3.13 fork)`.
 # Why: an operator can tell a fork binary from a stock Agave binary from the
 # validator log alone. Log line only; no behaviour change.
 # Applies to: Agave 2.3.13 source, verified with `patch --dry-run` and
@@ -12,10 +12,10 @@
      let _logger_thread = redirect_stderr_to_file(logfile);
  
      info!("{} {}", crate_name!(), solana_version);
-+    // MemeMachine: name the chain in the validator log at startup, so an
++    // Machine: name the chain in the validator log at startup, so an
 +    // operator can tell a fork binary from a stock Agave binary from the
 +    // log alone. Log line only; no behaviour change.
-+    info!("Chain: MemeMachine (Agave 2.3.13 fork)");
++    info!("Chain: Machine (Agave 2.3.13 fork)");
      info!("Starting validator with: {:#?}", std::env::args_os());
  
      let cuda = matches.is_present("cuda");

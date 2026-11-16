@@ -1,5 +1,5 @@
 #!/bin/bash
-# check-cluster.sh — verify the MemeMachine livenet is actually working.
+# check-cluster.sh — verify the Machine livenet is actually working.
 #
 # Checks, against the RPC endpoints in validators.conf:
 #   1. Each validator's RPC answers.
@@ -39,7 +39,7 @@ V1_HOST="${V1_PUBLIC_IP:-127.0.0.1}"
 V2_HOST="${V2_PUBLIC_IP:-127.0.0.1}"
 V3_HOST="${V3_PUBLIC_IP:-127.0.0.1}"
 
-echo "MemeMachine livenet check — genesis $GENESIS_HASH"
+echo "Machine livenet check — genesis $GENESIS_HASH"
 echo
 
 for n in 1 2 3; do

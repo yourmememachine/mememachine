@@ -1,13 +1,13 @@
-# MemeMachine — Genesis
+# Machine — Genesis
 
-The canonical identity of the MemeMachine chain. Everything needed to
+The canonical identity of the Machine chain. Everything needed to
 verify this chain is real, and to join it, is on this page.
 
 ## Chain identity
 
 | Field | Value |
 |---|---|
-| Chain name | **MemeMachine** |
+| Chain name | **Machine** |
 | Native token | **$MACHINE** (the gas token; 1 MACHINE = 1,000,000,000 lamports) |
 | Genesis hash | `32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb` |
 | Shred version | `35836` |
@@ -38,7 +38,7 @@ system accounts, inherent to every Solana genesis.
 | System accounts | — | ~0.2535667 | Rent-exempt minimums across 241 accounts. |
 
 MACHINE is the native gas token from genesis: every transaction fee on
-MemeMachine is paid in MACHINE. There is no separate wrapped or bridged
+Machine is paid in MACHINE. There is no separate wrapped or bridged
 token at genesis. (An approved SPL asset bridged in from Solana mainnet
 would be a separate asset — see `BRIDGE.md`.)
 

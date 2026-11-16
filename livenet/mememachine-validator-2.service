@@ -1,5 +1,5 @@
 [Unit]
-Description=MemeMachine livenet validator 2
+Description=Machine livenet validator 2
 After=network-online.target mememachine-validator-1.service
 Wants=network-online.target
 

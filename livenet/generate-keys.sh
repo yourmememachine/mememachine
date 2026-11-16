@@ -1,5 +1,5 @@
 #!/bin/bash
-# generate-keys.sh — generate fresh keypairs for the MemeMachine livenet.
+# generate-keys.sh — generate fresh keypairs for the Machine livenet.
 #
 # Creates, under livenet/keys/:
 #   v1-identity.json, v1-vote.json, v1-stake.json

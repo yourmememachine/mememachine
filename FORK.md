@@ -1,6 +1,6 @@
-# MemeMachine — How Deep Is the Fork?
+# Machine — How Deep Is the Fork?
 
-Plain answer first: **today MemeMachine runs on stock, prebuilt Agave
+Plain answer first: **today Machine runs on stock, prebuilt Agave
 2.3.13 binaries with a custom genesis, custom on-chain programs, and
 custom tooling — and now also has a real, verified source patch set that
 is not yet built or run.** The patched build is the path to a deeper
@@ -34,9 +34,9 @@ output: `patches/README.md`.
 
 | Patch | File | Change |
 |---|---|---|
-| `01-client-id.patch` | `version/src/lib.rs` | New client id 4, `MemeMachine`, as the default client. A binary built from this source prints `client:MemeMachine` in `--version` output and gossip instead of `client:Agave`. Gossip identity label only. |
+| `01-client-id.patch` | `version/src/lib.rs` | New client id 4, `Machine`, as the default client. A binary built from this source prints `client:Machine` in `--version` output and gossip instead of `client:Agave`. Gossip identity label only. |
 | `02-snapshot-interval.patch` | `runtime/src/snapshot_bank_utils.rs` | Default incremental snapshot interval `100` -> `500` slots. Operational default only. |
-| `03-startup-banner.patch` | `validator/src/commands/run/execute.rs` | One startup log line: `Chain: MemeMachine (Agave 2.3.13 fork)`. Log line only. |
+| `03-startup-banner.patch` | `validator/src/commands/run/execute.rs` | One startup log line: `Chain: Machine (Agave 2.3.13 fork)`. Log line only. |
 
 Deliberately untouched: ticks per slot, slots per epoch, vote/shred
 rules, fee schedule, rent, bank-hash computation, and the full-snapshot
@@ -68,7 +68,7 @@ Not verified, stated plainly:
   verified by clean application plus a syntax parse, not by compiling
   the `solana-runtime` or `agave-validator` crates.
 - **No patched binary has been built or run.** Until one is,
-  `client:MemeMachine` is a property of the patch set, not of any
+  `client:Machine` is a property of the patch set, not of any
   running node.
 
 Build it with `./build-from-source.sh` (downloads the source, verifies
@@ -81,7 +81,7 @@ in for the prebuilt one is a separate, manual operator step.
 All of this lives in genesis and configuration, not in Agave source.
 Details: `GENESIS.md`, `livenet/`.
 
-- **Chain identity:** name MemeMachine; native gas token $MACHINE
+- **Chain identity:** name Machine; native gas token $MACHINE
   (1 MACHINE = 1,000,000,000 lamports); genesis hash
   `32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb`; shred version `35836`;
   cluster type Development; created 2026-11-14.
@@ -139,7 +139,7 @@ Original code written for this chain, outside Agave source:
 
 What would make it deeper, in order: (1) build the patched source on a
 machine big enough for a full Agave build and run the resulting binary
-until it reports `client:MemeMachine`; (2) add a source-level change
+until it reports `client:Machine`; (2) add a source-level change
 with an observable on-chain effect that is still safe to test locally
 (e.g. a custom genesis-time default carried in source rather than in
 flags); (3) only then consider any change near consensus rules, with a

@@ -1,4 +1,4 @@
-//! LaunchGuard — MemeMachine's native anti-rug launch standard.
+//! LaunchGuard — Machine's native anti-rug launch standard.
 //! See programs/LAUNCH-GUARD.md for the design and honest limits.
 //!
 //! A launch registers only if the mint's mint and freeze authorities

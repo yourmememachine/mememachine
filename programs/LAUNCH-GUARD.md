@@ -1,4 +1,4 @@
-# LaunchGuard — MemeMachine's native anti-rug launch standard
+# LaunchGuard — Machine's native anti-rug launch standard
 
 ## Why this exists
 
@@ -10,7 +10,7 @@ because on other chains the launch rules live in apps, not in the
 chain's own program set.
 
 LaunchGuard moves the two rules that stop the classic rug into a
-program that ships **with MemeMachine itself**:
+program that ships **with Machine itself**:
 
 1. **Fixed supply, provably.** A launch can only register if the
    mint's mint authority **and** freeze authority are already revoked
@@ -124,4 +124,4 @@ promises.
   solana-program 2.3, same conventions as the bridge programs).
 - Rug-Farm Registry stays the *detection* layer for foreign launches
   (e.g. pump.fun). LaunchGuard is the *prevention* layer for native
-  MemeMachine launches. Detection warns; prevention constrains.
+  Machine launches. Detection warns; prevention constrains.

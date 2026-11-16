@@ -1,8 +1,8 @@
 #!/bin/bash
-# install.sh — install the prebuilt Agave binaries for MemeMachine.
+# install.sh — install the prebuilt Agave binaries for Machine.
 #
 # Downloads the Agave 2.3.13 prebuilt release from GitHub and extracts
-# the binaries MemeMachine needs into ./bin/. No source build, ever:
+# the binaries Machine needs into ./bin/. No source build, ever:
 # a source build will not finish on a small VM (1.5 CPU / ~6 GB RAM).
 # If the download fails, this script reports it plainly and stops —
 # it never falls back to building from source.

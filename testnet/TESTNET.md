@@ -1,4 +1,4 @@
-# MemeMachine public testnet — Phase 1 runbook
+# Machine public testnet — Phase 1 runbook
 
 Implements Phase 1 of `STAGED-LAUNCH.md`: the whole system, live in
 public, with **worthless tokens only**. One VPS (~$20/mo class),
@@ -14,7 +14,7 @@ before the audit, and the write-ups must say so.
 
 ## Labeling rules (non-negotiable)
 
-- The cluster is named **MemeMachine Testnet** everywhere it
+- The cluster is named **Machine Testnet** everywhere it
   appears: RPC responses, explorer, faucet page, announcements.
 - Test $MACHINE is a *different genesis* from any future livenet:
   different keys, different genesis hash. It is not convertible,

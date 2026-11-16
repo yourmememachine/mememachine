@@ -1,4 +1,4 @@
-# MemeMachine — Incident Response
+# Machine — Incident Response
 
 Who does what when something is wrong with the chain or the bridge.
 Written before an incident, because during one is the wrong time to

@@ -1,5 +1,5 @@
 #!/bin/bash
-# start-validator.sh — boot one MemeMachine livenet validator.
+# start-validator.sh — boot one Machine livenet validator.
 #
 # Usage:
 #   ./start-validator.sh 1 [--background]   # validator 1 (bootstrap, public RPC)
@@ -119,7 +119,7 @@ else
     ARGS+=( --enable-rpc-transaction-history )
 fi
 
-echo "Starting MemeMachine validator $N"
+echo "Starting Machine validator $N"
 echo "  genesis: $GENESIS_HASH (shred $SHRED_VERSION)"
 echo "  gossip:  $PUBLIC_IP:$GOSSIP_PORT   RPC: $RPC_BIND:$RPC_PORT"
 [ "$N" != "1" ] && echo "  entrypoint: $V1_PUBLIC_IP:8001 (validator 1)"

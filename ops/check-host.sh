@@ -1,5 +1,5 @@
 #!/bin/bash
-# check-host.sh — can this host run a MemeMachine validator at all?
+# check-host.sh — can this host run a Machine validator at all?
 #
 # The two hard blockers that stopped the old build VM (see
 # LAUNCH_CHECKLIST.md items 17-18) are checked first and in plain
@@ -18,7 +18,7 @@ set -u
 fail=0
 say() { printf '%-58s %s\n' "$1" "$2"; }
 
-echo "MemeMachine host readiness check"
+echo "Machine host readiness check"
 echo
 
 # 1. UDP send.
@@ -87,7 +87,7 @@ done
 
 echo
 if [ "$fail" = 0 ]; then
-    echo "HOST OK — this host can run MemeMachine validators."
+    echo "HOST OK — this host can run Machine validators."
     echo "Next: livenet/DEPLOY.md (keys, genesis, start, check-cluster.sh --with-transfer)."
 else
     echo "HOST NOT SUITABLE — fix the FAIL lines above, or move to a host that passes."

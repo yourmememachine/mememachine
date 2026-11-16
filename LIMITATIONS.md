@@ -1,4 +1,4 @@
-# MemeMachine — Current Limitations
+# Machine — Current Limitations
 
 The one-page version, so nobody — reviewer, grantor, or user — has
 to guess what is not yet true. The full evidence trail is

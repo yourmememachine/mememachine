@@ -1,5 +1,5 @@
 #!/bin/bash
-# up.sh — bring up the MemeMachine PUBLIC TESTNET on a single host.
+# up.sh — bring up the Machine PUBLIC TESTNET on a single host.
 #
 # Thin sequencer over the existing, tested livenet package — it adds
 # no new chain logic. See testnet/TESTNET.md for the full phase,

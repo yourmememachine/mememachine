@@ -1,6 +1,6 @@
-# MemeMachine Livenet — Deployment Guide
+# Machine Livenet — Deployment Guide
 
-Deploy the MemeMachine live network on fresh Ubuntu VPS(s): three
+Deploy the Machine live network on fresh Ubuntu VPS(s): three
 validators reaching consensus, one public RPC endpoint.
 
 ## Status: NOT RUNNING YET

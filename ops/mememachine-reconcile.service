@@ -1,5 +1,5 @@
 [Unit]
-Description=MemeMachine bridge reconciliation (locked vs minted)
+Description=Machine bridge reconciliation (locked vs minted)
 After=network-online.target
 Wants=network-online.target
 

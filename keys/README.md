@@ -1,7 +1,7 @@
 # Keys — DEV ONLY
 
 The keypairs in this directory are **throwaway development keys** for
-the MemeMachine test chain. They hold no mainnet value.
+the Machine test chain. They hold no mainnet value.
 
 - `founder.json` — bootstrap validator identity / founder
   (`7ivcPQJ6C7RZAnprKkJHN9o1PrpSjE6iC2mm7RRS3DEz`)

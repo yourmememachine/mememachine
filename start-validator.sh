@@ -1,7 +1,7 @@
 #!/bin/bash
-# start-validator.sh — boot the MemeMachine single-node validator.
+# start-validator.sh — boot the Machine single-node validator.
 #
-# Copies the shipped MemeMachine genesis (ledger/) to a working ledger
+# Copies the shipped Machine genesis (ledger/) to a working ledger
 # (ledger-test/), seeds the bootstrap validator keypairs, and starts
 # solana-test-validator on RPC port 8899 (faucet on 9900).
 #
@@ -51,7 +51,7 @@ if [ ! -d ledger-test ]; then
     cp keys/faucet.json ledger-test/faucet-keypair.json
 fi
 
-echo "Starting MemeMachine validator (genesis 32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb)..."
+echo "Starting Machine validator (genesis 32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb)..."
 echo "  RPC: http://127.0.0.1:8899   Faucet: http://127.0.0.1:9900"
 if [ "$BACKGROUND" = 1 ]; then
     nohup ./bin/solana-test-validator --ledger ledger-test --rpc-port 8899 --faucet-port 9900 > test-validator-stdout.log 2>&1 &

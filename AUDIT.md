@@ -1,4 +1,4 @@
-# MemeMachine — Audit Readiness Package
+# Machine — Audit Readiness Package
 
 Status: **No independent audit has been performed.** This document
 exists so that when an auditor is engaged, everything they need is
@@ -87,7 +87,7 @@ starts from what is already known:
 
 - **`cargo audit` (RustSec DB) on both workspaces: 10 known
   vulnerabilities, all in transitive dependencies; none in
-  MemeMachine code.** Disposition by group:
+  Machine code.** Disposition by group:
   - `rustls` / `rustls-webpki` / `webpki-roots` (5 advisories, low–
     medium): TLS stack used by the **relayer's** RPC client (host
     side only, never on-chain). Must be resolved or explicitly

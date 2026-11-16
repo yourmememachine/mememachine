@@ -1,5 +1,5 @@
 #!/bin/bash
-# generate-genesis.sh — build the MemeMachine 3-validator livenet genesis.
+# generate-genesis.sh — build the Machine 3-validator livenet genesis.
 #
 # Creates livenet/ledger/ (genesis.bin + genesis.tar.bz2 + blockstore)
 # and livenet/genesis-info.env (genesis hash, shred version, validator
@@ -159,7 +159,7 @@ GENESIS_HASH=$("$AGAVE_BIN/agave-ledger-tool" --ledger "$LEDGER_DIR" genesis-has
 SHRED_VERSION=$("$AGAVE_BIN/agave-ledger-tool" --ledger "$LEDGER_DIR" genesis 2>/dev/null | awk '/Shred version:/ {print $3}')
 
 cat > "$INFO_FILE" <<EOF
-# MemeMachine livenet genesis info — written by generate-genesis.sh.
+# Machine livenet genesis info — written by generate-genesis.sh.
 # Share the GENESIS_HASH and SHRED_VERSION with anyone joining the network.
 GENESIS_HASH=$GENESIS_HASH
 SHRED_VERSION=$SHRED_VERSION

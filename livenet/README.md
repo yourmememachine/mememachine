@@ -1,6 +1,6 @@
-# MemeMachine — Livenet Package
+# Machine — Livenet Package
 
-Everything needed to run MemeMachine as a live public network: a
+Everything needed to run Machine as a live public network: a
 3-validator genesis, per-validator start scripts, systemd units, port
 and firewall notes, and a step-by-step VPS deployment guide.
 

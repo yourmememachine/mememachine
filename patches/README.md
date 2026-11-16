@@ -1,6 +1,6 @@
-# Source patches — MemeMachine fork of Agave 2.3.13
+# Source patches — Machine fork of Agave 2.3.13
 
-This directory holds the source-level patch set that makes MemeMachine a
+This directory holds the source-level patch set that makes Machine a
 deeper fork than "stock Agave binaries + custom genesis". Each patch is a
 unified diff against the real Agave 2.3.13 source
 (`anza-xyz/agave`, tag `v2.3.13`), with a header at the top of the file
@@ -11,9 +11,9 @@ a local patch set applied by `../build-from-source.sh`.
 
 | Patch | File | Change |
 |---|---|---|
-| `01-client-id.patch` | `version/src/lib.rs` | New client id 4, `MemeMachine`, reported as the default client. `--version` output becomes `... client:MemeMachine` instead of `... client:Agave`. Gossip identity label only. |
+| `01-client-id.patch` | `version/src/lib.rs` | New client id 4, `Machine`, reported as the default client. `--version` output becomes `... client:Machine` instead of `... client:Agave`. Gossip identity label only. |
 | `02-snapshot-interval.patch` | `runtime/src/snapshot_bank_utils.rs` | Default incremental snapshot interval `100` -> `500` slots. Operational default only. |
-| `03-startup-banner.patch` | `validator/src/commands/run/execute.rs` | One startup log line: `Chain: MemeMachine (Agave 2.3.13 fork)`. Log line only. |
+| `03-startup-banner.patch` | `validator/src/commands/run/execute.rs` | One startup log line: `Chain: Machine (Agave 2.3.13 fork)`. Log line only. |
 
 ## What was deliberately NOT changed
 

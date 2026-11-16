@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-from-source.sh — build the MemeMachine validator binaries from
+# build-from-source.sh — build the Machine validator binaries from
 # patched Agave 2.3.13 source.
 #
 # What it does:
@@ -30,7 +30,7 @@
 #
 # After a successful build, verify the fork identity in the new binary:
 #   ./bin-patched/agave-validator --version
-#   # expect: agave-validator 2.3.13 (src:...; feat:..., client:MemeMachine)
+#   # expect: agave-validator 2.3.13 (src:...; feat:..., client:Machine)
 # (The prebuilt binary in ./bin/ instead reports client:Agave.)
 set -euo pipefail
 
@@ -144,5 +144,5 @@ echo "==> Built binaries staged in ${OUT_DIR}:"
 ls -l "$OUT_DIR"
 echo "==> Fork identity check:"
 "${OUT_DIR}/agave-validator" --version
-echo "    (expect client:MemeMachine; the prebuilt ./bin/ binary reports client:Agave)"
+echo "    (expect client:Machine; the prebuilt ./bin/ binary reports client:Agave)"
 echo "==> Done. ./bin/ was not touched; swapping binaries is a manual step."

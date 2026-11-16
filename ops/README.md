@@ -1,4 +1,4 @@
-# MemeMachine Ops
+# Machine Ops
 
 Operational tooling and runbooks for running the chain and (later)
 the bridge in public. Everything here is preparation until the

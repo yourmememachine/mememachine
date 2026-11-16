@@ -1,4 +1,4 @@
-# MemeMachine — Public RPC and Wallet Support
+# Machine — Public RPC and Wallet Support
 
 Status: **NEXT — needs the 3-validator livenet on a suitable host.**
 Nothing public answers today. This document is the ready-to-run plan
@@ -53,7 +53,7 @@ and in `ops/network.json` in this repo (a template today; the values
 are filled at livenet launch and must match `genesis-info.env`
 exactly):
 
-- Network name: MemeMachine
+- Network name: Machine
 - RPC endpoint: the public RPC above
 - Genesis hash: the livenet genesis hash (NOT the localnet hash
   `32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb`)
@@ -63,5 +63,5 @@ exactly):
 
 OS-layer wallet connect (Phantom / Solflare / Backpack in the Solana
 OS) already works; this section is the chain-level step — wallets
-adding MemeMachine as a network — and it is only real once the
+adding Machine as a network — and it is only real once the
 public RPC answers.

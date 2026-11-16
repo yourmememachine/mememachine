@@ -1,6 +1,6 @@
 # Fork-script tests
 
-Tests for MemeMachine's own scripts — the shell scripts that boot and
+Tests for Machine's own scripts — the shell scripts that boot and
 build the chain, the vote-authority patcher, and the genesis config.
 They do **not** test the bridge programs (those live in `bridge/`:
 `cargo test --release`, 34/34) and they do **not** test the live

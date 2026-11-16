@@ -1,5 +1,5 @@
 [Unit]
-Description=Run MemeMachine bridge reconciliation every minute
+Description=Run Machine bridge reconciliation every minute
 
 [Timer]
 OnBootSec=2min
