@@ -1,7 +1,7 @@
 # Machine — Whitepaper
 
 **Chain:** Machine · **Token:** $MACHINE · **Version:** 2.0 — 2026-11-16
-**Author:** Dilip Teneti · **Status:** Pre-launch. Localnet proven; unaudited; no real assets.
+**Status:** Pre-launch. Localnet proven; unaudited; no real assets.
 
 > Machine was previously named MemeMachine. The project was renamed on
 > 2026-11-16; grant and hackathon applications submitted in November 2026
