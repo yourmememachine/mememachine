@@ -165,3 +165,9 @@ to support development, SOL donations are welcome at:
 Donations are gifts toward development — they buy no token, no
 equity, and no return. $MACHINE is the chain's gas token; it is
 never sold and never bridged.
+
+## Connect
+
+- **X:** [@yourmememachine](https://x.com/yourmememachine)
+- **Telegram:** [@Greenpumpsol](https://t.me/Greenpumpsol)
+- **GitHub:** [@yourmememachine](https://github.com/yourmememachine)
