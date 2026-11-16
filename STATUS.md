@@ -4,7 +4,7 @@ Verified 2026-11-16 ~15:20 UTC by a full local `make verify` run
 (bridge workspace 109 passed, LaunchGuard 26 passed, fork suite
 23 OK — total 158, 0 failed) against the local working tree,
 which includes the 2026-11-16 hardening changes (LaunchGuard forgery
-patch, ed25519 compute-unit measurements) not yet pushed to GitHub.
+patch, ed25519 compute-unit measurements) now pushed to GitHub.
 Nothing here is claimed without a run, a file,
 or a command behind it. "PROVEN" means it exists and was verified.
 "NEXT" means it is not done yet, with the plain blocker stated.
