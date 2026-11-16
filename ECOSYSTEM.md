@@ -70,7 +70,7 @@ relayer exists (`bridge/crates/relayer/`) but has never run live;
 no asset has crossed, nothing here holds real funds.
 
 **Proven.** Built and tested locally only. Re-verified 2026-11-15:
-`cargo test --release` in `bridge/` — **93 passed, 0 failed**
+`cargo test --release` in `bridge/` — **99 passed, 0 failed**
 (22 bridge-common unit, 19 machine-bridge integration, 14
 solana-lock integration, 23 relayer including the full end-to-end
 drill). Full output in `bridge/VERIFY.md`.

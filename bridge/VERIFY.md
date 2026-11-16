@@ -9,8 +9,8 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **93 passed, 0 failed** (33
-  bridge-common unit + 21 machine-bridge + 15 solana-lock + 24
+- **Tests:** bridge workspace **99 passed, 0 failed** (33
+  bridge-common unit + 21 machine-bridge + 15 solana-lock + 30
   relayer, including the full local end-to-end drill and the
   45-crossing volume drill); LaunchGuard **23 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
@@ -398,3 +398,35 @@ LaunchGuard **13 passed**; fork suite 23 OK; `make verify` green.
   (204,024 B), launch_guard.so
   `405a0075790224ee2e00c34762d2e561d5ac401bb29c0420030afce1f51dd367`
   (115,208 B). Not deployed.
+
+### Addendum — relayer source-transfer verification (2026-11-16)
+
+Trust audit of the relayer watcher, prompted by the Coreum bridge
+drain (Aug 2026). Bridge workspace **99 passed, 0 failed**
+(bridge-common 33, machine-bridge 21, solana-lock 15, relayer 30);
+LaunchGuard **23 passed**; fork suite 23 OK; `make verify` green.
+
+- **Finding:** the `EventRecord` is sound — the lock program
+  transfers into the vault before writing it — but the watcher's
+  sender extraction (`sender_from_parsed_transaction`) only
+  scanned top-level instructions. The deposit's token transfer is
+  a CPI of the Deposit instruction, so it lives in
+  `meta.innerInstructions`: on a real deposit transaction the old
+  code found no transfer and refused to sign, and a batched
+  transaction with an unrelated top-level transfer would have
+  yielded the wrong sender in the attested message (and the
+  permanent receipt).
+- **Fix (off-chain only):** `sender_from_verified_source_transfer`
+  scans top-level and inner instructions and requires the transfer
+  behind the record — into the vault for a deposit, burning the
+  wrapped mint for a burn — for exactly the record's amount.
+  Anything else fails closed (`SourceTransferNotVerified`) and no
+  signature is produced. The watcher reads the vault / wrapped
+  mint from the source program's config account at startup.
+  No program change, no SBF rebuild, no audit-scope change.
+- **Tests added (8, replacing the 2 old sender-extraction
+  tests):** sender found in inner instructions (deposit and burn),
+  Coreum-style phantom deposit rejected, inner transfer to the
+  wrong destination rejected, wrong amount rejected, decoy
+  top-level transfer ignored, burn with the wrong mint rejected,
+  missing instructions still an error.

@@ -57,6 +57,11 @@ pub enum RelayerError {
     UnknownRelayer(PubkeyString),
     EventNotFound(String),
     SenderNotFound(String),
+    /// The source transaction contains a transfer/burn of the right
+    /// kind but none that matches the event record (wrong vault
+    /// destination, wrong mint, or wrong amount) — fail closed
+    /// rather than sign a message whose sender cannot be proven.
+    SourceTransferNotVerified(String),
 }
 
 pub type PubkeyString = String;
@@ -86,6 +91,9 @@ impl fmt::Display for RelayerError {
             RelayerError::UnknownRelayer(p) => write!(f, "signature from unknown relayer {p}"),
             RelayerError::EventNotFound(m) => write!(f, "source event not found: {m}"),
             RelayerError::SenderNotFound(m) => write!(f, "sender not found in source transaction: {m}"),
+            RelayerError::SourceTransferNotVerified(m) => {
+                write!(f, "source transfer not verified: {m}")
+            }
         }
     }
 }

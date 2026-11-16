@@ -5,7 +5,7 @@ The off-chain relayer for the Machine bridge (BRIDGE.md sections
 3-of-5 attestations, collects a quorum, and submits `MintWrapped` /
 `Unlock` to the destination chain.
 
-**Status: built and tested locally (24 tests, see below). NOT
+**Status: built and tested locally (30 tests, see below). NOT
 deployed. NOT audited. No asset has crossed with it.** The deploy
 gate in BRIDGE.md section 5 applies to the relayer exactly as it
 does to the programs: live net, public RPC, fresh production keys,
@@ -28,8 +28,17 @@ independent audit, worthless-amount crossings, monitoring.
    the identical message. `expiry_slot` is therefore derived from
    the source slot (`source_slot + expiry_window_slots`, a shared
    config value), never from a local clock. Sender and source
-   transaction are read from the source transaction itself (parsed
-   SPL transfer/burn authority), not asserted by any relayer.
+   transaction are read from the source transaction itself — and
+   verified, not just read: the deposit/burn transfer is a CPI of
+   the lock/bridge program, so it is found in the transaction's
+   inner instructions, and it must be the transfer behind this
+   record — into the vault for a deposit, burning the wrapped mint
+   for a burn — for exactly the record's amount. A transaction
+   that merely contains some other transfer (the Coreum failure,
+   Aug 2026: relayers attested to self-payments of the bridge's
+   own wrapped token as deposits) yields no sender and the relayer
+   refuses to sign. The sender is proven from chain data, never
+   asserted by any relayer.
 4. **Sign** — ed25519 over the message hash, with this operator's
    own keypair. One signature moves nothing.
 5. **Exchange + collect** — phase-1 transport is one signed JSON
@@ -73,15 +82,19 @@ and hold the correct mint; the destination program enforces both.
 cargo test --release -p relayer
 ```
 
-20 unit tests (config validation, finality margin, deterministic
+26 unit tests (config validation, finality margin, deterministic
 expiry, signing against bridge-common's verifier, attestation
 collection incl. disagreement and 2-of-5 failure, instruction
-account order and data round-trip, sender extraction from parsed
-transactions, watcher cursor behaviour) plus 3 integration tests
-(deposit -> 3-of-5 quorum -> MintWrapped instruction; expired
-attestation rejected; and the full local end-to-end drill in
-`tests/full_drill.rs` — both directions executed against the real
-programs, with a forced pause and a forced relayer disagreement;
+account order and data round-trip, verified sender extraction from
+parsed transactions — including the Coreum-style phantom deposit
+rejected, wrong-amount and wrong-destination transfers rejected,
+and a decoy top-level transfer ignored in favour of the real CPI
+transfer into the vault — watcher cursor behaviour) plus 4
+integration tests (deposit -> 3-of-5 quorum -> MintWrapped
+instruction; expired attestation rejected; and the full local
+end-to-end drill in `tests/full_drill.rs` — both directions executed
+against the real programs, with a forced pause and a forced
+relayer disagreement, plus the 45-crossing volume drill;
 see `bridge/drills/LOCAL-DRILL.md`).
 
 ## Honest limits

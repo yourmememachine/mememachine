@@ -18,7 +18,7 @@ use bridge_common::{nonce_pda, EventRecord};
 use relayer::attestation::{AttestationFile, Collector};
 use relayer::config::{parse_pubkey, RelayerConfig};
 use relayer::message::{Direction, ObservedEvent};
-use relayer::rpc::{sender_from_parsed_transaction, RpcClient};
+use relayer::rpc::{sender_from_verified_source_transfer, RpcClient, SourceTransferCheck};
 use relayer::signing::RelayerSigner;
 use relayer::submit::{build_mint_instructions, build_unlock_instructions};
 use relayer::watcher::{poll_once, PollOutcome, RelayerState, SourceChain};
@@ -31,6 +31,11 @@ struct RpcSource {
     client: RpcClient,
     program_id: Pubkey,
     direction: Direction,
+    /// Deposit direction: the lock program's vault token account —
+    /// the source transfer must land here (rpc.rs).
+    vault: Option<Pubkey>,
+    /// Burn direction: the wrapped mint that must be burned.
+    wrapped_mint: Option<Pubkey>,
 }
 
 impl SourceChain for RpcSource {
@@ -47,11 +52,30 @@ impl SourceChain for RpcSource {
         let (record_pda, _) = nonce_pda(&self.program_id, self.direction.nonce_dir(), record.nonce);
         let (source_tx, _slot) = self.client.first_signature_for_address(&record_pda)?;
         let tx = self.client.transaction_parsed(&source_tx)?;
-        let kind = match self.direction {
-            Direction::SolanaToMachine => "transfer",
-            Direction::MachineToSolana => "burn",
+        // The sender is proven, not asserted: the source transaction
+        // must contain the transfer behind this record — into the
+        // vault for a deposit, burning the wrapped mint for a burn —
+        // for exactly the record's amount. Anything else fails
+        // closed (see rpc.rs; Coreum, Aug 2026).
+        let (kind, check) = match self.direction {
+            Direction::SolanaToMachine => (
+                "transfer",
+                SourceTransferCheck {
+                    destination: self.vault,
+                    mint: None,
+                    amount: record.amount,
+                },
+            ),
+            Direction::MachineToSolana => (
+                "burn",
+                SourceTransferCheck {
+                    destination: None,
+                    mint: self.wrapped_mint,
+                    amount: record.amount,
+                },
+            ),
         };
-        let sender = sender_from_parsed_transaction(&tx, kind)?;
+        let sender = sender_from_verified_source_transfer(&tx, kind, &check)?;
         Ok(ObservedEvent {
             record: record.clone(),
             sender,
@@ -60,18 +84,43 @@ impl SourceChain for RpcSource {
     }
 }
 
-fn source_for(cfg: &RelayerConfig, direction: Direction) -> RpcSource {
+fn source_for(cfg: &RelayerConfig, direction: Direction) -> Result<RpcSource> {
+    use borsh::BorshDeserialize;
     match direction {
-        Direction::SolanaToMachine => RpcSource {
-            client: RpcClient::new(&cfg.solana_rpc_url),
-            program_id: cfg.lock_program_id(),
-            direction,
-        },
-        Direction::MachineToSolana => RpcSource {
-            client: RpcClient::new(&cfg.machine_rpc_url),
-            program_id: cfg.machine_program_id(),
-            direction,
-        },
+        Direction::SolanaToMachine => {
+            let client = RpcClient::new(&cfg.solana_rpc_url);
+            let program_id = cfg.lock_program_id();
+            let (config_pda, _) = bridge_common::config_pda(&program_id);
+            let data = client.account_data(&config_pda)?.ok_or_else(|| {
+                RelayerError::Rpc(format!("no lock config account at {config_pda}"))
+            })?;
+            let config =
+                bridge_common::LockConfig::try_from_slice(&data).map_err(RelayerError::Borsh)?;
+            Ok(RpcSource {
+                client,
+                program_id,
+                direction,
+                vault: Some(config.vault),
+                wrapped_mint: None,
+            })
+        }
+        Direction::MachineToSolana => {
+            let client = RpcClient::new(&cfg.machine_rpc_url);
+            let program_id = cfg.machine_program_id();
+            let (config_pda, _) = bridge_common::config_pda(&program_id);
+            let data = client.account_data(&config_pda)?.ok_or_else(|| {
+                RelayerError::Rpc(format!("no bridge config account at {config_pda}"))
+            })?;
+            let config = bridge_common::MachineConfig::try_from_slice(&data)
+                .map_err(RelayerError::Borsh)?;
+            Ok(RpcSource {
+                client,
+                program_id,
+                direction,
+                vault: None,
+                wrapped_mint: Some(config.wrapped_mint),
+            })
+        }
     }
 }
 
@@ -98,7 +147,7 @@ fn sign_once(
     state: &mut RelayerState,
     direction: Direction,
 ) -> Result<bool> {
-    let source = source_for(cfg, direction);
+    let source = source_for(cfg, direction)?;
     let nonce = state.next_nonce(direction);
     // The message always carries the original Solana mint.
     match poll_once(

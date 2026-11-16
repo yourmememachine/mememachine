@@ -44,6 +44,14 @@ current limitations are in LIMITATIONS.md.
 - **Relayer disagreement or haste.** Relayers sign only finalized
   source events (+16 slots); the collector refuses to assemble a
   crossing when relayers disagree. Nothing mints on a split vote.
+- **Phantom deposits (Coreum, Aug 2026).** A relayer must never
+  treat "a transaction exists" as proof of a deposit: the watcher
+  verifies the source transaction contains the transfer behind
+  the event record — into the vault for a deposit, burning the
+  wrapped mint for a burn, for exactly the record's amount
+  (found in top-level or inner instructions, since the transfer
+  is a CPI) — and refuses to sign otherwise. A transaction that
+  only moves tokens between other wallets yields no sender at all.
 - **Being trapped.** The kill-switch permanently stops minting but
   burns — the exit path — stay open. Pause likewise never blocks
   the design's exit guarantees beyond what BRIDGE.md §4.3 states.

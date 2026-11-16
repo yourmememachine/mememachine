@@ -35,6 +35,15 @@ chain configuration gates any public chain launch. Both scopes:
 > creator reputation PDA. All are part of Scope A. Auditors should
 > quote and review against the current `main` HEAD (pinned at the
 > top of this file), not the tree as of the first inquiry.
+>
+> **Scope update (2026-11-16):** the off-chain relayer's watcher
+> was fixed after a trust audit prompted by the Coreum bridge drain
+> (Aug 2026). The watcher now verifies the source transfer behind
+> each event before signing — into the vault for a deposit, burning
+> the wrapped mint for a burn, for exactly the record's amount —
+> and refuses to sign otherwise. Off-chain code only, no program
+> change, no SBF rebuild; the relayer was already in Scope A.
+> Auditors should still quote against the current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
