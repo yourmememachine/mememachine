@@ -206,6 +206,33 @@ struct Chains {
     collector: Collector,
 }
 
+/// Native (builtin) wrapper for the SPL Token program, as a fn pointer.
+///
+/// `ProgramTest::add_builtin_program` takes a bare fn pointer, while the
+/// `processor!` macro yields an `Option<closure>` whose lifetime is not
+/// higher-ranked, so the macro cannot be used here directly. This is the
+/// same body the macro generates.
+fn spl_token_builtin<'a>(
+    vm: *mut solana_program_test::EbpfVm<'a, solana_program_test::InvokeContext<'static>>,
+    _arg0: u64,
+    _arg1: u64,
+    _arg2: u64,
+    _arg3: u64,
+    _arg4: u64,
+) {
+    let vm = unsafe {
+        &mut *((vm as *mut u64)
+            .offset(-(solana_program_test::get_runtime_environment_key() as isize))
+            as *mut solana_program_test::EbpfVm<solana_program_test::InvokeContext>)
+    };
+    vm.program_result = solana_program_test::invoke_builtin_function(
+        spl_token::processor::Processor::process,
+        vm.context_object_pointer,
+    )
+    .map_err(|err| solana_program_test::EbpfError::SyscallError(err))
+    .into();
+}
+
 async fn setup_chains() -> Chains {
     // Five relayers: one identity as dalek signer (relayer) and as
     // solana keypair (program config + pause signing).
@@ -233,11 +260,10 @@ async fn setup_chains() -> Chains {
         lock_pid,
         processor!(solana_lock::processor::process),
     );
-    sol_test.add_program(
-        "spl_token",
-        spl_token::id(),
-        processor!(spl_token::processor::Processor::process),
-    );
+    // SPL Token is a builtin (native) program on-chain, so register it as a
+    // builtin: `add_program` would panic in SBF mode (BPF_OUT_DIR set) because
+    // no spl_token.so exists to load.
+    sol_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
     let mut sol = sol_test.start_with_context().await;
     let user = Keypair::new();
     let mint_authority = Keypair::new();
@@ -297,11 +323,10 @@ async fn setup_chains() -> Chains {
         machine_pid,
         processor!(machine_bridge::processor::process),
     );
-    machine_test.add_program(
-        "spl_token",
-        spl_token::id(),
-        processor!(spl_token::processor::Processor::process),
-    );
+    // SPL Token is a builtin (native) program on-chain, so register it as a
+    // builtin: `add_program` would panic in SBF mode (BPF_OUT_DIR set) because
+    // no spl_token.so exists to load.
+    machine_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
     let mut machine = machine_test.start_with_context().await;
     let recipient = Keypair::new();
     let (bridge_authority, _) = authority_pda(&machine_pid);
