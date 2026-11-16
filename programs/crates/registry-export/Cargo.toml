@@ -1,0 +1,20 @@
+[package]
+name = "registry-export"
+version = "0.1.0"
+edition = "2021"
+description = "Off-chain LaunchGuard registry export: reads LaunchRecord and CreatorReputation accounts from RPC and emits a public, machine-readable JSON registry of protected launches."
+
+[dependencies]
+borsh = "1"
+launch-guard = { path = "../launch-guard" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+solana-account-decoder = "2.3"
+solana-client = "2.3"
+solana-program = "2.3"
+solana-sdk = "2.3"
+spl-token = { version = "4", features = ["no-entrypoint"] }
+
+[dev-dependencies]
+solana-program-test = "2.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
