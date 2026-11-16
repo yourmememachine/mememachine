@@ -117,10 +117,31 @@ accounts cannot be frozen by the creator, and the locked tokens
 cannot move early — those are SPL- and program-level facts, not
 promises.
 
+## Registry export (machine-readable)
+
+Checking one launch by hand is fine; a wallet or checker needs to
+answer the same question for every launch at once. The off-chain
+registry export (`programs/crates/registry-export/`, binary
+`launchguard-registry`) reads every `LaunchRecord` and
+`CreatorReputation` account via `getProgramAccounts` and emits one
+public JSON registry: mint, creator, locked amount and share,
+lock and expiry slots, status (`locked` / `expired_unreleased` /
+`released`), and creator reputation per launch. With `--verify` it
+also fetches each vault and mint account and re-checks the
+invariants above instead of trusting the record. Parsing is strict
+(owner + discriminator + exact length), so foreign accounts are
+ignored, never misread — and the registry never claims a check it
+did not run: the `vault_*` / `authorities_revoked` fields are null
+without `--verify`. This is the piece that turns LaunchGuard from
+a standard you can verify into a standard a checker can consume:
+launch standards elsewhere are PDFs; ours is a feed.
+
 ## How it fits the chain
 
 - `programs/crates/launch-guard/` — the program (native Rust,
   solana-program 2.3, same conventions as the bridge programs).
+- `programs/crates/registry-export/` — the off-chain registry
+  export described above.
 - Off-chain checkers stay the *detection* layer for foreign launches.
   LaunchGuard is the *prevention* layer for native Machine launches.
   Detection warns; prevention constrains.

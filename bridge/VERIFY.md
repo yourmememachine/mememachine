@@ -13,8 +13,9 @@ the current state and supersedes their numbers.
   bridge-common unit + 21 machine-bridge + 15 solana-lock + 1
   precompile-cost + 39 relayer, including the full local
   end-to-end drill and the 45-crossing volume drill); LaunchGuard
-  **26 passed** (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-16: **158 passed, 0 failed**.
+  **26 passed** and registry export **11 passed**
+  (`programs/VERIFY.md`); fork suite 23 OK.
+  Full `make verify` 2026-11-16: **169 passed, 0 failed**.
 - **Verification path:** attestation verification uses the ed25519
   precompile + instructions sysvar (changed 2026-11-14; the original
   sections below describe the earlier in-program dalek path's runs).

@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `266f6c5` (2026-11-16; `make verify` green —
-bridge workspace 108 passed, LaunchGuard 23 passed, fork suite
-23 OK). The pin is refreshed after every full verification run;
+Last verified commit: `d276c3f` (2026-11-16; `make verify` green —
+bridge workspace 109 passed, LaunchGuard 26 passed, registry export
+11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -55,6 +55,16 @@ chain configuration gates any public chain launch. Both scopes:
 > serialization. No program change, no SBF rebuild, no scope
 > change; the relayer and bridge-common were already in Scope A.
 > Auditors should still quote against the current `main` HEAD.
+>
+> **Scope update (2026-11-16, later still):** a new off-chain
+> registry export (`programs/crates/registry-export/`) that reads
+> LaunchGuard's `LaunchRecord` and `CreatorReputation` accounts
+> via RPC and emits a public JSON registry of protected launches,
+> with an optional `--verify` re-check of vault balances and
+> revoked mint authorities. Off-chain tooling only — it reads
+> Scope A accounts, it does not touch the program: no program
+> change, no SBF rebuild, no scope change. Auditors should still
+> quote against the current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |

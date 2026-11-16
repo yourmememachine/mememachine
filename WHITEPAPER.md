@@ -40,8 +40,8 @@ Machine's answer is to move the protections into the chain itself:
 
 Everything claimed in this paper is implemented and tested in the public
 repository, or is explicitly labelled as not yet done. Machine today is
-a single-node localnet with 154 automated tests passing across its
-bridge, launch standard, and fork checks. It is not audited, it is not
+a single-node localnet with 169 automated tests passing across its
+bridge, launch standard, registry export, and fork checks. It is not audited, it is not
 deployed, and no real asset has crossed its bridge. The launch is
 staged and gated on an independent audit funded through public grants —
 because a chain that asks for trust should first earn it in the open.
@@ -441,14 +441,15 @@ The drill reports live in the repository (`bridge/drills/`).
 ### 7.1 Testing
 
 All figures from the latest full verification (`make verify`, run
-2026-11-16 against commit `266f6c5`; re-runnable by anyone):
+2026-11-16 against commit `d276c3f`; re-runnable by anyone):
 
 | Suite | Tests | Covers |
 |---|---|---|
-| Bridge workspace | 108 passing | bridge-common (33), machine-bridge (21), solana-lock (15), relayer (39) |
-| LaunchGuard | 23 passing | 13 integration, 9 adversarial, 1 full demo launch |
+| Bridge workspace | 109 passing | bridge-common (33), machine-bridge (21), solana-lock (15), precompile-cost (1), relayer (39) |
+| LaunchGuard | 26 passing | 13 integration, 12 adversarial, 1 full demo launch |
+| Registry export | 11 passing | 9 unit, 2 program-test integration |
 | Fork suite | 23 checks OK | genesis, patches, chain bring-up |
-| **Total** | **154** | |
+| **Total** | **169** | |
 
 Beyond unit and integration tests: cargo-fuzz harnesses run against
 the message and sysvar parsers and the crossing-receipt
@@ -540,7 +541,7 @@ will be claimed only when a mechanism exists and has been used.
   and unexercised.
 - **Vesting is a commitment, not a lockup** (Section 4.4).
 - **Small numbers, honestly framed.** Solana runs ~1,000+ validators
-  and years of production load; Machine runs one local node and 154
+  and years of production load; Machine runs one local node and 169
   tests. Machine's claim is narrower and, we believe, more durable:
   a launch standard that exists nowhere else, a bridge designed
   against the industry's own post-mortems, and a public record that
@@ -570,7 +571,7 @@ or it doesn't ship.
 | Dynamic caps (unlock) | 1% per tx / 5% per 216,000 slots of live locked total; quarter strength for 216,000 slots after any unpause |
 | LaunchGuard minimums | Authorities revoked; ≥10% of supply locked ≥6,480,000 slots (30 days) |
 | Demo launch mint | `AjTP23T2HhMryZVDPpzVYrTsWHgH6jKkMt9b8cLdn7hc` (localnet, worthless) |
-| Tests | 154 passing (108 bridge workspace, 23 LaunchGuard, 23 fork checks) |
+| Tests | 169 passing (109 bridge workspace, 26 LaunchGuard, 11 registry export, 23 fork checks) |
 | Licence | Apache-2.0 |
 
 ## Appendix B — Document map

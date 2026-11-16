@@ -187,3 +187,27 @@ unchanged. Suite now **23 passed, 0 failed** (13 integration +
 9 adversarial + 1 demo launch). Tests only — no program change,
 so no SBF rebuild and no audit-scope change. Localnet
 program-test only; the demo token is worthless by construction.
+
+### Addendum — LaunchGuard registry export (2026-11-16)
+
+A new off-chain crate, `crates/registry-export/`, turns the
+program's accounts into a public, machine-readable JSON registry:
+`launchguard-registry --url <RPC> --program-id <ID> [--verify]`
+reads every `LaunchRecord` + `CreatorReputation` via
+`getProgramAccounts` and emits mint, creator, locked amount/share,
+lock and expiry slots, status (`locked` / `expired_unreleased` /
+`released`), and creator reputation per launch. `--verify` also
+fetches each vault and mint account and re-checks the registration
+invariants (vault covers the locked amount; both authorities
+revoked) instead of trusting the record. Parsing is strict (owner
++ discriminator + exact length); foreign accounts are ignored,
+never misread. Suite now **37 passed, 0 failed** in `programs/`
+(LaunchGuard 26 + registry export 11: 9 lib unit tests covering
+the strict parser, statuses, reputation joining, and verify logic,
+plus 2 program-test integration tests — two real launches, 10% /
+30 days and 25% / 60 days, built from the actual account bytes the
+program wrote, then register → warp → release → re-export proving
+the `released` status and the empty-vault check). Off-chain
+tooling only — no program change, so no SBF rebuild and no
+audit-scope change. `make verify` green against `d276c3f`;
+repo total **169** (109 bridge workspace + 37 programs + 23 fork).
