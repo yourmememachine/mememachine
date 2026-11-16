@@ -42,11 +42,8 @@ slots are time, and every app is a native app on the chain.
 - **Solana OS** — the native apps layer (Wallet, Rug Shield, Pump
   Radar, x402 Store, MCP Hub, Terminal, Chain Files). It is the
   dashboard and the app platform, not an afterthought.
-- **Rug-Farm Registry** — the open rug-checker for pump.fun, running
-  as a day-one app on Machine (real v2.17+ detection rules, live
-  watcher, hosted API).
 
-Two real apps ship on day one.
+A real apps layer ships on day one.
 
 ## How to run it
 
@@ -89,7 +86,7 @@ not a claim.
 | 1 validator today | **NEXT — not done yet.** Machine is 1 validator today (local single-node testnet). Multi-validator (3 nodes) is the top roadmap item; it needs a host where the file-descriptor limit can be raised to 1,000,000 and UDP send works. See `LAUNCH_CHECKLIST.md`. |
 | Bridge | **NEXT.** Bridge plan is a dated roadmap item (see below). Nothing is claimed as bridged until it is. |
 | Wallet support | **Shipped (OS layer).** The Solana OS wallet connect supports Phantom, Solflare, and Backpack (real USDC signing). Chain-level wallet support (wallets adding the Machine network) is NEXT and needs a public RPC endpoint. |
-| Day-one ecosystem | **Shipped.** Rug-Farm Registry + Solana OS are day-one apps (above). |
+| Day-one ecosystem | **Shipped.** Solana OS is the day-one apps layer (above). |
 | Distribution | **Shipped (distribution).** MACHINE distribution is published in `GENESIS.md`: founder 998,999,000 / stake 1,000,000 / faucet 1,000. No hidden allocation. Price history doesn't exist yet — the token is not trading. |
 | Audit and bug bounty | **NEXT.** Audit + bug bounty are dated roadmap items. |
 | Published genesis, fees, whitepaper | **Shipped.** Genesis hash, validator keys, and the full fee schedule are in `GENESIS.md`. This README is the positioning doc; a whitepaper is NEXT. |

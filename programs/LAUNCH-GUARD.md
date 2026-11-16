@@ -4,10 +4,9 @@
 
 Every chain has launchpads. Launches still rug the same way: the
 creator keeps the mint authority (prints more supply), keeps most of
-the supply unlocked (dumps it), or both. Detection tools — including
-our own Rug-Farm Registry — can only *warn* about this after the fact,
-because on other chains the launch rules live in apps, not in the
-chain's own program set.
+the supply unlocked (dumps it), or both. Detection tools can only
+*warn* about this after the fact, because on other chains the launch
+rules live in apps, not in the chain's own program set.
 
 LaunchGuard moves the two rules that stop the classic rug into a
 program that ships **with Machine itself**:
@@ -122,6 +121,6 @@ promises.
 
 - `programs/crates/launch-guard/` — the program (native Rust,
   solana-program 2.3, same conventions as the bridge programs).
-- Rug-Farm Registry stays the *detection* layer for foreign launches
-  (e.g. pump.fun). LaunchGuard is the *prevention* layer for native
-  Machine launches. Detection warns; prevention constrains.
+- Off-chain checkers stay the *detection* layer for foreign launches.
+  LaunchGuard is the *prevention* layer for native Machine launches.
+  Detection warns; prevention constrains.

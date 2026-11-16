@@ -26,7 +26,6 @@ disclosure policy, not a marketing document.
 | Validator configuration and genesis | The genesis files in `ledger/`, `GENESIS.md`, `patch-vote-authority.py`, `install.sh`, `start-validator.sh`, and `run-in-ns.sh` — anything that affects how the chain boots, votes, confirms, or finalizes. |
 | Livenet deployment package | Everything under `livenet/` — key generation, genesis generation, validator systemd units, cluster checks, port and firewall documentation. |
 | Machine website | The public Machine website (the deployed site and its source artifact). Findings must be about the site itself, not about the hosting provider's infrastructure. |
-| Rug-Farm Registry hosted API | The public read API at `rug-farm-registry.onrender.com` — read-only testing only. Findings about incorrect registry data are data-quality issues, not security issues, unless they demonstrate an integrity or access-control failure. |
 | Bridge programs and relayer (code review) | Everything under `bridge/` — the solana-lock and machine-bridge programs, bridge-common, and the off-chain relayer in `bridge/crates/relayer/`. Code review only: nothing is deployed, so findings must be demonstrated against the code and its tests. |
 
 ### Out of scope
@@ -39,8 +38,8 @@ disclosure policy, not a marketing document.
   wallet software are the vendors' responsibility.
 - **Social engineering, phishing, and physical attacks** against any
   person involved in the project.
-- **Denial-of-service testing** against any hosted endpoint, including
-  the Rug-Farm Registry API. Do not degrade a service other people use.
+- **Denial-of-service testing** against any hosted endpoint. Do not
+  degrade a service other people use.
 - **The localnet itself as a halt target.** The single-node localnet is
   a development environment. Testing that halts it, corrupts its ledger,
   or exhausts its resources is out of scope — report the underlying bug

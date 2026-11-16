@@ -23,7 +23,7 @@ writing: slot 1,180, confirmed 1,179, finalized 1,149.
 | 9 | Finalizing | Finalized Slot 1,149. Root slot 1,074+. |
 | 10 | Snapshots working | Full snapshot at slot 1,100 (validator log: `Full Snapshot Slot: 1100`). |
 | 11 | Founder / faucet / stake balances correct | Founder 998,998,999.99411, faucet 1,000, stake 1,000,000 — all via `solana balance` on the live RPC. |
-| 12 | Day-one apps shipped | Rug-Farm Registry (repo `github.com/yourmememachine/rug-farm-registry`, hosted API `rug-farm-registry.onrender.com`) + Solana OS (web artifact, the native apps layer). |
+| 12 | Day-one apps shipped | Solana OS (web artifact, the native apps layer). |
 | 13 | Fast blocks | Observed ~3 slots/second on the localnet, confirming and finalizing continuously. |
 | 14 | Wallet support beyond one wallet (OS layer) | Solana OS wallet connect supports Phantom, Solflare, and Backpack (real USDC signing). |
 | 15 | Prebuilt binaries only, no source build | Agave 2.3.13 release binaries in `bin/`. `install.sh` downloads the release; nothing was compiled from source. |
