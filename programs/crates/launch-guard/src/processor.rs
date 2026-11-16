@@ -40,7 +40,15 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn load_record(account: &AccountInfo) -> Result<LaunchRecord, ProgramError> {
+fn load_record(account: &AccountInfo, program_id: &Pubkey) -> Result<LaunchRecord, ProgramError> {
+    // The record must be one of ours. An account owned by another
+    // program can carry attacker-chosen bytes — a valid discriminator
+    // and a forged mint/vault/creator/lock — and without this check
+    // the release path would trust it until the runtime rejected the
+    // write at the end of the instruction. Fail here, before any work.
+    if account.owner != program_id {
+        return Err(ProgramError::InvalidAccountData);
+    }
     let data = account.try_borrow_data()?;
     if data.is_empty() || data[0] != DISCRIMINATOR_LAUNCH {
         return Err(ProgramError::InvalidAccountData);
@@ -321,7 +329,14 @@ fn process_extend(
     if !creator.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
-    let mut record = load_record(record_account)?;
+    let mut record = load_record(record_account, program_id)?;
+    // The record for a mint lives only at its derived PDA: a
+    // program-owned account holding a valid record for some other
+    // address is not this mint's record.
+    let (record_pda, _) = launch_pda(program_id, &record.mint);
+    if record_account.key != &record_pda {
+        return Err(LaunchError::InvalidPda.into());
+    }
     if record.creator != *creator.key {
         return Err(LaunchError::NotCreator.into());
     }
@@ -366,7 +381,14 @@ fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
     if token_program.key != &spl_token::id() {
         return Err(LaunchError::UnsupportedTokenProgram.into());
     }
-    let mut record = load_record(record_account)?;
+    let mut record = load_record(record_account, program_id)?;
+    // The record for a mint lives only at its derived PDA. Without
+    // this, a program-owned account holding a valid-looking record
+    // for another address could stand in for this mint's record.
+    let (record_pda, _) = launch_pda(program_id, &record.mint);
+    if record_account.key != &record_pda {
+        return Err(LaunchError::InvalidPda.into());
+    }
     if record.creator != *creator.key {
         return Err(LaunchError::NotCreator.into());
     }
