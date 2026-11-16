@@ -9,11 +9,12 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **108 passed, 0 failed** (33
-  bridge-common unit + 21 machine-bridge + 15 solana-lock + 39
-  relayer, including the full local end-to-end drill and the
-  45-crossing volume drill); LaunchGuard **23 passed**
-  (`programs/VERIFY.md`); fork suite 23 OK.
+- **Tests:** bridge workspace **109 passed, 0 failed** (33
+  bridge-common unit + 21 machine-bridge + 15 solana-lock + 1
+  precompile-cost + 39 relayer, including the full local
+  end-to-end drill and the 45-crossing volume drill); LaunchGuard
+  **26 passed** (`programs/VERIFY.md`); fork suite 23 OK.
+  Full `make verify` 2026-11-16: **158 passed, 0 failed**.
 - **Verification path:** attestation verification uses the ed25519
   precompile + instructions sysvar (changed 2026-11-14; the original
   sections below describe the earlier in-program dalek path's runs).
@@ -25,12 +26,22 @@ the current state and supersedes their numbers.
   also writes a permanent receipt PDA (message hash, source tx,
   amount, recipient, slot, timestamp), derived from
   (direction, nonce) — see the 2026-11-15 addendum below.
-- **Compute units (program-test, native execution):** MintWrapped
-  676, Unlock 676, Burn 409, Deposit 409 — full transactions; see
-  the CU section in the code-review update below. SBF-execution CU
-  is a testnet-host measurement, still outstanding.
-- **SBF:** solana_lock.so `1bc7c3a9…` (204,288 B), machine_bridge.so
-  `eccd1686…` (204,024 B), launch_guard.so `405a0075…` (115,208 B).
+- **Compute units (measured on the real SBF build, 2026-11-16):**
+  MintWrapped (3-of-5) 84,952 execution CU + 7,200 precompile =
+  **92,152 total**; Unlock (3-of-5) 79,582 + 7,200 = **86,782
+  total**; Burn 15,054 execution; Deposit 16,719 execution.
+  `compute_units_consumed` does NOT include the ed25519 precompile
+  charge (proved: a 3-signature precompile-only transaction reports
+  0 CU); the cost-model charge is 2,400 CU/signature (strict).
+  Three ed25519 verifies fit the 200,000 CU budget comfortably
+  (~46% / ~43%). The old 409/676 figures in the log below were
+  native-execution measurements, which meter almost nothing — see
+  the corrected CU section.
+- **SBF (rebuilt 2026-11-16):** solana_lock.so `cda1b66f…`
+  (204,272 B), machine_bridge.so `ecd19d0f…` (204,016 B).
+  launch_guard.so was NOT rebuilt after the 2026-11-16 forgery
+  patch — the `405a0075…` (115,208 B) hash from 2026-11-15 is
+  stale for the current sources; rebuild outstanding.
   Not deployed anywhere; no asset has crossed; no audit.
 
 Toolchain: cargo 1.100.0 (3acc79c0c 2026-11-05), rustc 1.100.0
@@ -235,20 +246,42 @@ test result: ok. 2 passed   — relayer integration
 Total: 66 passed, 0 failed. Exit code 0.
 ```
 
-### Compute units (program-test, native execution)
+### Compute units — CORRECTED 2026-11-16 (measured on the real SBF build)
 
-Measured with `process_transaction_with_metadata` (tests
-`compute_units_mint_wrapped`, `compute_units_unlock`):
+**The 409 CU figures below this section were wrong for SBF.**
+They were measured with `process_transaction_with_metadata` in
+program-test, which executes the programs natively: native
+execution meters almost nothing (program entry + syscalls only),
+so a full MintWrapped transaction reported 409 CU. Those numbers
+say nothing about on-chain cost and are kept below only as a
+dated log. The real numbers, measured 2026-11-16 on the SBF
+build (`cargo build-sbf`, platform-tools v1.48, lockfile verified
+byte-identical to `bridge/deploy/sbf-Cargo.lock`), are:
 
-- Full MintWrapped transaction (ed25519 precompile + bridge
-  instruction, 3-of-5): **409 CU**
-- Full Unlock transaction (same shape): **409 CU**
+| Instruction | Execution CU (`compute_units_consumed`) | ed25519 precompile (cost model) | Full on-chain total |
+|---|---|---|---|
+| MintWrapped (3-of-5) | 84,952 | 3 × 2,400 = 7,200 | **92,152** |
+| Unlock (3-of-5) | 79,582 | 3 × 2,400 = 7,200 | **86,782** |
+| Burn | 15,054 | — | 15,054 |
+| Deposit | 16,719 | — | 16,719 |
 
-Program-test executes the programs natively, so these figures are
-not SBF-execution costs; what they show is that the design carries
-almost no on-chain verification overhead of its own — signature
-verification is the runtime precompile's job now. SBF-execution CU
-will be measured on the Phase 1 testnet host and recorded here.
+**Key finding: `compute_units_consumed` does NOT include the
+ed25519 precompile charge.** Proved with a new test
+(`bridge/crates/solana-lock/tests/precompile_cost.rs`,
+`precompile_charge_excluded_from_execution_cu`): a transaction
+containing only a 3-signature ed25519 instruction succeeds and
+reports **0 CU**. The precompile charge lives in the cost model
+only: 2,280 CU/signature non-strict, **2,400 CU/signature
+strict** (solana-cost-model 2.3.13; strict applies — all features
+are active by default). The totals above use the strict figure.
+
+**Verdict: three ed25519 verifies in one crossing fit the compute
+limit comfortably** — 92,152 / 86,782 CU is ~46% / ~43% of the
+200,000 CU default transaction budget, far under the 1,400,000
+maximum. Even a 5-of-5 crossing (~96,952 / ~91,582 CU) fits.
+The CU test `println!` labels used to say "(incl. ed25519
+precompile)" — that was wrong and is fixed: execution CU
+excludes the precompile charge, and the labels now say so.
 
 ### SBF rebuild (same day, new sources)
 
@@ -456,3 +489,42 @@ machine-bridge 21, solana-lock 15, relayer 39); LaunchGuard
   `LEN`, plus canonicality of arbitrary-byte decodes. Bounded
   session (`cargo fuzz run crossing_receipt -- -max_total_time=300
   -runs=5000000`): **2,405,767 executions in 301 s, no findings**.
+
+### Addendum — hardening pass (2026-11-16)
+
+Bridge workspace **109 passed, 0 failed** (bridge-common 33,
+machine-bridge 21, solana-lock 15, precompile-cost 1, relayer
+39); LaunchGuard **26 passed**; fork suite 23 OK; full
+`make verify` green — **158 passed, 0 failed**.
+
+- **ed25519 compute units measured on the real SBF build** (see
+  the corrected CU section above): MintWrapped 92,152 CU total,
+  Unlock 86,782 CU total — three verifies fit the 200,000 CU
+  budget comfortably. The old 409/676 figures were
+  native-execution measurements, not SBF costs.
+- **SBF rebuilt** (same program-only lockfile method as
+  `bridge/deploy/SBF-BUILD-NOTES.md`; lockfile verified
+  byte-identical to `bridge/deploy/sbf-Cargo.lock`):
+  solana_lock.so `cda1b66ffb32d2c6fe94e0ccbd96ffd95736a78845667a33ed3dc8a64cde8d35`
+  (204,272 B), machine_bridge.so
+  `ecd19d0f8765eb1e333323526cf11e1abd760f98a87bf42d6e13ec55f5eecb77`
+  (204,016 B). Hashes differ from the 2026-11-15 record
+  (f2bdc178/9570f07d) because commits `8369f99` (receipts, cap
+  tightening) and `b9d98d3` (precompile-parser adversarial tests)
+  changed program code after that rebuild. Rebuilding solana-lock
+  in place reproduced the identical hash (deterministic).
+  launch_guard.so was NOT rebuilt in this pass (see SBF-BUILD-NOTES.md).
+- **SPL Token as a builtin in tests:** the bridge tests now
+  register SPL Token via `add_builtin_program` (lock_tests.rs,
+  mint_tests.rs, relayer full_drill.rs) instead of `add_program` —
+  token is a builtin program on-chain, and `add_program` panics
+  in SBF mode because no `spl_token.so` exists. Native behaviour
+  unchanged.
+- **New test:** `bridge/crates/solana-lock/tests/precompile_cost.rs`
+  pins the finding that a precompile-only transaction reports
+  0 execution CU.
+- **LaunchGuard forgery patch** (in `programs/`, see
+  `STATUS.md` P23 and `HARDENING-2026-11-16.md`): `load_record`
+  rejects foreign-owned accounts; release/extend verify the record
+  is the derived PDA. 3 new adversarial tests; mutation check
+  done (removing either check makes its test fail).
