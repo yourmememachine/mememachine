@@ -373,4 +373,206 @@ mod tests {
         assert_eq!(m, msg);
         assert_eq!(s.relayer, signers[0].pubkey());
     }
+
+    // ---------------------------------------------------------------
+    // Malformed exchange files must fail CLOSED (backlog #4).
+    //
+    // Exchange files are untrusted input: another relayer's host, a
+    // synced folder, or an attacker with write access to the share
+    // can put anything in the directory. For every malformed shape
+    // below, `collect` must return an error — never panic, never
+    // hand the submitter a partial attestation, and never let the
+    // malformed file substitute for a valid signature toward the
+    // quorum threshold.
+    // ---------------------------------------------------------------
+
+    fn fresh_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("relayer-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_raw(dir: &Path, file_name: &str, bytes: &[u8]) {
+        std::fs::write(dir.join(file_name), bytes).unwrap();
+    }
+
+    #[test]
+    fn truncated_attestation_file_fails_closed() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("truncated");
+        write_n(&dir, &signers, &msg, 2);
+        // Third relayer's file, cut in half mid-JSON (interrupted
+        // sync, disk-full peer, torn write on the share).
+        let good = AttestationFile::new(
+            Direction::SolanaToMachine,
+            &msg,
+            &signers[2].sign(&msg),
+        );
+        let text = serde_json::to_string_pretty(&good).unwrap();
+        write_raw(&dir, &good.file_name(), &text.as_bytes()[..text.len() / 2]);
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(matches!(
+            c.collect(&dir, Direction::SolanaToMachine, 7, 500),
+            Err(RelayerError::Json(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn garbage_bytes_attestation_file_fails_closed() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("garbage");
+        write_n(&dir, &signers, &msg, 2);
+        // Not even valid UTF-8, under a perfectly plausible file name.
+        let name = format!("solana-to-machine-7-{}.json", signers[2].pubkey());
+        write_raw(&dir, &name, b"\xff\xfe\x00 not an attestation {{{");
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(c.collect(&dir, Direction::SolanaToMachine, 7, 500).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_attestation_file_fails_closed() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("empty");
+        write_n(&dir, &signers, &msg, 2);
+        let name = format!("solana-to-machine-7-{}.json", signers[2].pubkey());
+        write_raw(&dir, &name, b"");
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(matches!(
+            c.collect(&dir, Direction::SolanaToMachine, 7, 500),
+            Err(RelayerError::Json(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn wrong_length_signature_field_fails_closed() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("badsiglen");
+        write_n(&dir, &signers, &msg, 2);
+        // Valid JSON, valid message, but the signature field decodes
+        // to 32 bytes instead of 64.
+        let mut bad = AttestationFile::new(
+            Direction::SolanaToMachine,
+            &msg,
+            &signers[2].sign(&msg),
+        );
+        bad.signature = bs58::encode([1u8; 32]).into_string();
+        let name = bad.file_name();
+        write_raw(&dir, &name, serde_json::to_string_pretty(&bad).unwrap().as_bytes());
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(matches!(
+            c.collect(&dir, Direction::SolanaToMachine, 7, 500),
+            Err(RelayerError::InvalidSignature(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn forged_signature_fails_closed_at_verification() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("forgedsig");
+        write_n(&dir, &signers, &msg, 2);
+        // A genuine signature by relayer 3 — but over a *different*
+        // message (amount 42), transplanted onto this message's file.
+        // The file parses, the stored hash matches the message, and
+        // the signature is 64 well-formed bytes; only the final
+        // bridge-common verification can catch it, and it must.
+        let mut other = msg.clone();
+        other.amount = 42;
+        let forged = AttestationFile::new(
+            Direction::SolanaToMachine,
+            &msg,
+            &signers[2].sign(&other),
+        );
+        let name = forged.file_name();
+        write_raw(&dir, &name, serde_json::to_string_pretty(&forged).unwrap().as_bytes());
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(matches!(
+            c.collect(&dir, Direction::SolanaToMachine, 7, 500),
+            Err(RelayerError::InvalidSignature(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tampered_message_hash_fails_closed() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("badhash");
+        write_n(&dir, &signers, &msg, 2);
+        // The stored (redundant) hash no longer matches the message
+        // in the same file: `to_parts` must reject before counting.
+        let mut bad = AttestationFile::new(
+            Direction::SolanaToMachine,
+            &msg,
+            &signers[2].sign(&msg),
+        );
+        bad.message_hash_hex = "00".repeat(32);
+        let name = bad.file_name();
+        write_raw(&dir, &name, serde_json::to_string_pretty(&bad).unwrap().as_bytes());
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(matches!(
+            c.collect(&dir, Direction::SolanaToMachine, 7, 500),
+            Err(RelayerError::InvalidSignature(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_for_another_nonce_never_counts_toward_quorum() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("wrongnonce");
+        write_n(&dir, &signers, &msg, 2);
+        // A fully valid attestation — for nonce 8 — wearing a
+        // nonce-7 file name. It must be skipped, not counted: the
+        // two genuine nonce-7 signatures are not a quorum.
+        let mut msg8 = msg.clone();
+        msg8.nonce = 8;
+        let alien = AttestationFile::new(
+            Direction::SolanaToMachine,
+            &msg8,
+            &signers[2].sign(&msg8),
+        );
+        let name = format!("solana-to-machine-7-{}.json", signers[2].pubkey());
+        write_raw(&dir, &name, serde_json::to_string_pretty(&alien).unwrap().as_bytes());
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(matches!(
+            c.collect(&dir, Direction::SolanaToMachine, 7, 500),
+            Err(RelayerError::QuorumNotReached { have: 2, need: 3 })
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn malformed_file_fails_closed_even_when_quorum_is_present() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("mixedbad");
+        // A full valid quorum of 3, plus a fourth relayer's file
+        // corrupted. Strict fail-closed: collection errors out
+        // rather than silently skipping the bad file — a human
+        // investigates the exchange directory; nothing is submitted.
+        write_n(&dir, &signers, &msg, 3);
+        let name = format!("solana-to-machine-7-{}.json", signers[3].pubkey());
+        write_raw(&dir, &name, b"{\"direction\": torn write");
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(c.collect(&dir, Direction::SolanaToMachine, 7, 500).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn malformed_file_never_substitutes_for_a_missing_signature() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("mixedshort");
+        // Two valid signatures plus one malformed file: the bad file
+        // must not be counted as the third — no quorum, no partial
+        // attestation, just an error.
+        write_n(&dir, &signers, &msg, 2);
+        let name = format!("solana-to-machine-7-{}.json", signers[2].pubkey());
+        write_raw(&dir, &name, b"garbage");
+        let c = Collector { relayers: pubs, quorum: 3 };
+        assert!(c.collect(&dir, Direction::SolanaToMachine, 7, 500).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

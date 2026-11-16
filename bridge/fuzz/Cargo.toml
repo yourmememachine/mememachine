@@ -3,7 +3,7 @@ name = "bridge-fuzz"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "cargo-fuzz targets for bridge-common's parsers: the ed25519 precompile / instructions-sysvar parser (AUDIT.md Scope A priority), BridgeMessage decoding, and the DailyUsage cap arithmetic."
+description = "cargo-fuzz targets for bridge-common's parsers: the ed25519 precompile / instructions-sysvar parser (AUDIT.md Scope A priority), BridgeMessage decoding, the DailyUsage cap arithmetic, and the CrossingReceipt serialization / receipt PDA derivation."
 
 [package.metadata]
 cargo-fuzz = true
@@ -29,3 +29,7 @@ path = "fuzz_targets/message_decode.rs"
 [[bin]]
 name = "daily_usage"
 path = "fuzz_targets/daily_usage.rs"
+
+[[bin]]
+name = "crossing_receipt"
+path = "fuzz_targets/crossing_receipt.rs"
