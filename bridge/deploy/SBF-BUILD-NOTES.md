@@ -28,6 +28,29 @@ unchanged, see `bridge/VERIFY.md`):
 | `solana_lock.so` | 201,704 | `f2bdc178495af0db34298178865fd9c9408f07f152169973c68a5ebd82b8aa41` |
 | `machine_bridge.so` | 202,016 | `9570f07d503092fe586f8212987996274807fbe6d5de6f73558f8ed8cb73abb6` |
 
+**Rebuilt 2026-11-16** from the hardening pass (receipts + cap
+tightening from `8369f99`, precompile-parser adversarial tests from
+`b9d98d3`; same program-only lockfile method — the scratch
+lockfile was verified byte-identical to the saved
+`sbf-Cargo.lock`; platform-tools v1.48):
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 204,272 | `cda1b66ffb32d2c6fe94e0ccbd96ffd95736a78845667a33ed3dc8a64cde8d35` |
+| `machine_bridge.so` | 204,016 | `ecd19d0f8765eb1e333323526cf11e1abd760f98a87bf42d6e13ec55f5eecb77` |
+
+Hashes differ from the 2026-11-15 record because the program code
+changed after that rebuild. Rebuilding solana-lock in place
+reproduced the identical hash (deterministic build). These binaries
+were used for the SBF compute-unit measurement in
+`bridge/VERIFY.md` (MintWrapped 92,152 CU total, Unlock 86,782 CU
+total). **launch_guard.so was NOT rebuilt in this pass** — the
+2026-11-15 hash (`405a0075…`, 115,208 B) is stale for the current
+sources after the 2026-11-16 forgery patch; rebuild outstanding
+before any LaunchGuard deployment. The `.so` files themselves live
+only in the ephemeral scratch directory and are not committed —
+the hashes above are the record, matching existing practice.
+
 Build note from the same evening: the scratch tree's manifests must
 keep their `[dev-dependencies]` stripped (step 1) — restoring the
 full workspace manifests makes cargo re-resolve the graph, pulls the
@@ -50,7 +73,7 @@ test-only dependencies (`solana-program-test` → `solana-accounts-db`
 requires `blake3 ^1.8`, whose `digest 0.11` → `block-buffer 0.12` chain
 is edition2024). This is a toolchain-age problem, not a program-code
 problem: the host toolchain (cargo 1.100) builds and tests the same
-code fine (56/56).
+code fine (109/109 bridge workspace).
 
 ## Method used (reproducible)
 
@@ -78,7 +101,7 @@ code fine (56/56).
 - The pins above change *transitive dependency versions* relative to
   the workspace lockfile used for host tests. The program crates' own
   code and their direct dependencies are unchanged, and the host test
-  suites (56/56) were run against the workspace lock. Rebuilding from
+  suites (109/109 bridge workspace) were run against the workspace lock. Rebuilding from
   `sbf-Cargo.lock` and comparing hashes is the reproducibility check.
 - The generated `*-keypair.json` files from this build are throwaway
   build artifacts in a scratch directory — they are **not** program
