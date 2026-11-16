@@ -116,3 +116,53 @@ RegisterAndLock CU (program-test, native execution): 9,508 →
 **9,775**. SBF rebuilt: launch_guard.so
 `405a0075790224ee2e00c34762d2e561d5ac401bb29c0420030afce1f51dd367`
 (115,208 B). Not deployed.
+
+### Addendum — "rug attempt" adversarial harness (2026-11-16)
+
+A second test file, `crates/launch-guard/tests/adversarial.rs`
+(9 tests), written from an attacker's checklist. Each test is one
+way a creator, a stranger, or a compromised account tries to get
+locked tokens out early, to shorten a lock, to forge a reputation,
+or to bypass the program entirely. Suite now **22 passed,
+0 failed** (13 integration + 9 adversarial). Tests only — no
+program change, so no SBF rebuild and no audit-scope change.
+
+- `attack_release_one_slot_early_fails_at_exact_expiry_succeeds`:
+  the expiry boundary is exact — one slot before `lock_until_slot`
+  the vault is sealed (`StillLocked`); at the slot itself it opens.
+- `attack_double_register_same_mint_fails`: a second registration
+  of the same mint cannot create the launch PDA again; one record,
+  one vault, reputation still counts 1.
+- `attack_stranger_drains_vault_directly_fails`: a stranger calling
+  the SPL token program to move vault funds fails — the vault is
+  owned by the authority PDA, which only the program can sign for.
+- `attack_release_to_attacker_token_account_fails`: a release naming
+  an attacker's token account as destination fails (`MintMismatch`);
+  the honest release still works afterwards.
+- `attack_release_without_reputation_account_fails`: release with a
+  nonexistent reputation account fails (`InvalidPda`) and, the
+  transaction rolling back, moves no funds.
+- `attack_register_with_forged_reputation_fails`: registering with
+  another creator's reputation PDA fails (`InvalidPda`); nothing is
+  created for the attacker and the victim's counters are untouched.
+- `attack_lock_can_only_move_later`: extend by zero fails; extend
+  after release fails (`AlreadyReleased`); extend after expiry is
+  permitted — it only re-locks the creator's own funds for longer,
+  and the old expiry stays sealed until the new date. This is the
+  designed direction (locks extend, never shorten), pinned by test
+  rather than assumed.
+- `attack_two_creators_interleaved_reputations_stay_separate`: two
+  creators' interleaved launches keep separate counters; neither
+  can release the other's launch or borrow the other's reputation
+  PDA.
+- `attack_failed_registration_does_not_create_reputation`: a
+  registration rejected for a sub-10% lock leaves no reputation
+  account and no record; the later successful registration counts
+  exactly once.
+
+Two harness notes for future test authors: an identical transaction
+resubmitted in the same slot returns the first transaction's cached
+result instead of executing, so a repeated attempt needs a slot
+warp first; and `warp_to_slot` rejects a target at or behind the
+current slot, so expiries that coincide must warp to
+`max(target, current + 1)`.
