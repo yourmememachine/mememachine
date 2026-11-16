@@ -129,7 +129,7 @@ When those exist, the deploy path is:
 - **Relayer: implemented, never run live.** The off-chain relayer
   (watching for finalized deposits/burns, signing attestations,
   collecting a 3-of-5 quorum, submitting them) is in
-  `crates/relayer/` and passes its tests locally (30 tests). Since
+  `crates/relayer/` and passes its tests locally (39 tests). Since
   2026-11-16 the watcher verifies the source transfer behind each
   event (into the vault / burning the wrapped mint, exact amount)
   before signing. It has never watched a real deposit — there is

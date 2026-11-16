@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `e14c539` (2026-11-16; `make verify` green —
-bridge workspace 99 passed, LaunchGuard 23 passed, fork suite
+Last verified commit: `266f6c5` (2026-11-16; `make verify` green —
+bridge workspace 108 passed, LaunchGuard 23 passed, fork suite
 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -43,6 +43,17 @@ chain configuration gates any public chain launch. Both scopes:
 > the wrapped mint for a burn, for exactly the record's amount —
 > and refuses to sign otherwise. Off-chain code only, no program
 > change, no SBF rebuild; the relayer was already in Scope A.
+> Auditors should still quote against the current `main` HEAD.
+>
+> **Scope update (2026-11-16, later):** tests-only hardening of
+> the in-scope relayer — nine new collector tests proving the
+> file-based attestation exchange fails closed on malformed files
+> (truncated / garbage / empty files, bad or forged signatures,
+> tampered message hash, wrong-nonce file; no behavior change was
+> needed) — plus a fourth cargo-fuzz target (`crossing_receipt`)
+> over bridge-common's receipt PDA derivation and `CrossingReceipt`
+> serialization. No program change, no SBF rebuild, no scope
+> change; the relayer and bridge-common were already in Scope A.
 > Auditors should still quote against the current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
@@ -93,6 +104,13 @@ starts from what is already known:
   regression test; post-fix runs are clean (7.77M executions on
   the parser target; 7.35M and 19.1M on the other two). Details
   in `bridge/VERIFY.md`.
+  **Round 2 (2026-11-16):** a fourth target, `crossing_receipt`,
+  covers the receipt PDA derivation (`receipt_pda` — total and
+  deterministic for any direction byte and nonce) and the
+  `CrossingReceipt` borsh round-trip at its declared length, plus
+  canonicality of arbitrary-byte decodes. Bounded session
+  (`-max_total_time=300`): 2,405,767 executions in 301 s, no
+  findings.
 
 - **`cargo audit` (RustSec DB) on both workspaces: 10 known
   vulnerabilities, all in transitive dependencies; none in

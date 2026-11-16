@@ -9,8 +9,8 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **99 passed, 0 failed** (33
-  bridge-common unit + 21 machine-bridge + 15 solana-lock + 30
+- **Tests:** bridge workspace **108 passed, 0 failed** (33
+  bridge-common unit + 21 machine-bridge + 15 solana-lock + 39
   relayer, including the full local end-to-end drill and the
   45-crossing volume drill); LaunchGuard **23 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
@@ -430,3 +430,29 @@ LaunchGuard **23 passed**; fork suite 23 OK; `make verify` green.
   wrong destination rejected, wrong amount rejected, decoy
   top-level transfer ignored, burn with the wrong mint rejected,
   missing instructions still an error.
+
+### Addendum — malformed-attestation fail-closed tests + fuzz round 2 (2026-11-16)
+
+Bridge workspace **108 passed, 0 failed** (bridge-common 33,
+machine-bridge 21, solana-lock 15, relayer 39); LaunchGuard
+**23 passed**; fork suite 23 OK; `make verify` green against
+`266f6c5`.
+
+- **Relayer exchange robustness (9 new tests, tests only):** the
+  collector's inputs are files written by *other* relayers into a
+  shared directory — untrusted input. Tests prove collection fails
+  closed on a truncated file, garbage bytes, an empty file, a
+  wrong-length signature field, a forged signature (caught at the
+  final bridge-common re-verification), a tampered stored message
+  hash, and a valid attestation for another nonce wearing this
+  nonce's file name (skipped, never counted). A malformed file
+  aborts collection even when a full valid quorum is also present:
+  strict fail-closed, no partial attestation is ever produced.
+  No behavior change was needed — the collector already failed
+  closed in every shape; the tests pin it.
+- **Fuzz round 2:** new `crossing_receipt` target in
+  `bridge/fuzz/` — `receipt_pda` derivation (total, deterministic)
+  and the `CrossingReceipt` borsh round-trip at its declared
+  `LEN`, plus canonicality of arbitrary-byte decodes. Bounded
+  session (`cargo fuzz run crossing_receipt -- -max_total_time=300
+  -runs=5000000`): **2,405,767 executions in 301 s, no findings**.

@@ -5,7 +5,7 @@ The off-chain relayer for the Machine bridge (BRIDGE.md sections
 3-of-5 attestations, collects a quorum, and submits `MintWrapped` /
 `Unlock` to the destination chain.
 
-**Status: built and tested locally (30 tests, see below). NOT
+**Status: built and tested locally (39 tests, see below). NOT
 deployed. NOT audited. No asset has crossed with it.** The deploy
 gate in BRIDGE.md section 5 applies to the relayer exactly as it
 does to the programs: live net, public RPC, fresh production keys,
@@ -82,9 +82,12 @@ and hold the correct mint; the destination program enforces both.
 cargo test --release -p relayer
 ```
 
-26 unit tests (config validation, finality margin, deterministic
+35 unit tests (config validation, finality margin, deterministic
 expiry, signing against bridge-common's verifier, attestation
-collection incl. disagreement and 2-of-5 failure, instruction
+collection incl. disagreement and 2-of-5 failure, malformed
+exchange files failing closed (truncated / garbage / empty,
+bad or forged signatures, tampered hash, wrong-nonce file),
+instruction
 account order and data round-trip, verified sender extraction from
 parsed transactions — including the Coreum-style phantom deposit
 rejected, wrong-amount and wrong-destination transfers rejected,
