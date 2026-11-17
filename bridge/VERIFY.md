@@ -9,13 +9,28 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **127 passed, 0 failed** (37
+- **Tests:** bridge workspace **146 passed, 0 failed** (37
   bridge-common unit + 27 machine-bridge + 21 solana-lock + 1
-  precompile-cost + 41 relayer, including the full local
-  end-to-end drill and the 45-crossing volume drill); LaunchGuard
-  **29 passed** and registry export **11 passed**
+  precompile-cost + 41 relayer + 19 proof bundle, including the
+  full local end-to-end drill and the 45-crossing volume drill);
+  LaunchGuard **29 passed** and registry export **11 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-17: **190 passed, 0 failed**.
+  Full `make verify` 2026-11-17: **209 passed, 0 failed**.
+- **Crossing proof bundles (2026-11-17, commit `c90ade0`):** new
+  off-chain crate `crates/proof-bundle/` (binary `crossing-proof`)
+  exports one self-contained JSON bundle per crossing — receipt,
+  canonical message, attestation set, stated relayer set and
+  quorum — and verifies it fully offline: the message hash is
+  recomputed from the canonical encoding, the receipt is compared
+  field-by-field against the message, and the signatures are
+  re-verified with bridge-common's own `verify_attestation`, with
+  the claimed quorum pinned to the protocol constant so a bundle
+  cannot weaken the rules it claims to satisfy. 19 tests: 18
+  library (valid bundles, JSON round-trip, the tamper matrix) and
+  1 end-to-end (a real crossing through the drill harness,
+  verified in-process and through the shipped binary). See
+  `PROOF-BUNDLE.md`. Off-chain only — no program change, no SBF
+  rebuild.
 - **Self-audit fixes (2026-11-16, commit `7cd6f5b`):** Initialize
   in both bridge programs is bound to the program's upgrade
   authority (ProgramData account required; machine-bridge also

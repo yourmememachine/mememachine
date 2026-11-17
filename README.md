@@ -165,7 +165,7 @@ The locks are also machine-readable: the [registry export](programs/crates/regis
 
 ## Bridge
 
-Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 86 program tests passing (127 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (41 tests passing). SBF-measured: MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
+Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 86 program tests passing (146 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (41 tests passing) and the crossing-proof bundle tool in `bridge/crates/proof-bundle/` (19 tests passing; [bridge/PROOF-BUNDLE.md](bridge/PROOF-BUNDLE.md)). SBF-measured: MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
 
 ## Support
 

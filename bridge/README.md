@@ -25,9 +25,11 @@ bridge/
     │   ├── src/lib.rs
     │   ├── src/processor.rs
     │   └── tests/lock_tests.rs # program-test integration tests
-    └── relayer/                # off-chain relayer (see its README)
-        └── src/                  # watcher, signing, attestation
-                                # collector, submitter, RPC, CLI
+    ├── relayer/                # off-chain relayer (see its README)
+    │   └── src/                  # watcher, signing, attestation
+    │                           # collector, submitter, RPC, CLI
+    └── proof-bundle/           # off-chain crossing proof bundles:
+                                # export + offline verify (PROOF-BUNDLE.md)
 ```
 
 ## Design (from BRIDGE.md)

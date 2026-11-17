@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `7cd6f5b` (2026-11-17; `make verify` green —
-bridge workspace 127 passed, LaunchGuard 29 passed, registry export
+Last verified commit: `c90ade0` (2026-11-17; `make verify` green —
+bridge workspace 146 passed, LaunchGuard 29 passed, registry export
 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -90,6 +90,19 @@ chain configuration gates any public chain launch. Both scopes:
 > in particular, quotes issued against pre-`7cd6f5b` trees do not
 > cover the changed Initialize paths.
 
+> **Scope update (2026-11-17):** a new off-chain crossing proof
+> bundle tool (`bridge/crates/proof-bundle/`, binary
+> `crossing-proof`; doc `bridge/PROOF-BUNDLE.md`) packages a
+> completed crossing's receipt, canonical message, and attestation
+> set into one self-contained JSON file and verifies it fully
+> offline, re-running bridge-common's own `verify_attestation`
+> against the bundle's stated relayer set with the claimed quorum
+> pinned to the protocol constant. Off-chain tooling only — it
+> reads Scope A data (crossing receipts, relayer attestation
+> files); it does not touch any program: **no program change, no
+> SBF rebuild, no scope change.** Auditors should still quote
+> against the current `main` HEAD.
+
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
 |---|---|
@@ -102,8 +115,8 @@ chain configuration gates any public chain launch. Both scopes:
 
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
-cd bridge && cargo test --release # bridge workspace: programs + relayer
-cd programs && cargo test --release # LaunchGuard: 23 tests (13 integration + 9 adversarial + 1 demo launch)
+cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle (146)
+cd programs && cargo test --release # LaunchGuard 29 tests (16 integration + 12 adversarial + 1 demo launch) + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```
 
