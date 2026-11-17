@@ -78,6 +78,21 @@ outstanding above:
 | `machine_bridge.so` | 211,856 | `8e4501e25f3ef840f60ede5e5e05e3e9e2ecfd9a7f7547340ac2b58b440f1406` |
 | `launch_guard.so` | 126,512 | `cda7112195249da03cedcc968561519a9a9898f2773d32e860f486611a86b92d` |
 
+**Rebuilt 2026-11-17** from the LaunchGuard CloseVault change
+(`8e84d18`: a fourth instruction — creator-only, gated on the
+record's Released state — sweeps residual vault tokens to the
+creator and closes the vault account; see the AUDIT.md scope
+update). LaunchGuard only — the bridge programs were not
+touched and their binaries above stand. Same standalone-tree
+method (`~/workspace/sbf-lg/`, manifests stripped, saved
+`programs/sbf-Cargo.lock` byte-identical to the tree's
+lockfile). The build is deterministic: two consecutive builds
+produced the identical hash.
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `launch_guard.so` | 135,488 | `915dc769e342b695dc11c37548184a1edff2e7534603410cb0bb787c8fb33788` |
+
 ## Why the build does not run directly against the bridge workspace
 
 `bridge/deploy/build-sbf.sh` against the workspace fails before any

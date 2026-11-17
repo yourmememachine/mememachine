@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `c90ade0` (2026-11-17; `make verify` green —
-bridge workspace 146 passed, LaunchGuard 29 passed, registry export
+Last verified commit: `8e84d18` (2026-11-17; `make verify` green —
+bridge workspace 146 passed, LaunchGuard 34 passed, registry export
 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -103,6 +103,35 @@ chain configuration gates any public chain launch. Both scopes:
 > SBF rebuild, no scope change.** Auditors should still quote
 > against the current `main` HEAD.
 
+> **Scope update (2026-11-17, later — PROGRAM CHANGE, SBF
+> REBUILT):** LaunchGuard gained a fourth instruction,
+> `CloseVault` (commit `8e84d18`, from an external review's
+> stuck-funds point). The vault is a normal SPL token account, so
+> anyone can transfer extra tokens into it, and `Release` moves
+> exactly `locked_amount` — the excess was permanently stuck.
+> `CloseVault` is creator-only and gated on the record's
+> Released state, which `Release` sets only after the full
+> locked amount has left the vault; it sweeps the residual to
+> the creator and closes the vault account (rent to the
+> creator). It has no path to any part of the lock: while a
+> launch is locked or expired-but-unreleased it always fails
+> (new error `NotReleased`). No LaunchGuard economics changed
+> (the 10% floor, lock durations, and all parameters are as
+> before). The same review's claim of a missing record-PDA
+> re-derivation check in `ExtendLock`/`Release` was verified
+> **not present in the code**: the assertion has been in both
+> instructions since `93b5cd9` (2026-11-16), the reputation PDA
+> is bound the same way in `RegisterAndLock` and `Release`, and
+> dedicated wrong-address regression tests cover all of it;
+> `CloseVault` carries the same check. 5 new tests (LaunchGuard
+> suite 29 → 34); `launch_guard.so` rebuilt (135,488 B, sha256
+> in `bridge/deploy/SBF-BUILD-NOTES.md`); the bridge programs
+> were not touched and their binaries were not rebuilt.
+> **Auditors must quote and review against the current `main`
+> HEAD (pinned at the top of this file), not any earlier tree** —
+> quotes issued against pre-`8e84d18` trees do not cover
+> `CloseVault`.
+
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
 |---|---|
@@ -116,7 +145,7 @@ chain configuration gates any public chain launch. Both scopes:
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
 cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle (146)
-cd programs && cargo test --release # LaunchGuard 29 tests (16 integration + 12 adversarial + 1 demo launch) + registry export 11
+cd programs && cargo test --release # LaunchGuard 34 tests (16 integration + 17 adversarial + 1 demo launch) + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```
 

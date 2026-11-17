@@ -13,7 +13,7 @@ gate allows.
 ## Phase 0 — Public proof of work ($0) — *current*
 
 - Everything in the open: code, tests (146 bridge + 23 fork +
-  29 LaunchGuard + 11 registry export), SBF hashes, runbooks, drills, honest status docs.
+  34 LaunchGuard + 11 registry export), SBF hashes, runbooks, drills, honest status docs.
 - Free security passes: `cargo audit`, clippy, cargo-fuzz, plus a
   documented self-review checklist. (Sec3 X-Ray turned out to be
   paid-only and Soteria cannot read this codebase's toolchain —

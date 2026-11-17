@@ -13,9 +13,18 @@ the current state and supersedes their numbers.
   bridge-common unit + 27 machine-bridge + 21 solana-lock + 1
   precompile-cost + 41 relayer + 19 proof bundle, including the
   full local end-to-end drill and the 45-crossing volume drill);
-  LaunchGuard **29 passed** and registry export **11 passed**
+  LaunchGuard **34 passed** and registry export **11 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-17: **209 passed, 0 failed**.
+  Full `make verify` 2026-11-17: **214 passed, 0 failed**.
+- **LaunchGuard CloseVault (2026-11-17, commit `8e84d18`):** new
+  creator-only instruction, gated on the record's Released state,
+  that sweeps residual tokens (sent into the vault by anyone —
+  Release moves exactly `locked_amount`) back to the creator and
+  closes the vault account. No path to the lock: locked or
+  expired-but-unreleased launches always fail it. 5 new
+  adversarial tests; the external review's missing-PDA-check
+  claim was verified already fixed since `93b5cd9`. Details in
+  `programs/VERIFY.md` and the AUDIT.md scope update.
 - **Crossing proof bundles (2026-11-17, commit `c90ade0`):** new
   off-chain crate `crates/proof-bundle/` (binary `crossing-proof`)
   exports one self-contained JSON bundle per crossing — receipt,
@@ -66,7 +75,10 @@ the current state and supersedes their numbers.
   `46c58613…` (210,256 B), machine_bridge.so `8e4501e2…`
   (211,856 B), launch_guard.so `cda71121…` (126,512 B — the
   LaunchGuard rebuild left outstanding by the forgery patch is
-  now done). Full hashes in `bridge/deploy/SBF-BUILD-NOTES.md`.
+  now done). **launch_guard.so rebuilt again 2026-11-17
+  (CloseVault, `8e84d18`): `915dc769…` (135,488 B); the two
+  bridge binaries are unchanged.** Full hashes in
+  `bridge/deploy/SBF-BUILD-NOTES.md`.
   Not deployed anywhere; no asset has crossed; no audit.
 
 Toolchain: cargo 1.100.0 (3acc79c0c 2026-11-05), rustc 1.100.0

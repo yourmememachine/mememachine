@@ -7,6 +7,31 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-17 — `8e84d18`** LaunchGuard CloseVault (external
+  review triage). The review's stuck-funds point was real: the
+  vault is a normal SPL token account, anyone can transfer extra
+  tokens into it, and `Release` moves exactly `locked_amount`,
+  so the excess was permanently stuck. New instruction
+  `CloseVault` — creator only, gated on the record's Released
+  state (set only after the full locked amount has left the
+  vault) — sweeps the residual to the creator and closes the
+  vault account, returning its rent. Locked or
+  expired-but-unreleased launches always fail it (new error
+  `NotReleased`); it has no path to any part of the lock, and it
+  carries the same record-PDA re-derivation check as
+  ExtendLock/Release. The review's second code claim — a missing
+  record-PDA re-derivation check in ExtendLock and Release —
+  was verified **not present in the code**: the assertion has
+  been in both instructions since `93b5cd9` (2026-11-16), the
+  reputation PDA is bound the same way in RegisterAndLock and
+  Release, and dedicated wrong-address regression tests cover
+  all of it (a forged Released record at a wrong address is now
+  also pinned against CloseVault). The remaining four points
+  are the standard's documented scope (10% floor vs the unlocked
+  90%, no LP locking, per-keypair reputation, slot-based locks /
+  unaudited) — LAUNCH-GUARD.md wording tightened, no economics
+  changed. 5 new tests; launch_guard.so rebuilt
+  (`915dc769…`, 135,488 B).
 - **2026-11-16 — `7cd6f5b`** Self-audit fixes (REVIEW-1: the
   audit method turned on Machine's own code; 4 findings, each
   PoC-proven in a scratch copy first). (F-1, High) `Initialize`

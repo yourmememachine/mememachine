@@ -40,7 +40,7 @@ Machine's answer is to move the protections into the chain itself:
 
 Everything claimed in this paper is implemented and tested in the public
 repository, or is explicitly labelled as not yet done. Machine today is
-a single-node localnet with 209 automated tests passing across its
+a single-node localnet with 214 automated tests passing across its
 bridge, launch standard, registry export, proof bundle, and fork checks. It is not audited, it is not
 deployed, and no real asset has crossed its bridge. The launch is
 staged and gated on an independent audit funded through public grants —
@@ -441,15 +441,15 @@ The drill reports live in the repository (`bridge/drills/`).
 ### 7.1 Testing
 
 All figures from the latest full verification (`make verify`, run
-2026-11-17 against commit `c90ade0`; re-runnable by anyone):
+2026-11-17 against commit `8e84d18`; re-runnable by anyone):
 
 | Suite | Tests | Covers |
 |---|---|---|
 | Bridge workspace | 146 passing | bridge-common (37), machine-bridge (27), solana-lock (21), precompile-cost (1), relayer (41), proof-bundle (19) |
-| LaunchGuard | 29 passing | 16 integration, 12 adversarial, 1 full demo launch |
+| LaunchGuard | 34 passing | 16 integration, 17 adversarial, 1 full demo launch |
 | Registry export | 11 passing | 9 unit, 2 program-test integration |
 | Fork suite | 23 checks OK | genesis, patches, chain bring-up |
-| **Total** | **209** | |
+| **Total** | **214** | |
 
 Beyond unit and integration tests: cargo-fuzz harnesses run against
 the message and sysvar parsers and the crossing-receipt
@@ -541,7 +541,7 @@ will be claimed only when a mechanism exists and has been used.
   and unexercised.
 - **Vesting is a commitment, not a lockup** (Section 4.4).
 - **Small numbers, honestly framed.** Solana runs ~1,000+ validators
-  and years of production load; Machine runs one local node and 209
+  and years of production load; Machine runs one local node and 214
   tests. Machine's claim is narrower and, we believe, more durable:
   a launch standard that exists nowhere else, a bridge designed
   against the industry's own post-mortems, and a public record that
@@ -571,7 +571,7 @@ or it doesn't ship.
 | Dynamic caps (unlock) | 1% per tx / 5% per 216,000 slots of live locked total; quarter strength for 216,000 slots after any unpause |
 | LaunchGuard minimums | Authorities revoked; ≥10% of supply locked ≥6,480,000 slots (30 days) |
 | Demo launch mint | `AjTP23T2HhMryZVDPpzVYrTsWHgH6jKkMt9b8cLdn7hc` (localnet, worthless) |
-| Tests | 209 passing (146 bridge workspace, 29 LaunchGuard, 11 registry export, 23 fork checks) |
+| Tests | 214 passing (146 bridge workspace, 34 LaunchGuard, 11 registry export, 23 fork checks) |
 | Licence | Apache-2.0 |
 
 ## Appendix B — Document map

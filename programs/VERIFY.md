@@ -231,3 +231,35 @@ launch_guard.so
 the 2026-11-16 forgery patch. `make verify` green against
 `7cd6f5b`; repo total **190** (127 bridge workspace + 40 programs
 + 23 fork). Not deployed.
+
+### Addendum — CloseVault (2026-11-17)
+
+An external review of LaunchGuard raised six points. Triage
+against the code: four are the standard's documented scope (10%
+lock is a floor, not a guarantee; no LP locking; per-keypair
+reputation; slot-based locks, unaudited, undeployed — wording in
+LAUNCH-GUARD.md tightened, no economics changed); the claimed
+missing record-PDA re-derivation check in ExtendLock/Release
+was verified **already present** since `93b5cd9` (with the
+reputation PDA bound the same way in RegisterAndLock and
+Release, and wrong-address regression tests covering all of
+it); and the stuck-residual point was real and is fixed in
+commit `8e84d18`: the vault is a normal SPL token account,
+anyone can send extra tokens into it, and Release moves exactly
+`locked_amount`. New instruction **CloseVault** — creator only,
+gated on the record's Released state (set only after the full
+locked amount has left the vault), with the same record-PDA
+re-derivation check — sweeps the residual to the creator and
+closes the vault account (rent to the creator). Locked or
+expired-but-unreleased launches always fail it (new error
+`NotReleased` = 13); it has no path to any part of the lock.
+5 new adversarial tests: residual recovery after release, close
+before release fails (locked and expired-unreleased), stranger
+close fails (`NotCreator`), zero-residual close, and a forged
+Released record at a wrong address fails CloseVault with
+`InvalidPda`. Suite now **34 passed, 0 failed** (16 integration
++ 17 adversarial + 1 demo launch). SBF rebuilt: launch_guard.so
+`915dc769e342b695dc11c37548184a1edff2e7534603410cb0bb787c8fb33788`
+(135,488 B; deterministic — two builds, identical hash).
+`make verify` green against `8e84d18`; repo total **214**
+(146 bridge workspace + 45 programs + 23 fork). Not deployed.
