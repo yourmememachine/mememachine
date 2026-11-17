@@ -13,6 +13,7 @@ crossed. Nothing here holds real funds.**
 bridge/
 ├── Cargo.toml                  # workspace (resolver 2)
 ├── README.md                   # this file
+├── RELAYER-LOG.md              # the relayer's tamper-evident audit log
 ├── VERIFY.md                   # real build/test output
 └── crates/
     ├── bridge-common/          # message format, attestation verification,
@@ -27,7 +28,8 @@ bridge/
     │   └── tests/lock_tests.rs # program-test integration tests
     ├── relayer/                # off-chain relayer (see its README)
     │   └── src/                  # watcher, signing, attestation
-    │                           # collector, submitter, RPC, CLI
+    │                           # collector, submitter, RPC, CLI,
+    │                           # hash-chained audit log + relayer-log
     └── proof-bundle/           # off-chain crossing proof bundles:
                                 # export + offline verify (PROOF-BUNDLE.md)
 ```
@@ -131,7 +133,7 @@ When those exist, the deploy path is:
 - **Relayer: implemented, never run live.** The off-chain relayer
   (watching for finalized deposits/burns, signing attestations,
   collecting a 3-of-5 quorum, submitting them) is in
-  `crates/relayer/` and passes its tests locally (41 tests). Since
+  `crates/relayer/` and passes its tests locally (54 tests). Since
   2026-11-16 the watcher verifies the source transfer behind each
   event (into the vault / burning the wrapped mint, exact amount)
   before signing — and since the self-audit fix later that day,

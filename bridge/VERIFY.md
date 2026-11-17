@@ -9,13 +9,27 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **146 passed, 0 failed** (37
+- **Tests:** bridge workspace **159 passed, 0 failed** (37
   bridge-common unit + 27 machine-bridge + 21 solana-lock + 1
-  precompile-cost + 41 relayer + 19 proof bundle, including the
+  precompile-cost + 54 relayer + 19 proof bundle, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **34 passed** and registry export **11 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-17: **214 passed, 0 failed**.
+  Full `make verify` 2026-11-17: **227 passed, 0 failed**.
+- **Tamper-evident relayer audit log (2026-11-17, commit
+  `1a76c91`):** new `audit_log` module in the relayer crate plus a
+  `relayer-log` inspector binary. Every sign, quorum collection,
+  non-routine collection failure, dry run, and submission is
+  appended to a hash-chained JSON Lines log; the relayer fails
+  closed if the existing log does not verify. 13 new tests,
+  including the pinned honest limit: truncation and a wholesale
+  recomputed rewrite pass internal verification and are caught
+  only against a published checkpoint (`relayer-log head` /
+  `verify --checkpoint`). The wire format was cross-checked
+  against an independent Python implementation of the hash
+  construction, whose output the shipped binary verifies. See
+  `RELAYER-LOG.md`. Off-chain only — no program change, no SBF
+  rebuild.
 - **LaunchGuard CloseVault (2026-11-17, commit `8e84d18`):** new
   creator-only instruction, gated on the record's Released state,
   that sweeps residual tokens (sent into the vault by anyone —

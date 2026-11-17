@@ -441,15 +441,15 @@ The drill reports live in the repository (`bridge/drills/`).
 ### 7.1 Testing
 
 All figures from the latest full verification (`make verify`, run
-2026-11-17 against commit `8e84d18`; re-runnable by anyone):
+2026-11-17 against commit `1a76c91`; re-runnable by anyone):
 
 | Suite | Tests | Covers |
 |---|---|---|
-| Bridge workspace | 146 passing | bridge-common (37), machine-bridge (27), solana-lock (21), precompile-cost (1), relayer (41), proof-bundle (19) |
+| Bridge workspace | 159 passing | bridge-common (37), machine-bridge (27), solana-lock (21), precompile-cost (1), relayer (54), proof-bundle (19) |
 | LaunchGuard | 34 passing | 16 integration, 17 adversarial, 1 full demo launch |
 | Registry export | 11 passing | 9 unit, 2 program-test integration |
 | Fork suite | 23 checks OK | genesis, patches, chain bring-up |
-| **Total** | **214** | |
+| **Total** | **227** | |
 
 Beyond unit and integration tests: cargo-fuzz harnesses run against
 the message and sysvar parsers and the crossing-receipt
@@ -571,7 +571,7 @@ or it doesn't ship.
 | Dynamic caps (unlock) | 1% per tx / 5% per 216,000 slots of live locked total; quarter strength for 216,000 slots after any unpause |
 | LaunchGuard minimums | Authorities revoked; ≥10% of supply locked ≥6,480,000 slots (30 days) |
 | Demo launch mint | `AjTP23T2HhMryZVDPpzVYrTsWHgH6jKkMt9b8cLdn7hc` (localnet, worthless) |
-| Tests | 214 passing (146 bridge workspace, 34 LaunchGuard, 11 registry export, 23 fork checks) |
+| Tests | 227 passing (159 bridge workspace, 34 LaunchGuard, 11 registry export, 23 fork checks) |
 | Licence | Apache-2.0 |
 
 ## Appendix B — Document map

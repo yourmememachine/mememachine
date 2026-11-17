@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `8e84d18` (2026-11-17; `make verify` green —
-bridge workspace 146 passed, LaunchGuard 34 passed, registry export
+Last verified commit: `1a76c91` (2026-11-17; `make verify` green —
+bridge workspace 159 passed, LaunchGuard 34 passed, registry export
 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -132,6 +132,23 @@ chain configuration gates any public chain launch. Both scopes:
 > quotes issued against pre-`8e84d18` trees do not cover
 > `CloseVault`.
 
+> **Scope update (2026-11-17, later still):** the off-chain
+> relayer gained a tamper-evident audit log
+> (`bridge/crates/relayer/src/audit_log.rs`, inspector binary
+> `relayer-log`; doc `bridge/RELAYER-LOG.md`; commit `1a76c91`).
+> Every sign, quorum collection, non-routine collection failure,
+> dry run, and submission is appended to a hash-chained JSON
+> Lines log; the relayer fails closed if the existing log does
+> not verify. Verification against a previously published
+> checkpoint (`seq:hash` of the head) detects truncation and
+> wholesale rewrites, which internal chain verification alone
+> cannot — both attacks are covered by tests that pin the limit
+> honestly. Off-chain only: it records Scope A relayer actions;
+> it does not touch any program: **no program change, no SBF
+> rebuild, no scope change.** Relayer tests 41 → 54; bridge
+> workspace 146 → 159. Auditors should still quote against the
+> current `main` HEAD.
+
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
 |---|---|
@@ -144,7 +161,7 @@ chain configuration gates any public chain launch. Both scopes:
 
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
-cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle (146)
+cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle (159)
 cd programs && cargo test --release # LaunchGuard 34 tests (16 integration + 17 adversarial + 1 demo launch) + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```
