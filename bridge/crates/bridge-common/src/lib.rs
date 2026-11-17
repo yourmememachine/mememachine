@@ -650,6 +650,85 @@ pub fn verify_admins(
     Ok(())
 }
 
+/// Validate a member set (relayers or admins) at initialization or
+/// rotation: no default (unset) keys and no duplicates. One shared
+/// validator on purpose — `Initialize` previously checked only for
+/// default keys while `SetRelayers` also rejected duplicates, so a
+/// config could be initialized with a silently weaker set than its
+/// size suggests (self-audit F-3, 2026-11-16). Error mapping matches
+/// the historical `SetRelayers` behavior exactly: a default key is
+/// `InvalidState`, a duplicate is `DuplicateRelayerSignature`.
+pub fn validate_member_set(members: &[Pubkey]) -> Result<(), BridgeError> {
+    for (i, m) in members.iter().enumerate() {
+        if m == &Pubkey::default() {
+            return Err(BridgeError::InvalidState);
+        }
+        if members[..i].contains(m) {
+            return Err(BridgeError::DuplicateRelayerSignature);
+        }
+    }
+    Ok(())
+}
+
+/// Verify that `payer` is the recorded upgrade authority of
+/// `program_id`, using the program's ProgramData account under the
+/// BPF upgradeable loader. `Initialize` in both bridge programs runs
+/// this check: initialization is bound to whoever deployed the
+/// program, so a stranger cannot seize a freshly deployed bridge's
+/// config in the deployment window (self-audit F-1, 2026-11-16).
+///
+/// The account must be exactly the canonical ProgramData address for
+/// this program, owned by the upgradeable loader, and hold
+/// `UpgradeableLoaderState::ProgramData` metadata with an upgrade
+/// authority present (not `None` — an immutable program has no one
+/// authorized to initialize a bridge against it) equal to `payer`.
+///
+/// The metadata is the loader's bincode layout, parsed by hand with
+/// every read bounds-checked (bridge-common takes no bincode
+/// dependency): a 4-byte variant tag (ProgramData = 3), the 8-byte
+/// last-modified slot, a 1-byte authority option tag, and the
+/// 32-byte authority when present — 45 bytes total
+/// (`UpgradeableLoaderState::size_of_programdata_metadata`).
+#[allow(deprecated)]
+pub fn verify_upgrade_authority(
+    program_id: &Pubkey,
+    programdata_account: &AccountInfo,
+    payer: &Pubkey,
+) -> Result<(), BridgeError> {
+    use solana_program::bpf_loader_upgradeable;
+    let expected = bpf_loader_upgradeable::get_program_data_address(program_id);
+    if *programdata_account.key != expected {
+        return Err(BridgeError::InvalidAccountData);
+    }
+    if *programdata_account.owner != bpf_loader_upgradeable::id() {
+        return Err(BridgeError::InvalidAccountData);
+    }
+    let data = programdata_account
+        .try_borrow_data()
+        .map_err(|_| BridgeError::InvalidAccountData)?;
+    // Variant tags follow the enum's declaration order in
+    // solana-loader-v3-interface: Uninitialized 0, Buffer 1,
+    // Program 2, ProgramData 3.
+    const PROGRAMDATA_METADATA_LEN: usize = 45;
+    const VARIANT_PROGRAM_DATA: u32 = 3;
+    if data.len() < PROGRAMDATA_METADATA_LEN
+        || u32::from_le_bytes(data[0..4].try_into().unwrap()) != VARIANT_PROGRAM_DATA
+    {
+        return Err(BridgeError::InvalidAccountData);
+    }
+    // Authority option tag at byte 12 (after tag + slot). Anything
+    // other than 1 (Some) — including 0 (None, an immutable program)
+    // — means there is no upgrade authority to bind to.
+    if data[12] != 1 {
+        return Err(BridgeError::InvalidAccountData);
+    }
+    let authority = Pubkey::new_from_array(data[13..45].try_into().unwrap());
+    if authority != *payer {
+        return Err(BridgeError::Unauthorized);
+    }
+    Ok(())
+}
+
 /// Pause authority: 2-of-3 admins OR any 2 of 5 relayers. Unpause is
 /// admins-only (see module docs — BRIDGE.md 4.3).
 pub fn verify_pause_authority(
@@ -1883,6 +1962,134 @@ mod nonce_gate_tests {
         let acct = account(&pda_s2m, &system, &mut lamports, &mut data);
         assert_eq!(
             check_nonce_unprocessed(&acct, &program_id, DIR_MACHINE_TO_SOLANA, 7),
+            Err(BridgeError::InvalidAccountData)
+        );
+    }
+}
+
+#[cfg(test)]
+mod init_gate_tests {
+    use super::*;
+    use std::{cell::RefCell, rc::Rc};
+
+    fn account<'a>(
+        key: &'a Pubkey,
+        owner: &'a Pubkey,
+        lamports: &'a mut u64,
+        data: &'a mut Vec<u8>,
+    ) -> AccountInfo<'a> {
+        AccountInfo {
+            key,
+            is_signer: false,
+            is_writable: true,
+            lamports: Rc::new(RefCell::new(lamports)),
+            data: Rc::new(RefCell::new(data)),
+            owner,
+            executable: false,
+            rent_epoch: 0,
+        }
+    }
+
+    #[test]
+    fn member_set_validation_accepts_distinct_non_default_keys() {
+        let set: [Pubkey; 5] = std::array::from_fn(|_| Pubkey::new_unique());
+        assert_eq!(validate_member_set(&set), Ok(()));
+        let admins: [Pubkey; 3] = std::array::from_fn(|_| Pubkey::new_unique());
+        assert_eq!(validate_member_set(&admins), Ok(()));
+    }
+
+    #[test]
+    fn member_set_validation_rejects_default_and_duplicate_keys() {
+        // Self-audit F-3: Initialize must apply the same validation
+        // SetRelayers always had.
+        let mut with_default: [Pubkey; 5] = std::array::from_fn(|_| Pubkey::new_unique());
+        with_default[3] = Pubkey::default();
+        assert_eq!(
+            validate_member_set(&with_default),
+            Err(BridgeError::InvalidState)
+        );
+        let mut with_dup: [Pubkey; 5] = std::array::from_fn(|_| Pubkey::new_unique());
+        with_dup[2] = with_dup[0];
+        with_dup[4] = with_dup[0];
+        assert_eq!(
+            validate_member_set(&with_dup),
+            Err(BridgeError::DuplicateRelayerSignature)
+        );
+    }
+
+    /// Hand-built ProgramData metadata in the loader's bincode
+    /// layout: variant tag 3, slot, option tag, authority.
+    fn programdata_bytes(authority: Option<Pubkey>) -> Vec<u8> {
+        let mut data = vec![0u8; 45];
+        data[0..4].copy_from_slice(&3u32.to_le_bytes());
+        data[4..12].copy_from_slice(&123u64.to_le_bytes());
+        if let Some(a) = authority {
+            data[12] = 1;
+            data[13..45].copy_from_slice(a.as_ref());
+        }
+        data
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn upgrade_authority_accepts_the_recorded_authority() {
+        let loader = solana_program::bpf_loader_upgradeable::id();
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let pd = solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id);
+        let authority = Pubkey::new_unique();
+        let mut lamports = 1_000_000u64;
+        let mut data = programdata_bytes(Some(authority));
+        let acct = account(&pd, &loader, &mut lamports, &mut data);
+        assert_eq!(
+            verify_upgrade_authority(&program_id, &acct, &authority),
+            Ok(())
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn upgrade_authority_rejects_strangers_immutable_and_wrong_accounts() {
+        let loader = solana_program::bpf_loader_upgradeable::id();
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let pd = solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id);
+        let authority = Pubkey::new_unique();
+        let stranger = Pubkey::new_unique();
+
+        // A payer who is not the recorded upgrade authority.
+        let mut lamports = 1_000_000u64;
+        let mut data = programdata_bytes(Some(authority));
+        let acct = account(&pd, &loader, &mut lamports, &mut data);
+        assert_eq!(
+            verify_upgrade_authority(&program_id, &acct, &stranger),
+            Err(BridgeError::Unauthorized)
+        );
+
+        // No upgrade authority recorded (immutable program): nobody
+        // may initialize against it.
+        let mut lamports = 1_000_000u64;
+        let mut data = programdata_bytes(None);
+        let acct = account(&pd, &loader, &mut lamports, &mut data);
+        assert_eq!(
+            verify_upgrade_authority(&program_id, &acct, &authority),
+            Err(BridgeError::InvalidAccountData)
+        );
+
+        // The right bytes at the wrong address prove nothing.
+        let wrong = Pubkey::new_unique();
+        let mut lamports = 1_000_000u64;
+        let mut data = programdata_bytes(Some(authority));
+        let acct = account(&wrong, &loader, &mut lamports, &mut data);
+        assert_eq!(
+            verify_upgrade_authority(&program_id, &acct, &authority),
+            Err(BridgeError::InvalidAccountData)
+        );
+
+        // The right address not owned by the loader proves nothing.
+        let mut lamports = 1_000_000u64;
+        let mut data = programdata_bytes(Some(authority));
+        let acct = account(&pd, &program_id, &mut lamports, &mut data);
+        assert_eq!(
+            verify_upgrade_authority(&program_id, &acct, &authority),
             Err(BridgeError::InvalidAccountData)
         );
     }

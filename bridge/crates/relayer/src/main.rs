@@ -75,7 +75,13 @@ impl SourceChain for RpcSource {
                 },
             ),
         };
-        let sender = sender_from_verified_source_transfer(&tx, kind, &check)?;
+        let sender = sender_from_verified_source_transfer(
+            &tx,
+            kind,
+            &check,
+            &self.program_id,
+            &record_pda,
+        )?;
         Ok(ObservedEvent {
             record: record.clone(),
             sender,

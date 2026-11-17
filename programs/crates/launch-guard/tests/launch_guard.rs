@@ -734,3 +734,170 @@ async fn creator_reputation_counts_registrations_and_completions() {
     // stranger still has no reputation account at all.
     assert!(read_reputation(&mut ctx, &Pubkey::new_unique()).await.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Self-audit regression tests (2026-11-16, REVIEW-1)
+//
+// F-4: the minimum lock uses ceiling division — a 19-token supply
+// may not pass the 10% gate with a 1-token lock.
+// F-2: pre-funded PDAs are adopted, not permanent blocks.
+// ---------------------------------------------------------------------------
+
+/// Like `make_mint` with `revoke = true`, but with a caller-chosen
+/// total supply (the F-4 rounding bug only shows at tiny supplies).
+async fn make_mint_with_supply(
+    ctx: &mut ProgramTestContext,
+    creator: &Keypair,
+    supply: u64,
+) -> (Pubkey, Pubkey) {
+    let mint = Keypair::new();
+    let token_acct = Keypair::new();
+    let rent = ctx.banks_client.get_rent().await.unwrap();
+    let ixs = vec![
+        system_instruction::transfer(&ctx.payer.pubkey(), &creator.pubkey(), 5_000_000_000),
+        system_instruction::create_account(
+            &creator.pubkey(),
+            &mint.pubkey(),
+            rent.minimum_balance(Mint::LEN),
+            Mint::LEN as u64,
+            &spl_token::id(),
+        ),
+        initialize_mint2(
+            &spl_token::id(),
+            &mint.pubkey(),
+            &creator.pubkey(),
+            Some(&creator.pubkey()),
+            0,
+        )
+        .unwrap(),
+        system_instruction::create_account(
+            &creator.pubkey(),
+            &token_acct.pubkey(),
+            rent.minimum_balance(TokenAccount::LEN),
+            TokenAccount::LEN as u64,
+            &spl_token::id(),
+        ),
+        initialize_account3(
+            &spl_token::id(),
+            &token_acct.pubkey(),
+            &mint.pubkey(),
+            &creator.pubkey(),
+        )
+        .unwrap(),
+        mint_to(
+            &spl_token::id(),
+            &mint.pubkey(),
+            &token_acct.pubkey(),
+            &creator.pubkey(),
+            &[],
+            supply,
+        )
+        .unwrap(),
+        set_authority(
+            &spl_token::id(),
+            &mint.pubkey(),
+            None,
+            AuthorityType::MintTokens,
+            &creator.pubkey(),
+            &[],
+        )
+        .unwrap(),
+        set_authority(
+            &spl_token::id(),
+            &mint.pubkey(),
+            None,
+            AuthorityType::FreezeAccount,
+            &creator.pubkey(),
+            &[],
+        )
+        .unwrap(),
+    ];
+    send(ctx, &ixs, &[creator, &mint, &token_acct])
+        .await
+        .expect("mint setup");
+    (mint.pubkey(), token_acct.pubkey())
+}
+
+#[tokio::test]
+async fn register_supply19_lock1_fails_lock2_succeeds() {
+    // Self-audit F-4: floor division computed ceil's job wrong —
+    // 19 * 1000 / 10_000 = 1 by floor, so a 1-token lock (5.26%)
+    // passed the >=10% gate. The ceiling is 2.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint_with_supply(&mut ctx, &creator, 19).await;
+    let err = send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, 1, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::LockTooSmall as u32);
+
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, 2, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+    let rec = record(&mut ctx, &mint).await;
+    assert_eq!(rec.total_supply, 19);
+    assert_eq!(rec.locked_amount, 2);
+}
+
+#[tokio::test]
+async fn register_succeeds_with_prefunded_record_pda() {
+    // Self-audit F-2: a dust transfer to the record PDA used to
+    // brick this mint's registration forever.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint(&mut ctx, &creator, true).await;
+    let record_pda = pda(&[SEED_LAUNCH, mint.as_ref()]);
+    let payer = ctx.payer.pubkey();
+    send(
+        &mut ctx,
+        &[system_instruction::transfer(&payer, &record_pda, 1_000_000)],
+        &[],
+    )
+    .await
+    .unwrap();
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, LOCK, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+    let rec = record(&mut ctx, &mint).await;
+    assert_eq!(rec.locked_amount, LOCK);
+}
+
+#[tokio::test]
+async fn register_succeeds_with_prefunded_vault_pda() {
+    // Self-audit F-2, vault variant: the vault is a token account
+    // created for the authority PDA; pre-funding it used to block
+    // registration the same way.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint(&mut ctx, &creator, true).await;
+    let vault_pda = pda(&[SEED_VAULT, mint.as_ref()]);
+    let payer = ctx.payer.pubkey();
+    send(
+        &mut ctx,
+        &[system_instruction::transfer(&payer, &vault_pda, 1_000_000)],
+        &[],
+    )
+    .await
+    .unwrap();
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, LOCK, MIN_LOCK_SLOTS)],
+        &[&creator],
+    )
+    .await
+    .unwrap();
+    assert_eq!(token_balance(&mut ctx, &vault_pda).await, LOCK);
+    assert_eq!(token_balance(&mut ctx, &token).await, SUPPLY - LOCK);
+}

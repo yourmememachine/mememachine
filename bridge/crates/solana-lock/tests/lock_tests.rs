@@ -120,8 +120,77 @@ fn spl_token_builtin<'a>(
     .into();
 }
 
+/// The program's ProgramData address under the BPF upgradeable
+/// loader — where `verify_upgrade_authority` looks for the upgrade
+/// authority `Initialize` is bound to (self-audit F-1).
+#[allow(deprecated)]
+fn programdata_address() -> Pubkey {
+    solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id())
+}
+
+/// Seed a ProgramData account naming `authority` as the program's
+/// upgrade authority. The bytes are the loader's bincode layout —
+/// variant tag 3 (ProgramData), slot, option tag, authority — the
+/// layout bridge-common parses. Native program-test has no real
+/// loader state for a `processor!` program, so the account is
+/// constructed directly (the harness CAN supply it; the check is
+/// fully exercised).
+#[allow(deprecated)]
+fn seed_programdata(test: &mut ProgramTest, authority: &Pubkey) {
+    let mut data = vec![0u8; 45];
+    data[0..4].copy_from_slice(&3u32.to_le_bytes());
+    data[12] = 1;
+    data[13..45].copy_from_slice(authority.as_ref());
+    test.add_account(
+        programdata_address(),
+        Account {
+            lamports: 10_000_000,
+            data,
+            owner: solana_program::bpf_loader_upgradeable::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+}
+
+/// Build the Initialize instruction (account list per the F-1
+/// layout: payer, config, vault, system program, programdata).
+fn initialize_ix(
+    payer: &Pubkey,
+    relayers: [Pubkey; 5],
+    admins: [Pubkey; 3],
+    source_mint: Pubkey,
+    vault: Pubkey,
+    per_tx_cap: u64,
+    daily_cap: u64,
+    vault_ceiling: u64,
+) -> Instruction {
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Initialize {
+            relayers,
+            admins,
+            source_mint,
+            vault,
+            per_tx_cap,
+            daily_cap,
+            vault_ceiling,
+        },
+        vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new_readonly(vault, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(programdata_address(), false),
+        ],
+    )
+}
+
 async fn setup(per_tx_cap: u64, daily_cap: u64, vault_ceiling: u64) -> Env {
     let program_id = program_id();
+    let deployer = Keypair::new();
     let mut program_test = ProgramTest::new(
         "solana_lock",
         program_id,
@@ -131,6 +200,9 @@ async fn setup(per_tx_cap: u64, daily_cap: u64, vault_ceiling: u64) -> Env {
     // builtin: `add_program` would panic in SBF mode (BPF_OUT_DIR set) because
     // no spl_token.so exists to load.
     program_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    // The deployer is the program's upgrade authority; Initialize
+    // is bound to it (self-audit F-1).
+    seed_programdata(&mut program_test, &deployer.pubkey());
     let mut context = program_test.start_with_context().await;
     let recent_blockhash = context.last_blockhash;
 
@@ -139,6 +211,19 @@ async fn setup(per_tx_cap: u64, daily_cap: u64, vault_ceiling: u64) -> Env {
     let user = Keypair::new();
     let mint_authority = Keypair::new();
     let (vault_authority, _) = authority_pda(&program_id);
+
+    // Fund the deployer so it can pay the config account's rent.
+    let fund_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &context.payer.pubkey(),
+            &deployer.pubkey(),
+            1_000_000_000,
+        )],
+        Some(&context.payer.pubkey()),
+        &[&context.payer],
+        recent_blockhash,
+    );
+    context.banks_client.process_transaction(fund_tx).await.unwrap();
 
     let source_mint = create_mint(
         &mut context.banks_client,
@@ -178,29 +263,20 @@ async fn setup(per_tx_cap: u64, daily_cap: u64, vault_ceiling: u64) -> Env {
     )
     .await;
 
-    let (config_pda, _) = config_pda(&program_id);
-    let init_ix = Instruction::new_with_borsh(
-        program_id,
-        &LockInstruction::Initialize {
-            relayers: relayer_pubkeys(&relayers),
-            admins: admin_pubkeys(&admins),
-            source_mint,
-            vault,
-            per_tx_cap,
-            daily_cap,
-            vault_ceiling,
-        },
-        vec![
-            AccountMeta::new(context.payer.pubkey(), true),
-            AccountMeta::new(config_pda, false),
-            AccountMeta::new_readonly(vault, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
-        ],
+    let init_ix = initialize_ix(
+        &deployer.pubkey(),
+        relayer_pubkeys(&relayers),
+        admin_pubkeys(&admins),
+        source_mint,
+        vault,
+        per_tx_cap,
+        daily_cap,
+        vault_ceiling,
     );
     let tx = Transaction::new_signed_with_payer(
         &[init_ix],
         Some(&context.payer.pubkey()),
-        &[&context.payer],
+        &[&context.payer, &deployer],
         recent_blockhash,
     );
     context.banks_client.process_transaction(tx).await.unwrap();
@@ -863,4 +939,366 @@ async fn unpause_tightens_dynamic_caps_for_one_window() {
     let sigs = sign_attestation(&msg, &env.relayers, 3);
     send_unlock(&mut env, msg, sigs).await.unwrap();
     assert_eq!(total_locked(&mut env).await, 2_000_000 - 5_000 - 10_000);
+}
+
+// ---------------------------------------------------------------------------
+// Self-audit regression tests (2026-11-16, REVIEW-1)
+//
+// F-1: Initialize is bound to the program's upgrade authority.
+// F-2: pre-funded PDAs are adopted, not permanent blocks.
+// F-3: Initialize applies SetRelayers' member-set validation.
+// K-1: the token program is pinned explicitly in the handlers.
+// ---------------------------------------------------------------------------
+
+/// A started context with the programdata account seeded for a
+/// deployer, plus a mint and a vault — but NOT initialized, so a
+/// test can drive Initialize itself.
+struct InitFixture {
+    context: solana_program_test::ProgramTestContext,
+    deployer: Keypair,
+    source_mint: Pubkey,
+    vault: Pubkey,
+}
+
+async fn init_fixture() -> InitFixture {
+    let program_id = program_id();
+    let deployer = Keypair::new();
+    let mut program_test = ProgramTest::new(
+        "solana_lock",
+        program_id,
+        solana_program_test::processor!(solana_lock::processor::process),
+    );
+    program_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    seed_programdata(&mut program_test, &deployer.pubkey());
+    let mut context = program_test.start_with_context().await;
+    let recent_blockhash = context.last_blockhash;
+    let fund_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &context.payer.pubkey(),
+            &deployer.pubkey(),
+            1_000_000_000,
+        )],
+        Some(&context.payer.pubkey()),
+        &[&context.payer],
+        recent_blockhash,
+    );
+    context.banks_client.process_transaction(fund_tx).await.unwrap();
+    let mint_authority = Keypair::new();
+    let (vault_authority, _) = authority_pda(&program_id);
+    let source_mint = create_mint(
+        &mut context.banks_client,
+        &context.payer,
+        &recent_blockhash,
+        &mint_authority.pubkey(),
+        None,
+        6,
+    )
+    .await;
+    let vault = create_token_account(
+        &mut context.banks_client,
+        &context.payer,
+        &recent_blockhash,
+        &source_mint,
+        &vault_authority,
+    )
+    .await;
+    InitFixture {
+        context,
+        deployer,
+        source_mint,
+        vault,
+    }
+}
+
+async fn send_init(
+    fx: &mut InitFixture,
+    payer: &Keypair,
+    relayers: [Pubkey; 5],
+    admins: [Pubkey; 3],
+) -> Result<(), solana_program_test::BanksClientError> {
+    let ix = initialize_ix(
+        &payer.pubkey(),
+        relayers,
+        admins,
+        fx.source_mint,
+        fx.vault,
+        1_000_000,
+        10_000_000,
+        1_000_000_000,
+    );
+    let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&fx.context.payer.pubkey()),
+        &[&fx.context.payer, payer],
+        blockhash,
+    );
+    fx.context.banks_client.process_transaction(tx).await
+}
+
+/// Initialize with the fixture's own deployer (the upgrade
+/// authority) as payer.
+async fn send_init_as_deployer(
+    fx: &mut InitFixture,
+    relayers: [Pubkey; 5],
+    admins: [Pubkey; 3],
+) -> Result<(), solana_program_test::BanksClientError> {
+    let ix = initialize_ix(
+        &fx.deployer.pubkey(),
+        relayers,
+        admins,
+        fx.source_mint,
+        fx.vault,
+        1_000_000,
+        10_000_000,
+        1_000_000_000,
+    );
+    let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&fx.context.payer.pubkey()),
+        &[&fx.context.payer, &fx.deployer],
+        blockhash,
+    );
+    fx.context.banks_client.process_transaction(tx).await
+}
+
+#[tokio::test]
+async fn stranger_cannot_initialize_but_upgrade_authority_can() {
+    // Self-audit F-1: before the fix, the first caller after
+    // deployment — anyone — set the relayers, admins, and caps.
+    let mut fx = init_fixture().await;
+    let relayers = relayer_keypairs();
+    let admins = admin_keypairs();
+    let stranger = Keypair::new();
+    let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
+    let fund_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &fx.context.payer.pubkey(),
+            &stranger.pubkey(),
+            1_000_000_000,
+        )],
+        Some(&fx.context.payer.pubkey()),
+        &[&fx.context.payer],
+        blockhash,
+    );
+    fx.context.banks_client.process_transaction(fund_tx).await.unwrap();
+
+    let result = send_init(
+        &mut fx,
+        &stranger,
+        relayer_pubkeys(&relayers),
+        admin_pubkeys(&admins),
+    )
+    .await;
+    assert_custom_error(result, BridgeError::Unauthorized);
+    // No config was created by the stranger's attempt.
+    let (config_pda, _) = config_pda(&program_id());
+    assert!(fx
+        .context
+        .banks_client
+        .get_account(config_pda)
+        .await
+        .unwrap()
+        .is_none());
+
+    // The upgrade authority's Initialize goes through and stores
+    // exactly its sets.
+    send_init_as_deployer(
+        &mut fx,
+        relayer_pubkeys(&relayers),
+        admin_pubkeys(&admins),
+    )
+    .await
+    .unwrap();
+    let acc: Account = fx
+        .context
+        .banks_client
+        .get_account(config_pda)
+        .await
+        .unwrap()
+        .unwrap();
+    let cfg = LockConfig::try_from_slice(&acc.data).unwrap();
+    assert_eq!(cfg.relayers.relayers, relayer_pubkeys(&relayers));
+    assert_eq!(cfg.admins.admins, admin_pubkeys(&admins));
+}
+
+#[tokio::test]
+async fn initialize_rejects_duplicate_and_default_members() {
+    // Self-audit F-3: SetRelayers always rejected these; Initialize
+    // only rejected default keys, so a "3-of-5" could silently be
+    // 3-of-3-distinct.
+    let mut fx = init_fixture().await;
+
+    let mut dup_relayers = relayer_pubkeys(&relayer_keypairs());
+    dup_relayers[1] = dup_relayers[0];
+    dup_relayers[2] = dup_relayers[0];
+    let result = send_init_as_deployer(
+        &mut fx,
+        dup_relayers,
+        admin_pubkeys(&admin_keypairs()),
+    )
+    .await;
+    assert_custom_error(result, BridgeError::DuplicateRelayerSignature);
+
+    let mut dup_admins = admin_pubkeys(&admin_keypairs());
+    dup_admins[2] = dup_admins[0];
+    let result = send_init_as_deployer(
+        &mut fx,
+        relayer_pubkeys(&relayer_keypairs()),
+        dup_admins,
+    )
+    .await;
+    assert_custom_error(result, BridgeError::DuplicateRelayerSignature);
+
+    let mut default_relayer = relayer_pubkeys(&relayer_keypairs());
+    default_relayer[4] = Pubkey::default();
+    let result = send_init_as_deployer(
+        &mut fx,
+        default_relayer,
+        admin_pubkeys(&admin_keypairs()),
+    )
+    .await;
+    assert_custom_error(result, BridgeError::InvalidState);
+}
+
+#[tokio::test]
+async fn initialize_adopts_prefunded_config_pda() {
+    // Self-audit F-2, config variant: a dust transfer to the config
+    // PDA before deployment used to block Initialize forever. (The
+    // amount is the rent-exempt minimum for an empty account — the
+    // smallest transfer that can create the shell.)
+    let mut fx = init_fixture().await;
+    let (config_pda, _) = config_pda(&program_id());
+    let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
+    let grief_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &fx.context.payer.pubkey(),
+            &config_pda,
+            1_000_000,
+        )],
+        Some(&fx.context.payer.pubkey()),
+        &[&fx.context.payer],
+        blockhash,
+    );
+    fx.context.banks_client.process_transaction(grief_tx).await.unwrap();
+
+    send_init_as_deployer(
+        &mut fx,
+        relayer_pubkeys(&relayer_keypairs()),
+        admin_pubkeys(&admin_keypairs()),
+    )
+    .await
+    .unwrap();
+    let acc: Account = fx
+        .context
+        .banks_client
+        .get_account(config_pda)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(acc.owner, program_id());
+}
+
+#[tokio::test]
+async fn unlock_succeeds_with_prefunded_nonce_and_receipt_pdas() {
+    // Self-audit F-2: pre-funding the destination nonce PDA (and
+    // the receipt PDA) used to brick the crossing permanently —
+    // the source-side burn had already happened.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    let program_id = program_id();
+    let (nonce_addr, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, 1);
+    let (receipt_addr, _) = receipt_pda(&program_id, DIR_MACHINE_TO_SOLANA, 1);
+    for target in [nonce_addr, receipt_addr] {
+        let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+        let grief_tx = Transaction::new_signed_with_payer(
+            &[system_instruction::transfer(
+                &env.context.payer.pubkey(),
+                &target,
+                1_000_000,
+            )],
+            Some(&env.context.payer.pubkey()),
+            &[&env.context.payer],
+            blockhash,
+        );
+        env.context.banks_client.process_transaction(grief_tx).await.unwrap();
+    }
+    let msg = burn_message(1, 500, env.user.pubkey(), env.source_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_unlock(&mut env, msg, sigs).await.unwrap();
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.vault).await,
+        49_500
+    );
+    assert_eq!(total_locked(&mut env).await, 49_500);
+}
+
+#[tokio::test]
+async fn deposit_succeeds_with_prefunded_record_pda() {
+    // Self-audit F-2, deposit-record variant.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    let (record_addr, _) = nonce_pda(&program_id(), DIR_SOLANA_TO_MACHINE, 1);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let grief_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &env.context.payer.pubkey(),
+            &record_addr,
+            1_000_000,
+        )],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer],
+        blockhash,
+    );
+    env.context.banks_client.process_transaction(grief_tx).await.unwrap();
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.vault).await,
+        50_000
+    );
+}
+
+#[tokio::test]
+async fn deposit_with_substitute_token_program_fails() {
+    // Self-audit K-1 hardening: the token program is pinned in the
+    // handler itself now, not only inside spl-token's CPI builders.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (record_pda, _) = nonce_pda(&program_id, DIR_SOLANA_TO_MACHINE, 1);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ix = Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Deposit {
+            amount: 50_000,
+            destination: Pubkey::new_unique(),
+            nonce: 1,
+        },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(env.user_token_account, false),
+            AccountMeta::new(env.vault, false),
+            AccountMeta::new(record_pda, false),
+            AccountMeta::new_readonly(env.user.pubkey(), true),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(Pubkey::new_unique(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer, &env.user],
+        blockhash,
+    );
+    let result = env.context.banks_client.process_transaction(tx).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.vault).await,
+        0
+    );
 }

@@ -190,12 +190,22 @@ pub struct SourceTransferCheck {
 /// instruction list — the old scan of top-level instructions only
 /// could not find it in a real deposit transaction, and would have
 /// attributed the sender of any unrelated top-level transfer instead.
-/// This scans top-level instructions first, then inner instructions
-/// in execution order, and returns the authority of the first
-/// instruction of `kind` whose destination (deposit) or mint (burn)
-/// and amount match the check. No match means no signature:
-/// the relayer refuses to sign rather than signing a message whose
-/// sender it cannot prove.
+///
+/// The scan is BOUND to the record being verified (self-audit L-1,
+/// 2026-11-16): the transfer must sit in the inner-instruction
+/// group of the one top-level instruction that created this record
+/// — identified as the call to `source_program` whose account list
+/// contains `record_pda`. The earlier whole-transaction scan let a
+/// single genuine transfer satisfy the check for ANY number of
+/// same-amount records created in the same batched transaction: one
+/// transfer could verify two records. That is not reachable today —
+/// a record cannot be created without its own transfer executing in
+/// the same instruction (the programs' token CPIs are built by
+/// spl-token's checked builders) — but the check now stands on its
+/// own instead of borrowing that on-chain invariant: a record whose
+/// creating instruction has no matching transfer in its own group
+/// fails closed, and a batched transaction's records each resolve
+/// to their own transfer's authority.
 ///
 /// Pure function over the RPC JSON, so it is unit-testable with
 /// fixtures and never guesses.
@@ -203,36 +213,58 @@ pub fn sender_from_verified_source_transfer(
     tx: &Value,
     kind: &str,
     check: &SourceTransferCheck,
+    source_program: &Pubkey,
+    record_pda: &Pubkey,
 ) -> Result<Pubkey> {
-    let mut candidates: Vec<&Value> = Vec::new();
-    if let Some(ixs) = tx
+    // Locate the instruction that created this record.
+    let top_level = tx
         .pointer("/transaction/message/instructions")
-        .and_then(|v| v.as_array())
-    {
-        candidates.extend(ixs.iter());
-    }
+        .and_then(|v| v.as_array());
+    let parent_index = top_level.and_then(|ixs| {
+        ixs.iter().position(|ix| {
+            ix.get("programId")
+                .and_then(|v| v.as_str())
+                .and_then(|s| Pubkey::from_str(s).ok())
+                == Some(*source_program)
+                && ix
+                    .get("accounts")
+                    .and_then(|v| v.as_array())
+                    .map(|accounts| {
+                        accounts
+                            .iter()
+                            .any(|a| a.as_str() == Some(record_pda.to_string().as_str()))
+                    })
+                    .unwrap_or(false)
+        })
+    });
+    let Some(parent_index) = parent_index else {
+        // This transaction did not create this record through the
+        // source program — whatever transfers it holds are not this
+        // record's backing. Fail closed.
+        return Err(RelayerError::SourceTransferNotVerified(format!(
+            "no instruction of {source_program} creating record {record_pda} in this transaction; refusing to sign"
+        )));
+    };
+    // Only the creating instruction's own inner group can hold the
+    // transfer that backs this record.
+    let mut candidates: Vec<&Value> = Vec::new();
     if let Some(groups) = tx
         .pointer("/meta/innerInstructions")
         .and_then(|v| v.as_array())
     {
         for group in groups {
-            if let Some(ixs) = group.get("instructions").and_then(|v| v.as_array()) {
-                candidates.extend(ixs.iter());
+            if group.get("index").and_then(|v| v.as_u64()) == Some(parent_index as u64) {
+                if let Some(ixs) = group.get("instructions").and_then(|v| v.as_array()) {
+                    candidates.extend(ixs.iter());
+                }
             }
         }
     }
-    if candidates.is_empty() {
-        return Err(RelayerError::SenderNotFound(
-            "no instructions in transaction".into(),
-        ));
-    }
-    let mut saw_kind = false;
     for ix in candidates {
         let parsed = &ix["parsed"];
         if parsed["type"].as_str().unwrap_or("") != kind {
             continue;
         }
-        saw_kind = true;
         let info = &parsed["info"];
         let amount = info["amount"]
             .as_str()
@@ -262,16 +294,14 @@ pub fn sender_from_verified_source_transfer(
             });
         }
     }
-    if saw_kind {
-        Err(RelayerError::SourceTransferNotVerified(format!(
-            "no '{kind}' instruction matches the event record (amount {}, destination {:?}, mint {:?}); refusing to sign",
-            check.amount, check.destination, check.mint
-        )))
-    } else {
-        Err(RelayerError::SenderNotFound(format!(
-            "no parsed '{kind}' instruction with an authority"
-        )))
-    }
+    // The creating instruction was found, but its own inner group
+    // holds no transfer backing this record (none at all, a wrong
+    // amount, a wrong destination/mint, or one without an
+    // authority): the record is unverified. Fail closed.
+    Err(RelayerError::SourceTransferNotVerified(format!(
+        "no '{kind}' instruction in the creating instruction's group matches the event record (amount {}, destination {:?}, mint {:?}); refusing to sign",
+        check.amount, check.destination, check.mint
+    )))
 }
 
 #[cfg(test)]
@@ -280,13 +310,21 @@ mod tests {
 
     /// A realistic deposit transaction: one top-level instruction
     /// (the lock program's Deposit, unparsed — it is not a known
-    /// program) and the token transfer as a CPI in
-    /// `meta.innerInstructions`.
-    fn deposit_tx(vault: &Pubkey, authority: &Pubkey, amount: &str) -> Value {
+    /// program; its account list carries the record PDA) and the
+    /// token transfer as a CPI in `meta.innerInstructions`, in the
+    /// group belonging to that instruction (index 0).
+    fn deposit_tx(
+        program: &Pubkey,
+        record: &Pubkey,
+        vault: &Pubkey,
+        authority: &Pubkey,
+        amount: &str,
+    ) -> Value {
         json!({
             "transaction": {"message": {"instructions": [
-                {"programId": "Lock111111111111111111111111111111111111111",
-                 "accounts": [], "data": "deadbeef"}
+                {"programId": program.to_string(),
+                 "accounts": [Pubkey::new_unique().to_string(), record.to_string()],
+                 "data": "deadbeef"}
             ]}},
             "meta": {"innerInstructions": [
                 {"index": 0, "instructions": [
@@ -303,11 +341,18 @@ mod tests {
 
     /// A realistic burn transaction: the burn is likewise a CPI of
     /// the bridge program's Burn instruction.
-    fn burn_tx(mint: &Pubkey, authority: &Pubkey, amount: &str) -> Value {
+    fn burn_tx(
+        program: &Pubkey,
+        record: &Pubkey,
+        mint: &Pubkey,
+        authority: &Pubkey,
+        amount: &str,
+    ) -> Value {
         json!({
             "transaction": {"message": {"instructions": [
-                {"programId": "Bridge1111111111111111111111111111111111111",
-                 "accounts": [], "data": "deadbeef"}
+                {"programId": program.to_string(),
+                 "accounts": [Pubkey::new_unique().to_string(), record.to_string()],
+                 "data": "deadbeef"}
             ]}},
             "meta": {"innerInstructions": [
                 {"index": 0, "instructions": [
@@ -340,22 +385,37 @@ mod tests {
 
     #[test]
     fn deposit_sender_found_in_inner_instructions() {
+        let program = Pubkey::new_unique();
+        let record = Pubkey::new_unique();
         let vault = Pubkey::new_unique();
         let user = Pubkey::new_unique();
-        let tx = deposit_tx(&vault, &user, "500");
-        let sender =
-            sender_from_verified_source_transfer(&tx, "transfer", &deposit_check(vault, 500))
-                .unwrap();
+        let tx = deposit_tx(&program, &record, &vault, &user, "500");
+        let sender = sender_from_verified_source_transfer(
+            &tx,
+            "transfer",
+            &deposit_check(vault, 500),
+            &program,
+            &record,
+        )
+        .unwrap();
         assert_eq!(sender, user);
     }
 
     #[test]
     fn burn_sender_verified_by_mint_and_amount() {
+        let program = Pubkey::new_unique();
+        let record = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let burner = Pubkey::new_unique();
-        let tx = burn_tx(&mint, &burner, "300");
-        let sender =
-            sender_from_verified_source_transfer(&tx, "burn", &burn_check(mint, 300)).unwrap();
+        let tx = burn_tx(&program, &record, &mint, &burner, "300");
+        let sender = sender_from_verified_source_transfer(
+            &tx,
+            "burn",
+            &burn_check(mint, 300),
+            &program,
+            &record,
+        )
+        .unwrap();
         assert_eq!(sender, burner);
     }
 
@@ -364,6 +424,8 @@ mod tests {
         // The Coreum failure: a transaction that moves tokens between
         // two attacker wallets, with no transfer into the vault, must
         // never yield a sender — it is not a deposit.
+        let program = Pubkey::new_unique();
+        let record = Pubkey::new_unique();
         let vault = Pubkey::new_unique();
         let attacker = Pubkey::new_unique();
         let tx = json!({
@@ -377,8 +439,14 @@ mod tests {
             ]}},
             "meta": {"innerInstructions": []}
         });
-        let err = sender_from_verified_source_transfer(&tx, "transfer", &deposit_check(vault, 500))
-            .unwrap_err();
+        let err = sender_from_verified_source_transfer(
+            &tx,
+            "transfer",
+            &deposit_check(vault, 500),
+            &program,
+            &record,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             RelayerError::SourceTransferNotVerified(_)
@@ -387,33 +455,55 @@ mod tests {
 
     #[test]
     fn inner_transfer_to_wrong_destination_rejected() {
+        let program = Pubkey::new_unique();
+        let record = Pubkey::new_unique();
         let vault = Pubkey::new_unique();
         let user = Pubkey::new_unique();
-        let mut tx = deposit_tx(&Pubkey::new_unique(), &user, "500");
+        let mut tx = deposit_tx(&program, &record, &Pubkey::new_unique(), &user, "500");
         // Same amount, but the CPI transfer went somewhere else.
-        let err = sender_from_verified_source_transfer(&tx, "transfer", &deposit_check(vault, 500))
-            .unwrap_err();
+        let err = sender_from_verified_source_transfer(
+            &tx,
+            "transfer",
+            &deposit_check(vault, 500),
+            &program,
+            &record,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             RelayerError::SourceTransferNotVerified(_)
         ));
         // And the right vault with the same tx must succeed, proving
         // the rejection is about the destination, not the shape.
-        tx = deposit_tx(&vault, &user, "500");
+        tx = deposit_tx(&program, &record, &vault, &user, "500");
         assert_eq!(
-            sender_from_verified_source_transfer(&tx, "transfer", &deposit_check(vault, 500))
-                .unwrap(),
+            sender_from_verified_source_transfer(
+                &tx,
+                "transfer",
+                &deposit_check(vault, 500),
+                &program,
+                &record
+            )
+            .unwrap(),
             user
         );
     }
 
     #[test]
     fn wrong_amount_rejected() {
+        let program = Pubkey::new_unique();
+        let record = Pubkey::new_unique();
         let vault = Pubkey::new_unique();
         let user = Pubkey::new_unique();
-        let tx = deposit_tx(&vault, &user, "499");
-        let err = sender_from_verified_source_transfer(&tx, "transfer", &deposit_check(vault, 500))
-            .unwrap_err();
+        let tx = deposit_tx(&program, &record, &vault, &user, "499");
+        let err = sender_from_verified_source_transfer(
+            &tx,
+            "transfer",
+            &deposit_check(vault, 500),
+            &program,
+            &record,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             RelayerError::SourceTransferNotVerified(_)
@@ -424,11 +514,15 @@ mod tests {
     fn decoy_top_level_transfer_ignored() {
         // A batched transaction with an unrelated top-level transfer
         // before the Deposit must still attribute the sender of the
-        // transfer that actually went into the vault.
+        // transfer that actually went into the vault. Inserting the
+        // decoy shifts the Deposit to index 1, so its inner group
+        // moves to index 1 with it (as real RPC output would show).
+        let program = Pubkey::new_unique();
+        let record = Pubkey::new_unique();
         let vault = Pubkey::new_unique();
         let user = Pubkey::new_unique();
         let decoy = Pubkey::new_unique();
-        let mut tx = deposit_tx(&vault, &user, "500");
+        let mut tx = deposit_tx(&program, &record, &vault, &user, "500");
         tx["transaction"]["message"]["instructions"]
             .as_array_mut()
             .unwrap()
@@ -441,20 +535,34 @@ mod tests {
                     "amount": "500"
                 }}}),
             );
-        let sender =
-            sender_from_verified_source_transfer(&tx, "transfer", &deposit_check(vault, 500))
-                .unwrap();
+        tx["meta"]["innerInstructions"][0]["index"] = json!(1);
+        let sender = sender_from_verified_source_transfer(
+            &tx,
+            "transfer",
+            &deposit_check(vault, 500),
+            &program,
+            &record,
+        )
+        .unwrap();
         assert_eq!(sender, user);
         assert_ne!(sender, decoy);
     }
 
     #[test]
     fn burn_with_wrong_mint_rejected() {
+        let program = Pubkey::new_unique();
+        let record = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let burner = Pubkey::new_unique();
-        let tx = burn_tx(&Pubkey::new_unique(), &burner, "300");
-        let err = sender_from_verified_source_transfer(&tx, "burn", &burn_check(mint, 300))
-            .unwrap_err();
+        let tx = burn_tx(&program, &record, &Pubkey::new_unique(), &burner, "300");
+        let err = sender_from_verified_source_transfer(
+            &tx,
+            "burn",
+            &burn_check(mint, 300),
+            &program,
+            &record,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             RelayerError::SourceTransferNotVerified(_)
@@ -467,7 +575,9 @@ mod tests {
         assert!(sender_from_verified_source_transfer(
             &tx,
             "transfer",
-            &deposit_check(Pubkey::new_unique(), 500)
+            &deposit_check(Pubkey::new_unique(), 500),
+            &Pubkey::new_unique(),
+            &Pubkey::new_unique()
         )
         .is_err());
     }

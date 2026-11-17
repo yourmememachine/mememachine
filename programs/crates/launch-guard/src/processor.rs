@@ -71,13 +71,76 @@ fn create_pda_account<'a>(
     space: usize,
     seeds: &[&[u8]],
 ) -> ProgramResult {
+    create_or_adopt_account(
+        payer,
+        new_account,
+        system_program,
+        program_id,
+        space,
+        seeds,
+    )
+}
+
+/// Create a PDA-owned account, adopting a pre-funded shell if one
+/// exists.
+///
+/// Self-audit F-2 (2026-11-16): the record, vault, and reputation
+/// PDAs are deterministic, so anyone could send 1 lamport to one
+/// before its registration and permanently block that mint's (or
+/// creator's) LaunchGuard registration — plain `create_account`
+/// refuses an account that already holds lamports, and there was no
+/// recovery path. Create-or-adopt removes the grief: a pre-existing
+/// account is adopted only if it is a pristine shell (lamports > 0,
+/// owned by the system program, no data) — the only state a bare
+/// transfer can produce. It is topped up to rent-exempt if needed,
+/// then allocated and assigned with the PDA's own signature,
+/// exactly as if created fresh. Any other pre-existing state still
+/// errors.
+#[allow(deprecated)]
+fn create_or_adopt_account<'a>(
+    payer: &AccountInfo<'a>,
+    new_account: &AccountInfo<'a>,
+    system_program: &AccountInfo<'a>,
+    owner: &Pubkey,
+    space: usize,
+    seeds: &[&[u8]],
+) -> ProgramResult {
     let rent = Rent::get()?;
+    let lamports = rent.minimum_balance(space);
+    if new_account.lamports() > 0 {
+        if *new_account.owner != solana_program::system_program::ID
+            || !new_account.data_is_empty()
+        {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        if new_account.lamports() < lamports {
+            invoke(
+                &system_instruction::transfer(
+                    payer.key,
+                    new_account.key,
+                    lamports - new_account.lamports(),
+                ),
+                &[payer.clone(), new_account.clone(), system_program.clone()],
+            )?;
+        }
+        invoke_signed(
+            &system_instruction::allocate(new_account.key, space as u64),
+            &[new_account.clone(), system_program.clone()],
+            &[seeds],
+        )?;
+        invoke_signed(
+            &system_instruction::assign(new_account.key, owner),
+            &[new_account.clone(), system_program.clone()],
+            &[seeds],
+        )?;
+        return Ok(());
+    }
     let ix = system_instruction::create_account(
         payer.key,
         new_account.key,
-        rent.minimum_balance(space),
+        lamports,
         space as u64,
-        program_id,
+        owner,
     );
     invoke_signed(
         &ix,
@@ -179,7 +242,14 @@ fn process_register(
     if lock_slots > MAX_LOCK_SLOTS {
         return Err(LaunchError::LockPeriodTooLong.into());
     }
-    let min_lock = (mint.supply as u128) * (MIN_LOCK_BPS as u128) / (BPS_DENOMINATOR as u128);
+    // The 10% floor rounds UP (ceiling division, self-audit F-4):
+    // floor division let a 19-token supply register with a 1-token
+    // lock — 5.26%, below the advertised minimum. A floor that
+    // protects the protocol must never round in the user's favor.
+    // u128 throughout: supply * 10,000 + 9,999 cannot overflow.
+    let min_lock = ((mint.supply as u128) * (MIN_LOCK_BPS as u128)
+        + (BPS_DENOMINATOR as u128 - 1))
+        / (BPS_DENOMINATOR as u128);
     if (lock_amount as u128) < min_lock || lock_amount == 0 {
         return Err(LaunchError::LockTooSmall.into());
     }
@@ -204,19 +274,15 @@ fn process_register(
     )?;
 
     // Create the vault token account, owned by the authority PDA.
-    let token_space = TokenAccount::LEN;
-    let rent = Rent::get()?;
-    let vault_ix = system_instruction::create_account(
-        creator.key,
-        vault_account.key,
-        rent.minimum_balance(token_space),
-        token_space as u64,
+    // Create-or-adopt like every other PDA here (self-audit F-2):
+    // the vault address is just as predictable as the record's.
+    create_or_adopt_account(
+        creator,
+        vault_account,
+        system_program,
         &spl_token::id(),
-    );
-    invoke_signed(
-        &vault_ix,
-        &[creator.clone(), vault_account.clone(), system_program.clone()],
-        &[&[SEED_VAULT, mint_account.key.as_ref(), &[vault_bump]]],
+        TokenAccount::LEN,
+        &[SEED_VAULT, mint_account.key.as_ref(), &[vault_bump]],
     )?;
     invoke(
         &initialize_account3(

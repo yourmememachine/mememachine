@@ -92,6 +92,21 @@ fn signer_pubkeys(accounts: &[AccountInfo], start: usize) -> Vec<Pubkey> {
         .collect()
 }
 
+/// Create a program PDA, adopting a pre-funded shell if one exists.
+///
+/// Self-audit F-2 (2026-11-16): every PDA address here is
+/// deterministic, so anyone could send 1 lamport to a nonce, receipt,
+/// or config PDA before its crossing/deployment and permanently
+/// block it — plain `create_account` refuses an account that already
+/// holds lamports, and there was no recovery path. Create-or-adopt
+/// removes the grief: a pre-existing account is adopted only if it
+/// is a pristine shell (lamports > 0, owned by the system program,
+/// no data) — the only state a bare transfer can produce. It is
+/// topped up to rent-exempt if needed, then allocated and assigned
+/// with the PDA's own signature, exactly as if created fresh. Any
+/// other pre-existing state (program-owned, data-carrying, or owned
+/// by a third program) still errors.
+#[allow(deprecated)]
 fn create_pda_account<'a>(
     payer: &AccountInfo<'a>,
     new_account: &AccountInfo<'a>,
@@ -102,6 +117,34 @@ fn create_pda_account<'a>(
 ) -> ProgramResult {
     let rent = Rent::get()?;
     let lamports = rent.minimum_balance(space);
+    if new_account.lamports() > 0 {
+        if *new_account.owner != solana_program::system_program::ID
+            || !new_account.data_is_empty()
+        {
+            return Err(BridgeError::InvalidAccountData.into());
+        }
+        if new_account.lamports() < lamports {
+            invoke(
+                &system_instruction::transfer(
+                    payer.key,
+                    new_account.key,
+                    lamports - new_account.lamports(),
+                ),
+                &[payer.clone(), new_account.clone(), system_program.clone()],
+            )?;
+        }
+        invoke_signed(
+            &system_instruction::allocate(new_account.key, space as u64),
+            &[new_account.clone(), system_program.clone()],
+            &[seeds],
+        )?;
+        invoke_signed(
+            &system_instruction::assign(new_account.key, program_id),
+            &[new_account.clone(), system_program.clone()],
+            &[seeds],
+        )?;
+        return Ok(());
+    }
     let ix = system_instruction::create_account(
         payer.key,
         new_account.key,
@@ -137,10 +180,16 @@ fn process_initialize(
     let config_account = next_account_info(&mut iter)?;
     let vault_account = next_account_info(&mut iter)?;
     let system_program = next_account_info(&mut iter)?;
+    let programdata_account = next_account_info(&mut iter)?;
 
     if !payer.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
     }
+    // Self-audit F-1: initialization is bound to the program's
+    // upgrade authority. Without this, the first caller after
+    // deployment — anyone — set the relayer set, the admin multisig,
+    // and the caps.
+    verify_upgrade_authority(program_id, programdata_account, payer.key)?;
     let (config_pda, bump) = config_pda(program_id);
     if *config_account.key != config_pda {
         return Err(BridgeError::InvalidAccountData.into());
@@ -159,11 +208,10 @@ fn process_initialize(
     if vault_state.owner != vault_authority || vault_state.mint != source_mint {
         return Err(BridgeError::InvalidAccountData.into());
     }
-    if relayers.iter().any(|r| r == &Pubkey::default())
-        || admins.iter().any(|a| a == &Pubkey::default())
-    {
-        return Err(BridgeError::InvalidState.into());
-    }
+    // Self-audit F-3: the same member-set validation SetRelayers
+    // applies — no default keys, no duplicates, for either set.
+    validate_member_set(&relayers)?;
+    validate_member_set(&admins)?;
     if per_tx_cap == 0 || daily_cap == 0 || daily_cap < per_tx_cap || vault_ceiling == 0 {
         return Err(BridgeError::InvalidAmount.into());
     }
@@ -215,6 +263,13 @@ fn process_deposit(
     let system_program = next_account_info(&mut iter)?;
 
     if *config_account.owner != *program_id {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    // Pin the token program (self-audit K-1 hardening): substitution
+    // already failed inside spl-token's checked CPI builders, but
+    // that safety rested on a dependency's behavior — check it here,
+    // explicitly, the way LaunchGuard does.
+    if token_program.key != &spl_token::id() {
         return Err(BridgeError::InvalidAccountData.into());
     }
     let mut config = load_config(config_account)?;
@@ -327,6 +382,10 @@ fn process_unlock(
     let receipt_account = next_account_info(&mut iter)?;
 
     if *config_account.owner != *program_id {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    // Token program pinned — see process_deposit (self-audit K-1).
+    if token_program.key != &spl_token::id() {
         return Err(BridgeError::InvalidAccountData.into());
     }
     let mut config = load_config(config_account)?;
@@ -557,14 +616,9 @@ fn process_set_relayers(
     }
     let mut config = load_config(config_account)?;
     verify_admins(&signers, &config.admins.admins, config.admins.threshold)?;
-    for (i, r) in relayers.iter().enumerate() {
-        if r == &Pubkey::default() {
-            return Err(BridgeError::InvalidState.into());
-        }
-        if relayers[..i].contains(r) {
-            return Err(BridgeError::DuplicateRelayerSignature.into());
-        }
-    }
+    // Shared with Initialize (self-audit F-3): identical checks,
+    // identical errors.
+    validate_member_set(&relayers)?;
     config.relayers.relayers = relayers;
     save_config(config_account, &config)?;
     msg!("Relayer set updated");

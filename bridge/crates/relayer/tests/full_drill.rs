@@ -47,6 +47,54 @@ fn lock_program_id() -> Pubkey {
     Pubkey::new_from_array([43u8; 32])
 }
 
+/// ProgramData address for `program_id` under the BPF upgradeable
+/// loader (self-audit F-1: Initialize is bound to the upgrade
+/// authority recorded there).
+#[allow(deprecated)]
+fn programdata_address(program_id: &Pubkey) -> Pubkey {
+    solana_program::bpf_loader_upgradeable::get_program_data_address(program_id)
+}
+
+/// Seed a ProgramData account naming `authority` as `program_id`'s
+/// upgrade authority. The bytes are the loader's bincode layout —
+/// variant tag 3 (ProgramData), slot, option tag, authority — the
+/// layout bridge-common parses. Native program-test has no real
+/// loader state for a `processor!` program, so the account is
+/// constructed directly.
+#[allow(deprecated)]
+fn seed_programdata(test: &mut ProgramTest, program_id: &Pubkey, authority: &Pubkey) {
+    let mut data = vec![0u8; 45];
+    data[0..4].copy_from_slice(&3u32.to_le_bytes());
+    data[12] = 1;
+    data[13..45].copy_from_slice(authority.as_ref());
+    test.add_account(
+        programdata_address(program_id),
+        solana_sdk::account::Account {
+            lamports: 10_000_000,
+            data,
+            owner: solana_program::bpf_loader_upgradeable::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+}
+
+/// Fund `deployer` (the upgrade authority for both programs in
+/// this drill) from the context payer.
+async fn fund_deployer(ctx: &mut ProgramTestContext, deployer: &Pubkey) {
+    let tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &ctx.payer.pubkey(),
+            deployer,
+            1_000_000_000,
+        )],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.last_blockhash,
+    );
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // Setup helpers (mirroring the program suites)
 // ---------------------------------------------------------------------------
@@ -253,6 +301,10 @@ async fn setup_chains() -> Chains {
         admins[2].pubkey(),
     ];
 
+    // One deployer is the upgrade authority of both programs;
+    // both Initialize calls are bound to it (self-audit F-1).
+    let deployer = Keypair::new();
+
     // --- Solana side: lock program ---
     let lock_pid = lock_program_id();
     let mut sol_test = ProgramTest::new(
@@ -264,7 +316,9 @@ async fn setup_chains() -> Chains {
     // builtin: `add_program` would panic in SBF mode (BPF_OUT_DIR set) because
     // no spl_token.so exists to load.
     sol_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    seed_programdata(&mut sol_test, &lock_pid, &deployer.pubkey());
     let mut sol = sol_test.start_with_context().await;
+    fund_deployer(&mut sol, &deployer.pubkey()).await;
     let user = Keypair::new();
     let mint_authority = Keypair::new();
     let source_mint = create_mint(&mut sol, &mint_authority.pubkey(), None).await;
@@ -301,17 +355,18 @@ async fn setup_chains() -> Chains {
             vault_ceiling: 50_000_000,
         },
         vec![
-            AccountMeta::new(sol.payer.pubkey(), true),
+            AccountMeta::new(deployer.pubkey(), true),
             AccountMeta::new(lock_config, false),
             AccountMeta::new_readonly(vault, false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(programdata_address(&lock_pid), false),
         ],
     );
     let blockhash = sol.banks_client.get_latest_blockhash().await.unwrap();
     let tx = Transaction::new_signed_with_payer(
         &[init_lock],
         Some(&sol.payer.pubkey()),
-        &[&sol.payer],
+        &[&sol.payer, &deployer],
         blockhash,
     );
     sol.banks_client.process_transaction(tx).await.unwrap();
@@ -327,7 +382,9 @@ async fn setup_chains() -> Chains {
     // builtin: `add_program` would panic in SBF mode (BPF_OUT_DIR set) because
     // no spl_token.so exists to load.
     machine_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    seed_programdata(&mut machine_test, &machine_pid, &deployer.pubkey());
     let mut machine = machine_test.start_with_context().await;
+    fund_deployer(&mut machine, &deployer.pubkey()).await;
     let recipient = Keypair::new();
     let (bridge_authority, _) = authority_pda(&machine_pid);
     let wrapped_mint = create_mint(
@@ -349,16 +406,18 @@ async fn setup_chains() -> Chains {
             daily_cap: 25_000_000,
         },
         vec![
-            AccountMeta::new(machine.payer.pubkey(), true),
+            AccountMeta::new(deployer.pubkey(), true),
             AccountMeta::new(machine_config, false),
+            AccountMeta::new_readonly(wrapped_mint, false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(programdata_address(&machine_pid), false),
         ],
     );
     let blockhash = machine.banks_client.get_latest_blockhash().await.unwrap();
     let tx = Transaction::new_signed_with_payer(
         &[init_machine],
         Some(&machine.payer.pubkey()),
-        &[&machine.payer],
+        &[&machine.payer, &deployer],
         blockhash,
     );
     machine.banks_client.process_transaction(tx).await.unwrap();
