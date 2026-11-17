@@ -319,6 +319,40 @@ fn extend_ix(creator: &Pubkey, mint: &Pubkey, additional_slots: u64) -> Instruct
     }
 }
 
+fn close_vault_ix(creator: &Pubkey, mint: &Pubkey, creator_token: &Pubkey) -> Instruction {
+    close_vault_ix_record(
+        creator,
+        &pda(&[SEED_LAUNCH, mint.as_ref()]),
+        &pda(&[SEED_VAULT, mint.as_ref()]),
+        creator_token,
+        &pda(&[SEED_AUTHORITY, mint.as_ref()]),
+    )
+}
+
+/// CloseVault naming an explicit record account — the forged-record
+/// attacks need to point the record slot at an account the program
+/// never created.
+fn close_vault_ix_record(
+    creator: &Pubkey,
+    record: &Pubkey,
+    vault: &Pubkey,
+    creator_token: &Pubkey,
+    authority: &Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: program_id(),
+        accounts: vec![
+            AccountMeta::new(*creator, true),
+            AccountMeta::new(*record, false),
+            AccountMeta::new(*vault, false),
+            AccountMeta::new(*creator_token, false),
+            AccountMeta::new_readonly(*authority, false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+        ],
+        data: borsh::to_vec(&LaunchInstruction::CloseVault {}).unwrap(),
+    }
+}
+
 /// ExtendLock naming an explicit record account.
 fn extend_ix_record(creator: &Pubkey, record: &Pubkey, additional_slots: u64) -> Instruction {
     Instruction {
@@ -352,6 +386,34 @@ fn forged_record(mint: &Pubkey, creator: &Pubkey, vault: &Pubkey) -> Vec<u8> {
 async fn token_balance(ctx: &mut ProgramTestContext, acct: &Pubkey) -> u64 {
     let a = ctx.banks_client.get_account(*acct).await.unwrap().unwrap();
     TokenAccount::unpack(&a.data).unwrap().amount
+}
+
+/// Anyone can transfer extra tokens into a launch's vault (standard
+/// SPL — the vault is a normal token account). Release moves exactly
+/// the locked amount, so the excess sits there until CloseVault.
+async fn send_extra_to_vault(
+    ctx: &mut ProgramTestContext,
+    creator: &Keypair,
+    token: &Pubkey,
+    mint: &Pubkey,
+    amount: u64,
+) {
+    let vault = pda(&[SEED_VAULT, mint.as_ref()]);
+    send(
+        ctx,
+        &[spl_transfer(
+            &spl_token::id(),
+            token,
+            &vault,
+            &creator.pubkey(),
+            &[],
+            amount,
+        )
+        .unwrap()],
+        &[creator],
+    )
+    .await
+    .expect("extra transfer into vault");
 }
 
 async fn record(ctx: &mut ProgramTestContext, mint: &Pubkey) -> LaunchRecord {
@@ -934,4 +996,268 @@ async fn attack_extend_with_record_at_wrong_address_fails() {
     .unwrap_err();
     expect_custom(&err, LaunchError::InvalidPda as u32);
     assert_eq!(record(&mut ctx, &mint.pubkey()).await.lock_until_slot, until);
+}
+
+// ---------------------------------------------------------------------------
+// CloseVault — residual recovery after release. The vault is a normal
+// token account, so anyone can send extra tokens into it; Release
+// moves exactly locked_amount and would leave the excess stuck
+// forever. CloseVault is the recovery path, and its gate is the
+// record's Released state: reachable only once the lock itself is
+// already out, so it can never touch locked funds.
+// ---------------------------------------------------------------------------
+
+const EXTRA: u64 = 250_000;
+
+#[tokio::test]
+async fn close_vault_recovers_residual_after_release() {
+    // Extra tokens land in the vault during the lock. Release
+    // returns exactly the locked amount; CloseVault then sweeps the
+    // residual to the creator and closes the vault account.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = register(&mut ctx, &creator).await;
+    let vault = pda(&[SEED_VAULT, mint.as_ref()]);
+    send_extra_to_vault(&mut ctx, &creator, &token, &mint, EXTRA).await;
+    assert_eq!(token_balance(&mut ctx, &vault).await, LOCK + EXTRA);
+
+    let until = record(&mut ctx, &mint).await.lock_until_slot;
+    ctx.warp_to_slot(until).unwrap();
+    send(
+        &mut ctx,
+        &[release_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .expect("release");
+    // Release moved exactly the lock — the residual is still there.
+    assert_eq!(token_balance(&mut ctx, &token).await, SUPPLY - EXTRA);
+    assert_eq!(token_balance(&mut ctx, &vault).await, EXTRA);
+
+    send(
+        &mut ctx,
+        &[close_vault_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .expect("close vault");
+    assert_eq!(token_balance(&mut ctx, &token).await, SUPPLY);
+    // The vault account is closed: rent returned, account gone.
+    assert!(ctx
+        .banks_client
+        .get_account(vault)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn attack_close_vault_before_release_fails() {
+    // While the launch is locked — and even after expiry, before
+    // Release runs — CloseVault must fail and nothing may move. The
+    // gate is the completed release, not the clock: there is no
+    // slot at which the residual (or anything else) can leave early.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = register(&mut ctx, &creator).await;
+    let vault = pda(&[SEED_VAULT, mint.as_ref()]);
+    send_extra_to_vault(&mut ctx, &creator, &token, &mint, EXTRA).await;
+
+    let err = send(
+        &mut ctx,
+        &[close_vault_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::NotReleased as u32);
+    assert_eq!(token_balance(&mut ctx, &vault).await, LOCK + EXTRA);
+
+    // Past expiry but not yet released: still sealed.
+    let until = record(&mut ctx, &mint).await.lock_until_slot;
+    ctx.warp_to_slot(until).unwrap();
+    let err = send(
+        &mut ctx,
+        &[close_vault_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::NotReleased as u32);
+    assert_eq!(token_balance(&mut ctx, &vault).await, LOCK + EXTRA);
+
+    // The honest sequence still works afterwards.
+    send(
+        &mut ctx,
+        &[release_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .expect("release after failed closes");
+    // Warp one slot so the closing transaction carries a fresh
+    // blockhash: byte-identical to the failed pre-release attempt
+    // under the same blockhash, it would be answered with that
+    // attempt's cached result instead of being run. (Any real
+    // client fetches a fresh blockhash per transaction; the warp
+    // is this harness's way of doing the same.)
+    let now = clock_slot(&mut ctx).await;
+    ctx.warp_to_slot(now + 1).unwrap();
+    send(
+        &mut ctx,
+        &[close_vault_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .expect("close after release");
+    assert_eq!(token_balance(&mut ctx, &token).await, SUPPLY);
+}
+
+#[tokio::test]
+async fn attack_close_vault_by_stranger_fails() {
+    // After release, a stranger who names the real record still
+    // cannot sweep the residual: CloseVault is creator-only, and the
+    // residual stays put for the creator to recover.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let stranger = Keypair::new();
+    let (mint, token) = register(&mut ctx, &creator).await;
+    let vault = pda(&[SEED_VAULT, mint.as_ref()]);
+    send_extra_to_vault(&mut ctx, &creator, &token, &mint, EXTRA).await;
+    let until = record(&mut ctx, &mint).await.lock_until_slot;
+    ctx.warp_to_slot(until).unwrap();
+    send(
+        &mut ctx,
+        &[release_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .expect("release");
+
+    let stranger_token = make_token_account(&mut ctx, &stranger.pubkey(), &mint).await;
+    let err = send(
+        &mut ctx,
+        &[close_vault_ix(&stranger.pubkey(), &mint, &stranger_token)],
+        &[&stranger],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::NotCreator as u32);
+    assert_eq!(token_balance(&mut ctx, &vault).await, EXTRA);
+    assert_eq!(token_balance(&mut ctx, &stranger_token).await, 0);
+
+    send(
+        &mut ctx,
+        &[close_vault_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .expect("creator closes after stranger attempt");
+    assert_eq!(token_balance(&mut ctx, &token).await, SUPPLY);
+}
+
+#[tokio::test]
+async fn close_vault_with_zero_residual_closes_vault() {
+    // No stray transfers: after a clean release the vault is empty,
+    // and CloseVault still closes it so the creator recovers the
+    // vault's rent instead of abandoning it.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = register(&mut ctx, &creator).await;
+    let vault = pda(&[SEED_VAULT, mint.as_ref()]);
+    let until = record(&mut ctx, &mint).await.lock_until_slot;
+    ctx.warp_to_slot(until).unwrap();
+    send(
+        &mut ctx,
+        &[release_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .expect("release");
+    assert_eq!(token_balance(&mut ctx, &vault).await, 0);
+
+    send(
+        &mut ctx,
+        &[close_vault_ix(&creator.pubkey(), &mint, &token)],
+        &[&creator],
+    )
+    .await
+    .expect("close empty vault");
+    assert_eq!(token_balance(&mut ctx, &token).await, SUPPLY);
+    assert!(ctx
+        .banks_client
+        .get_account(vault)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn attack_close_vault_with_record_at_wrong_address_fails() {
+    // The forged-record drain, aimed at CloseVault: the attacker
+    // plants a program-owned record claiming the launch is already
+    // Released, with themselves as creator and the victim's real
+    // vault in the vault field — at an address that is not the
+    // mint's record PDA. Without the PDA re-derivation check the
+    // sweep would run and hand them the residual. It must fail with
+    // InvalidPda and leave the residual untouched.
+    let victim = Keypair::new();
+    let attacker = Keypair::new();
+    let mint = Keypair::new();
+    let vault = pda(&[SEED_VAULT, mint.pubkey().as_ref()]);
+    let wrong_address = Keypair::new();
+    let mut planted = Account::new(1_000_000, 0, &program_id());
+    planted.data = borsh::to_vec(&LaunchRecord {
+        discriminator: DISCRIMINATOR_LAUNCH,
+        mint: mint.pubkey(),
+        creator: attacker.pubkey(),
+        vault,
+        total_supply: SUPPLY,
+        locked_amount: LOCK,
+        lock_until_slot: 0,
+        registered_slot: 0,
+        state: STATE_RELEASED,
+    })
+    .unwrap();
+    let mut ctx = start_with(vec![(wrong_address.pubkey(), planted)]).await;
+    let (_mint, token) = register_keyed(&mut ctx, &victim, &mint).await;
+    send_extra_to_vault(&mut ctx, &victim, &token, &mint.pubkey(), EXTRA).await;
+    let until = record(&mut ctx, &mint.pubkey()).await.lock_until_slot;
+    ctx.warp_to_slot(until).unwrap();
+    send(
+        &mut ctx,
+        &[release_ix(&victim.pubkey(), &mint.pubkey(), &token)],
+        &[&victim],
+    )
+    .await
+    .expect("victim release");
+    assert_eq!(token_balance(&mut ctx, &vault).await, EXTRA);
+
+    let attacker_token = make_token_account(&mut ctx, &attacker.pubkey(), &mint.pubkey()).await;
+    let authority = pda(&[SEED_AUTHORITY, mint.pubkey().as_ref()]);
+    let err = send(
+        &mut ctx,
+        &[close_vault_ix_record(
+            &attacker.pubkey(),
+            &wrong_address.pubkey(),
+            &vault,
+            &attacker_token,
+            &authority,
+        )],
+        &[&attacker],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::InvalidPda as u32);
+    assert_eq!(token_balance(&mut ctx, &vault).await, EXTRA);
+    assert_eq!(token_balance(&mut ctx, &attacker_token).await, 0);
+
+    // The victim's own close still recovers the residual.
+    send(
+        &mut ctx,
+        &[close_vault_ix(&victim.pubkey(), &mint.pubkey(), &token)],
+        &[&victim],
+    )
+    .await
+    .expect("victim close");
+    assert_eq!(token_balance(&mut ctx, &token).await, SUPPLY);
 }

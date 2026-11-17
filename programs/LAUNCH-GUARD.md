@@ -39,6 +39,7 @@ is not the classic SPL Token program is not a LaunchGuard launch.
 | `RegisterAndLock { lock_amount, lock_slots }` | Verifies revoked authorities + fixed supply, creates the launch record and vault PDAs, transfers `lock_amount` from the creator into the vault. Fails if: authorities not revoked, supply is zero, lock < 10% of supply, lock period < 30 days or > 5 years, or a record already exists for the mint. |
 | `ExtendLock { additional_slots }` | Creator only, while locked. Pushes the release slot further out (never past +5 years from now). There is deliberately no instruction that moves it earlier. |
 | `Release {}` | Creator only, only after the lock expires. Returns the full locked amount from the vault to the creator and marks the record Released. Before expiry it always fails. |
+| `CloseVault {}` | Creator only, and only after `Release` has completed. Sweeps any residual balance out of the vault and closes the vault account, returning its rent to the creator. The vault is a normal token account, so anyone can send extra tokens into it; `Release` moves exactly the locked amount, and without this instruction the excess would be stuck forever. Because it is gated on the record's Released state — set only after the full locked amount has left the vault — it has no path to any part of the lock: while a launch is locked or merely expired-but-unreleased, it always fails. |
 
 Locks are counted in **slots, not wall-clock time** — the same
 determinism rule the bridge uses. Slot counts cannot drift or be
@@ -75,9 +76,17 @@ launches and completions inside this standard.
 
 ## What LaunchGuard does NOT do (honest limits)
 
-- It does not lock **liquidity-pool** positions, team wallets beyond
-  the registered lock, or any tokens the creator holds in other
-  wallets. A creator can still sell whatever they didn't lock.
+- The 10% lock is a **floor, not a guarantee**. The other 90% of
+  supply is unlocked from the start: the creator can sell it
+  immediately, and nothing in the program stops a "soft rug" that
+  dumps unlocked supply. What the standard proves is narrower —
+  supply can never grow, and at least 10% cannot move for at least
+  30 days.
+- It does not lock **liquidity-pool** positions (no Raydium / Orca /
+  Meteora LP tokens are touched), team wallets beyond the
+  registered lock, or any tokens the creator holds in other
+  wallets. A creator can still pull liquidity or sell whatever
+  they didn't lock.
 - It does not judge token quality, team identity, or intent. A
   registered launch is *provably fixed-supply with a locked creator
   stake* — nothing more. Marketing it as more than that would be a lie.
@@ -105,8 +114,14 @@ For a mint `M` and the LaunchGuard program `P`, inspect:
    `lock_until_slot` in the future for an active lock, and
    `creator` = the wallet that registered.
 3. **The vault token account PDA** — seeds `["vault", M]` under
-   `P`. Its balance must equal the record's `locked_amount`, and
-   its owner must be the authority PDA (next item), never a wallet.
+   `P`. Its balance must be at least the record's `locked_amount`
+   (it can be higher — anyone can send extra tokens into the
+   vault; the excess cannot move early either, and after release
+   the creator can recover it and close the vault with
+   `CloseVault`), and its owner must be the authority PDA (next
+   item), never a wallet. After a completed release and close,
+   the vault account no longer exists and the record shows
+   Released.
 4. **The authority PDA** — seeds `["launch-authority", M]` under
    `P`. This program-derived address is the only authority that
    can move vault funds, and the program moves them only to the

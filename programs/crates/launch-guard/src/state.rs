@@ -75,6 +75,15 @@ pub enum LaunchInstruction {
     ExtendLock { additional_slots: u64 },
     /// Creator only, after expiry: return the locked tokens.
     Release {},
+    /// Creator only, and only after Release has completed: sweep
+    /// any residual balance out of the vault and close it. Anyone
+    /// can transfer extra tokens into the vault (standard SPL), and
+    /// Release moves exactly `locked_amount`, so without this the
+    /// excess would be stuck forever. Because the instruction is
+    /// gated on the record's Released state — which Release sets
+    /// only after the full locked amount has left the vault — it
+    /// can never touch the lock itself.
+    CloseVault {},
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -98,6 +107,10 @@ pub enum LaunchError {
     /// standard exists to remove, and the classic Mint layout this
     /// program parses does not describe them.
     UnsupportedTokenProgram = 12,
+    /// CloseVault was called before Release completed the lock.
+    /// The vault stays sealed — residual recovery exists only once
+    /// the locked amount itself is already out.
+    NotReleased = 13,
 }
 
 impl From<LaunchError> for ProgramError {

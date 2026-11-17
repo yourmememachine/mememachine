@@ -15,7 +15,7 @@ use solana_program::{
     sysvar::Sysvar,
 };
 use spl_token::{
-    instruction::{initialize_account3, transfer},
+    instruction::{close_account, initialize_account3, transfer},
     state::{Account as TokenAccount, Mint},
 };
 
@@ -33,6 +33,7 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
             process_extend(program_id, accounts, additional_slots)
         }
         LaunchInstruction::Release {} => process_release(program_id, accounts),
+        LaunchInstruction::CloseVault {} => process_close_vault(program_id, accounts),
     }
 }
 
@@ -522,6 +523,109 @@ fn process_release(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResu
         "LaunchGuard: released {} of {} to creator",
         record.locked_amount,
         record.mint
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// CloseVault — creator only, only after Release. Sweeps whatever extra
+// tokens were sent into the vault (Release moves exactly
+// locked_amount) back to the creator and closes the vault account,
+// returning its rent. The Released-state gate is the whole safety
+// argument: Release sets that state only after the full locked
+// amount has left the vault, so nothing reachable from here can be
+// part of the lock, and while a launch is still locked this
+// instruction always fails.
+// ---------------------------------------------------------------------------
+
+fn process_close_vault(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let iter = &mut accounts.iter();
+    let creator = next_account_info(iter)?;
+    let record_account = next_account_info(iter)?;
+    let vault_account = next_account_info(iter)?;
+    let creator_token = next_account_info(iter)?;
+    let authority_account = next_account_info(iter)?;
+    let token_program = next_account_info(iter)?;
+
+    if !creator.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if token_program.key != &spl_token::id() {
+        return Err(LaunchError::UnsupportedTokenProgram.into());
+    }
+    let record = load_record(record_account, program_id)?;
+    // Same binding as ExtendLock and Release: the record for a mint
+    // lives only at its derived PDA.
+    let (record_pda, _) = launch_pda(program_id, &record.mint);
+    if record_account.key != &record_pda {
+        return Err(LaunchError::InvalidPda.into());
+    }
+    if record.creator != *creator.key {
+        return Err(LaunchError::NotCreator.into());
+    }
+    if record.state != STATE_RELEASED {
+        return Err(LaunchError::NotReleased.into());
+    }
+    if vault_account.key != &record.vault {
+        return Err(LaunchError::InvalidPda.into());
+    }
+    let (authority_pda, authority_bump) = authority_pda(program_id, &record.mint);
+    if authority_account.key != &authority_pda {
+        return Err(LaunchError::InvalidPda.into());
+    }
+    let creator_token_data = TokenAccount::unpack(&creator_token.try_borrow_data()?)?;
+    if creator_token_data.owner != *creator.key || creator_token_data.mint != record.mint {
+        return Err(LaunchError::MintMismatch.into());
+    }
+    // The vault must still be the token account registration created:
+    // this mint, owned by the authority PDA. Anything else at that
+    // address is not ours to sweep or close.
+    let vault_data = TokenAccount::unpack(&vault_account.try_borrow_data()?)?;
+    if vault_data.mint != record.mint || vault_data.owner != authority_pda {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let residual = vault_data.amount;
+    let seeds: &[&[u8]] = &[SEED_AUTHORITY, record.mint.as_ref(), &[authority_bump]];
+    if residual > 0 {
+        invoke_signed(
+            &transfer(
+                token_program.key,
+                vault_account.key,
+                creator_token.key,
+                &authority_pda,
+                &[],
+                residual,
+            )?,
+            &[
+                vault_account.clone(),
+                creator_token.clone(),
+                authority_account.clone(),
+                token_program.clone(),
+            ],
+            &[seeds],
+        )?;
+    }
+    invoke_signed(
+        &close_account(
+            token_program.key,
+            vault_account.key,
+            creator.key,
+            &authority_pda,
+            &[],
+        )?,
+        &[
+            vault_account.clone(),
+            creator.clone(),
+            authority_account.clone(),
+            token_program.clone(),
+        ],
+        &[seeds],
+    )?;
+
+    msg!(
+        "LaunchGuard: vault for {} closed — {} residual tokens returned to creator",
+        record.mint,
+        residual
     );
     Ok(())
 }
