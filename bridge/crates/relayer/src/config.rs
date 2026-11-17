@@ -47,6 +47,13 @@ pub struct RelayerConfig {
     /// File holding the next-nonce cursors, so a restart does not
     /// re-process or skip events.
     pub state_path: String,
+    /// Tamper-evident audit log file (audit_log.rs). Optional:
+    /// defaults to `relayer-audit.jsonl` inside `attestation_dir`.
+    /// The relayer fails closed if the existing log does not
+    /// verify — it will not sign, collect, or submit without its
+    /// evidence trail.
+    #[serde(default)]
+    pub audit_log_path: Option<String>,
     /// Deterministic expiry: expiry_slot = source_slot + this value.
     /// MUST be identical for every relayer. Default 100_000 slots
     /// (~11 hours on Solana's ~400ms slots; Machine slots are faster,
@@ -129,6 +136,17 @@ impl RelayerConfig {
     pub fn vault(&self) -> Pubkey {
         parse_pubkey("vault", &self.vault).expect("validated")
     }
+
+    /// The audit log path in effect: the configured value, or the
+    /// default inside the attestation exchange directory.
+    pub fn audit_log_path(&self) -> String {
+        self.audit_log_path.clone().unwrap_or_else(|| {
+            format!(
+                "{}/relayer-audit.jsonl",
+                self.attestation_dir.trim_end_matches('/')
+            )
+        })
+    }
 }
 
 #[cfg(test)]
@@ -163,6 +181,7 @@ mod tests {
         assert_eq!(cfg.machine_safety_margin_slots, 0);
         assert_eq!(cfg.poll_interval_secs, 10);
         assert!(!cfg.submit_enabled);
+        assert_eq!(cfg.audit_log_path(), "/tmp/attestations/relayer-audit.jsonl");
     }
 
     #[test]

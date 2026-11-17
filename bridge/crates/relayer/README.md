@@ -51,6 +51,12 @@ independent audit, worthless-amount crossings, monitoring.
 6. **Submit** — builds `MintWrapped` / `Unlock` with the account
    order the processors expect and submits a signed transaction.
    Dry-run unless the config sets `submit_enabled: true`.
+7. **Log** — every sign, collect, non-routine collection failure,
+   dry run, and submission is appended to a hash-chained,
+   tamper-evident audit log (`audit_log.rs`, doc
+   `bridge/RELAYER-LOG.md`; inspector: the `relayer-log` binary).
+   The relayer fails closed if the existing log does not verify —
+   it will not act without its evidence trail.
 
 Relayers hold no funds. The mint authority is a program PDA; caps
 and replay protection are enforced on-chain, not here.
@@ -82,8 +88,11 @@ and hold the correct mint; the destination program enforces both.
 cargo test --release -p relayer
 ```
 
-35 unit tests (config validation, finality margin, deterministic
-expiry, signing against bridge-common's verifier, attestation
+48 unit tests (config validation, finality margin, deterministic
+expiry, signing against bridge-common's verifier, the audit log's
+hash chain — edited / deleted / reordered / forged entries
+detected, truncation and wholesale rewrite detected against a
+published checkpoint, fail-closed open — attestation
 collection incl. disagreement and 2-of-5 failure, malformed
 exchange files failing closed (truncated / garbage / empty,
 bad or forged signatures, tampered hash, wrong-nonce file),

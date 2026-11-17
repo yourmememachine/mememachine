@@ -15,7 +15,8 @@
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use bridge_common::{nonce_pda, EventRecord};
-use relayer::attestation::{AttestationFile, Collector};
+use relayer::attestation::{hash_hex, AttestationFile, Collector};
+use relayer::audit_log::{AuditEvent, AuditLog};
 use relayer::config::{parse_pubkey, RelayerConfig};
 use relayer::message::{Direction, ObservedEvent};
 use relayer::rpc::{sender_from_verified_source_transfer, RpcClient, SourceTransferCheck};
@@ -88,6 +89,16 @@ impl SourceChain for RpcSource {
             source_tx,
         })
     }
+}
+
+/// Append one event to the tamper-evident audit log. Opening the
+/// log verifies its existing chain, so a tampered log fails every
+/// action closed — the relayer does not sign, collect, or submit
+/// without its evidence trail (see audit_log.rs).
+fn log_event(cfg: &RelayerConfig, event: AuditEvent) -> Result<()> {
+    let mut log = AuditLog::open(Path::new(&cfg.audit_log_path()))?;
+    log.append(event)?;
+    Ok(())
 }
 
 fn source_for(cfg: &RelayerConfig, direction: Direction) -> Result<RpcSource> {
@@ -180,6 +191,19 @@ fn sign_once(
             let sig = signer.sign(&message);
             let path = AttestationFile::new(direction, &message, &sig)
                 .write_to(Path::new(&cfg.attestation_dir))?;
+            // Log before advancing the cursor: if the log cannot be
+            // written, the nonce stays current and the next poll
+            // re-signs the identical message (signatures are
+            // deterministic; the file write is idempotent).
+            log_event(
+                cfg,
+                AuditEvent::Signed {
+                    direction: direction.label().to_string(),
+                    nonce: message.nonce,
+                    message_hash: hash_hex(&message),
+                    relayer: signer.pubkey().to_string(),
+                },
+            )?;
             println!(
                 "{}: signed nonce {} amount {} -> {}",
                 direction.label(),
@@ -233,7 +257,38 @@ fn collect(
         quorum: bridge_common::QUORUM,
     };
     let dest_slot = dest_client(cfg, direction).finalized_slot()?;
-    collector.collect(Path::new(&cfg.attestation_dir), direction, nonce, dest_slot)
+    match collector.collect(Path::new(&cfg.attestation_dir), direction, nonce, dest_slot) {
+        Ok((message, signatures)) => {
+            log_event(
+                cfg,
+                AuditEvent::Collected {
+                    direction: direction.label().to_string(),
+                    nonce,
+                    message_hash: hash_hex(&message),
+                    signers: signatures.len(),
+                },
+            )?;
+            Ok((message, signatures))
+        }
+        Err(e) => {
+            // Non-routine failures are dispute evidence (disagreement,
+            // a malformed or forged exchange file): record them.
+            // QuorumNotReached is routine in the poll loop and is not
+            // logged. Recording is best-effort here — the collection
+            // error is the one the caller must see.
+            if !matches!(e, RelayerError::QuorumNotReached { .. }) {
+                let _ = log_event(
+                    cfg,
+                    AuditEvent::CollectionFailed {
+                        direction: direction.label().to_string(),
+                        nonce,
+                        reason: e.to_string(),
+                    },
+                );
+            }
+            Err(e)
+        }
+    }
 }
 
 fn submit(
@@ -290,6 +345,14 @@ fn submit(
             ixs.len(),
             ixs[1].program_id
         );
+        log_event(
+            cfg,
+            AuditEvent::DryRun {
+                direction: direction.label().to_string(),
+                nonce,
+                message_hash: hash_hex(&message),
+            },
+        )?;
         return Ok(());
     }
 
@@ -326,6 +389,15 @@ fn submit(
         .map_err(|e| RelayerError::Rpc(format!("transaction serialize: {e}")))?;
     let sig = client.send_transaction(&B64.encode(wire))?;
     println!("submitted: {sig}");
+    log_event(
+        cfg,
+        AuditEvent::Submitted {
+            direction: direction.label().to_string(),
+            nonce,
+            message_hash: hash_hex(&message),
+            tx_signature: sig,
+        },
+    )?;
     Ok(())
 }
 

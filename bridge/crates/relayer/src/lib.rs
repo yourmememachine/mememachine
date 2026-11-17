@@ -29,6 +29,7 @@
 //! (safely) never reach quorum — the collector reports the mismatch.
 
 pub mod attestation;
+pub mod audit_log;
 pub mod config;
 pub mod message;
 pub mod rpc;
@@ -62,6 +63,10 @@ pub enum RelayerError {
     /// destination, wrong mint, or wrong amount) — fail closed
     /// rather than sign a message whose sender cannot be proven.
     SourceTransferNotVerified(String),
+    /// The tamper-evident audit log (audit_log.rs) failed to parse,
+    /// verify, or append — the relayer fails closed rather than act
+    /// without its evidence trail.
+    AuditLog(String),
 }
 
 pub type PubkeyString = String;
@@ -94,6 +99,7 @@ impl fmt::Display for RelayerError {
             RelayerError::SourceTransferNotVerified(m) => {
                 write!(f, "source transfer not verified: {m}")
             }
+            RelayerError::AuditLog(m) => write!(f, "audit log error: {m}"),
         }
     }
 }
