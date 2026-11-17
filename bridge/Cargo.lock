@@ -3113,6 +3113,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "proof-bundle"
+version = "0.1.0"
+dependencies = [
+ "borsh 1.8.1",
+ "bridge-common",
+ "bs58",
+ "ed25519-dalek 2.2.0",
+ "machine-bridge",
+ "relayer",
+ "serde",
+ "serde_json",
+ "solana-lock",
+ "solana-program",
+ "solana-program-test",
+ "solana-sdk",
+ "spl-token",
+ "tokio",
+]
+
+[[package]]
 name = "qstring"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

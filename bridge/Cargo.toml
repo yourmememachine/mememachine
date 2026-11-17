@@ -5,4 +5,5 @@ members = [
     "crates/machine-bridge",
     "crates/solana-lock",
     "crates/relayer",
+    "crates/proof-bundle",
 ]
