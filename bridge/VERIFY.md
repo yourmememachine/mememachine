@@ -4,18 +4,27 @@ Real commands and their real output. Nothing here is claimed without a
 run behind it. Verified 2026-11-14 ~11:07 UTC, in the bridge workspace
 directory.
 
-## Current state (2026-11-15, latest commits — read this first)
+## Current state (2026-11-17, latest commits — read this first)
 
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **109 passed, 0 failed** (33
-  bridge-common unit + 21 machine-bridge + 15 solana-lock + 1
-  precompile-cost + 39 relayer, including the full local
+- **Tests:** bridge workspace **127 passed, 0 failed** (37
+  bridge-common unit + 27 machine-bridge + 21 solana-lock + 1
+  precompile-cost + 41 relayer, including the full local
   end-to-end drill and the 45-crossing volume drill); LaunchGuard
-  **26 passed** and registry export **11 passed**
+  **29 passed** and registry export **11 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-16: **169 passed, 0 failed**.
+  Full `make verify` 2026-11-17: **190 passed, 0 failed**.
+- **Self-audit fixes (2026-11-16, commit `7cd6f5b`):** Initialize
+  in both bridge programs is bound to the program's upgrade
+  authority (ProgramData account required; machine-bridge also
+  validates the wrapped mint account); PDA creation is
+  create-or-adopt in all three programs; one shared member-set
+  validator serves Initialize and SetRelayers; the token program
+  is pinned in the four value handlers; the relayer's
+  source-transfer check is bound to the record's creating
+  instruction. See STATUS.md P25 and SECURITY-CHANGELOG.md.
 - **Verification path:** attestation verification uses the ed25519
   precompile + instructions sysvar (changed 2026-11-14; the original
   sections below describe the earlier in-program dalek path's runs).
@@ -38,11 +47,11 @@ the current state and supersedes their numbers.
   (~46% / ~43%). The old 409/676 figures in the log below were
   native-execution measurements, which meter almost nothing — see
   the corrected CU section.
-- **SBF (rebuilt 2026-11-16):** solana_lock.so `cda1b66f…`
-  (204,272 B), machine_bridge.so `ecd19d0f…` (204,016 B).
-  launch_guard.so was NOT rebuilt after the 2026-11-16 forgery
-  patch — the `405a0075…` (115,208 B) hash from 2026-11-15 is
-  stale for the current sources; rebuild outstanding.
+- **SBF (rebuilt 2026-11-16, self-audit fixes):** solana_lock.so
+  `46c58613…` (210,256 B), machine_bridge.so `8e4501e2…`
+  (211,856 B), launch_guard.so `cda71121…` (126,512 B — the
+  LaunchGuard rebuild left outstanding by the forgery patch is
+  now done). Full hashes in `bridge/deploy/SBF-BUILD-NOTES.md`.
   Not deployed anywhere; no asset has crossed; no audit.
 
 Toolchain: cargo 1.100.0 (3acc79c0c 2026-11-05), rustc 1.100.0

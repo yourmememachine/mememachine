@@ -63,6 +63,21 @@ Both are ELF 64-bit sBPF shared objects (e_machine 0x107), stripped.
 They are **not deployed anywhere** — deployment stays gated on
 BRIDGE.md §5 (audit, fresh production keys, live net).
 
+**Rebuilt 2026-11-16 (later)** from the self-audit fixes
+(`7cd6f5b`: Initialize bound to the upgrade authority,
+create-or-adopt PDA creation, shared member-set validation,
+LaunchGuard ceiling-division minimum lock, token-program pin —
+see `STATUS.md` P25). Same standalone-tree method and saved
+lockfiles as the earlier rebuilds. All three programs rebuilt in
+this pass — including LaunchGuard, closing the rebuild left
+outstanding above:
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 210,256 | `46c586131e0a95fb4652586eb49690918b0f76f840805db53ffd3ec5da5e5c68` |
+| `machine_bridge.so` | 211,856 | `8e4501e25f3ef840f60ede5e5e05e3e9e2ecfd9a7f7547340ac2b58b440f1406` |
+| `launch_guard.so` | 126,512 | `cda7112195249da03cedcc968561519a9a9898f2773d32e860f486611a86b92d` |
+
 ## Why the build does not run directly against the bridge workspace
 
 `bridge/deploy/build-sbf.sh` against the workspace fails before any

@@ -7,6 +7,31 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-16 — `7cd6f5b`** Self-audit fixes (REVIEW-1: the
+  audit method turned on Machine's own code; 4 findings, each
+  PoC-proven in a scratch copy first). (F-1, High) `Initialize`
+  in both bridge programs was permissionless — the first caller
+  after deployment set relayers/admins/caps, and machine-bridge
+  accepted `wrapped_mint` from instruction data unvalidated.
+  Initialize now requires the program's ProgramData account and
+  the payer must equal the recorded upgrade authority
+  (`bridge_common::verify_upgrade_authority`); machine-bridge
+  validates the wrapped mint as a real mint account. (F-2,
+  Medium) PDA creation in all three programs is create-or-adopt:
+  a pre-funded empty system-owned PDA shell is topped up,
+  allocated, and assigned instead of permanently blocking the
+  crossing / registration / deployment it targets. (F-3, Low)
+  one shared `bridge_common::validate_member_set` (default keys
+  and duplicates rejected) now serves `Initialize` and
+  `SetRelayers` in both bridge programs. (F-4, Low) LaunchGuard
+  minimum lock uses ceiling division — supply 19 requires a
+  2-token lock (the floor computation admitted 1 token = 5.26%).
+  Same commit, defense in depth: token program pinned to
+  `spl_token::id()` in Deposit / Unlock / MintWrapped / Burn,
+  and the relayer's source-transfer verification is bound to the
+  record's creating instruction (one transfer can no longer
+  satisfy two same-amount records in one batched transaction).
+  21 new tests; all three SBF binaries rebuilt.
 - **2026-11-16 — `e14c539`** Relayer watcher trust audit (Coreum
   lesson, Aug 2026): the watcher's sender extraction only scanned
   top-level instructions, but the deposit's token transfer is a CPI

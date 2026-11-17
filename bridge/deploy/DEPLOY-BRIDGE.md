@@ -85,6 +85,12 @@ caps from `caps.py`. (The Initialize instruction formats are
 `LockInstruction::Initialize` / `MachineInstruction::Initialize` in
 bridge-common; submit them with the operator tooling used for the
 audit's test crossings so the exact transactions are rehearsed.)
+Since the 2026-11-16 self-audit fix (F-1), Initialize must be
+signed by the program's upgrade authority — after step 4 that is
+the admin multisig — and must include the program's ProgramData
+account; any other payer is rejected on-chain, and duplicate or
+default member keys are rejected by the shared member-set
+validator.
 
 Verify afterwards, by reading both config PDAs: relayers, admins,
 caps, paused = false, killed = false, and the mint/vault pubkeys all

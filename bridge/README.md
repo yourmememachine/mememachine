@@ -129,10 +129,13 @@ When those exist, the deploy path is:
 - **Relayer: implemented, never run live.** The off-chain relayer
   (watching for finalized deposits/burns, signing attestations,
   collecting a 3-of-5 quorum, submitting them) is in
-  `crates/relayer/` and passes its tests locally (39 tests). Since
+  `crates/relayer/` and passes its tests locally (41 tests). Since
   2026-11-16 the watcher verifies the source transfer behind each
   event (into the vault / burning the wrapped mint, exact amount)
-  before signing. It has never watched a real deposit — there is
+  before signing — and since the self-audit fix later that day,
+  the transfer must sit in the inner-instruction group of the
+  instruction that created the record being verified. It has
+  never watched a real deposit — there is
   no deployed bridge or public Machine RPC for it to watch yet.
 - **No upgrade path in the programs.** Program upgrades go through a
   multisig with a timelock (BRIDGE.md 4.2); the upgrade authority is a

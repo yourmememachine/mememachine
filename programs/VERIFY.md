@@ -211,3 +211,23 @@ the `released` status and the empty-vault check). Off-chain
 tooling only — no program change, so no SBF rebuild and no
 audit-scope change. `make verify` green against `d276c3f`;
 repo total **169** (109 bridge workspace + 37 programs + 23 fork).
+
+### Addendum — self-audit fixes (2026-11-16)
+
+The self-audit (REVIEW-1) turned on LaunchGuard found two issues,
+both fixed in commit `7cd6f5b` with regression tests in
+`crates/launch-guard/tests/launch_guard.rs`: (F-4) the minimum
+lock used floor division — a 19-token supply passed the ≥10%
+gate with a 1-token lock (5.26%); it now uses ceiling division
+(u128 intermediate), so supply 19 requires 2 and a 1-token lock
+fails with `LockTooSmall` while 2 succeeds. (F-2) PDA creation
+is create-or-adopt (shared pattern with the bridge programs): a
+pre-funded record or vault PDA shell is adopted instead of
+permanently blocking the mint's registration — both variants are
+pinned by tests. Suite now **29 passed, 0 failed**. SBF rebuilt:
+launch_guard.so
+`cda7112195249da03cedcc968561519a9a9898f2773d32e860f486611a86b92d`
+(126,512 B) — this also closes the rebuild left outstanding by
+the 2026-11-16 forgery patch. `make verify` green against
+`7cd6f5b`; repo total **190** (127 bridge workspace + 40 programs
++ 23 fork). Not deployed.

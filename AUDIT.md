@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `d276c3f` (2026-11-16; `make verify` green —
-bridge workspace 109 passed, LaunchGuard 26 passed, registry export
+Last verified commit: `7cd6f5b` (2026-11-17; `make verify` green —
+bridge workspace 127 passed, LaunchGuard 29 passed, registry export
 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -65,6 +65,30 @@ chain configuration gates any public chain launch. Both scopes:
 > Scope A accounts, it does not touch the program: no program
 > change, no SBF rebuild, no scope change. Auditors should still
 > quote against the current `main` HEAD.
+>
+> **Scope update (2026-11-16, self-audit fixes — PROGRAM CHANGES,
+> SBF REBUILT):** a self-audit of the in-scope code (REVIEW-1)
+> found four issues, all fixed in commit `7cd6f5b` with regression
+> tests: (F-1, High) `Initialize` in both bridge programs was
+> permissionless — it is now bound to the program's upgrade
+> authority (a new ProgramData account in both Initialize account
+> lists; new shared `verify_upgrade_authority` in bridge-common),
+> and machine-bridge validates the wrapped mint as a real mint
+> account; (F-2, Medium) PDA creation in all three programs is
+> create-or-adopt, so a pre-funded PDA shell no longer permanently
+> blocks a crossing, registration, or deployment; (F-3, Low) one
+> shared member-set validator in bridge-common now serves
+> `Initialize` and `SetRelayers` in both programs; (F-4, Low)
+> LaunchGuard's minimum lock uses ceiling division. Two
+> defense-in-depth hardenings landed in the same commit: the token
+> program is pinned explicitly in Deposit / Unlock / MintWrapped /
+> Burn, and the relayer's source-transfer verification is bound to
+> the record's creating instruction. All three SBF binaries were
+> rebuilt (hashes in `bridge/deploy/SBF-BUILD-NOTES.md`).
+> **Auditors must quote and review against the current `main`
+> HEAD (pinned at the top of this file), not any earlier tree** —
+> in particular, quotes issued against pre-`7cd6f5b` trees do not
+> cover the changed Initialize paths.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
