@@ -11,17 +11,41 @@
 //! without changing the collector: it consumes `AttestationFile`s,
 //! wherever they came from.
 //!
-//! The collector is strict:
-//! - the message must hash to the same value in every file, otherwise
-//!   it reports `Disagreement` and collects nothing (BRIDGE.md 3.2);
-//! - a relayer may contribute at most one signature;
-//! - signers must be in the registered relayer set;
+//! The collector is strict about what it COUNTS, and tolerant of
+//! junk it does not count (debate scope-2, 2026-11-17):
+//! - a file counts only if it parses, its stored hash matches, its
+//!   relayer is registered, and its signature verifies on its own;
+//!   anything else in the shared directory is skipped, so one junk
+//!   file cannot block a quorum that is already present;
+//! - a *verified* signature over a different message for the same
+//!   nonce is genuine equivocation: it reports `Disagreement` and
+//!   collects nothing (BRIDGE.md 3.2);
+//! - a relayer may contribute at most one counted signature;
 //! - the collected set is re-verified with bridge-common's own
 //!   `verify_attestation` before it is handed to the submitter, so the
 //!   off-chain check can never be weaker than the on-chain one.
 
 use crate::message::Direction;
 use crate::{RelayerError, Result};
+
+/// Best-effort directory fsync so a rename is durable.
+pub(crate) fn sync_dir(dir: &Path) {
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+}
+
+/// Verify one relayer signature over a message hash, on its own.
+/// The collector counts only signatures that pass this check, so an
+/// unverified file can never influence collection.
+fn signature_valid(message: &BridgeMessage, sig: &RelayerSignature) -> bool {
+    use ed25519_dalek::{Signature, VerifyingKey};
+    let Ok(vk) = VerifyingKey::from_bytes(&sig.relayer.to_bytes()) else {
+        return false;
+    };
+    let signature = Signature::from_bytes(&sig.signature);
+    vk.verify_strict(&message.hash(), &signature).is_ok()
+}
 use bridge_common::{verify_attestation, BridgeMessage, RelayerSignature, MAX_RELAYERS};
 use serde::{Deserialize, Serialize};
 use solana_program::pubkey::Pubkey;
@@ -155,14 +179,51 @@ impl AttestationFile {
     pub fn write_to(&self, dir: &Path) -> Result<PathBuf> {
         std::fs::create_dir_all(dir)?;
         let path = dir.join(self.file_name());
-        // Write-then-rename so a collector never reads a half file.
+        // Files are evidence: never silently overwrite an existing
+        // attestation. An identical re-write (crash recovery) is
+        // idempotent; a different message for the same
+        // (direction, nonce, relayer) is refused, so the first
+        // attestation survives as equivocation evidence.
+        if path.exists() {
+            match Self::read_from(&path) {
+                Ok(existing) if existing == *self => return Ok(path),
+                Ok(_) => {
+                    return Err(RelayerError::Io(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        format!(
+                            "refusing to overwrite a different existing attestation at {}",
+                            path.display()
+                        ),
+                    )))
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        // Write-then-rename so a collector never reads a half file,
+        // and fsync so the file survives a host crash, not just a
+        // process crash.
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(self)?)?;
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(serde_json::to_string_pretty(self)?.as_bytes())?;
+            f.sync_all()?;
+        }
         std::fs::rename(&tmp, &path)?;
+        sync_dir(dir);
         Ok(path)
     }
 
     pub fn read_from(path: &Path) -> Result<Self> {
+        // Attestation files are small; refuse oversized files instead
+        // of reading unbounded untrusted input into memory.
+        const MAX_ATTESTATION_BYTES: u64 = 64 * 1024;
+        if std::fs::metadata(path)?.len() > MAX_ATTESTATION_BYTES {
+            return Err(RelayerError::InvalidSignature(format!(
+                "attestation file {} exceeds {MAX_ATTESTATION_BYTES} bytes",
+                path.display()
+            )));
+        }
         let text = std::fs::read_to_string(path)?;
         Ok(serde_json::from_str(&text)?)
     }
@@ -205,14 +266,27 @@ impl Collector {
                 .collect();
             entries.sort();
             for path in entries {
-                let file = AttestationFile::read_from(&path)?;
-                let (msg, sig) = file.to_parts()?;
+                // Untrusted exchange input: a file that does not
+                // parse, does not hash-match, comes from an
+                // unregistered relayer, or carries a signature that
+                // does not verify is SKIPPED, never counted and never
+                // fatal by its mere existence. Only a *verified*
+                // signature over a *different* message is genuine
+                // equivocation evidence and fails collection.
+                let Ok(file) = AttestationFile::read_from(&path) else { continue };
+                let Ok((msg, sig)) = file.to_parts() else { continue };
                 if msg.nonce != nonce {
+                    continue;
+                }
+                if !self.relayers.contains(&sig.relayer) {
+                    continue;
+                }
+                if !signature_valid(&msg, &sig) {
                     continue;
                 }
                 let h = hash_hex(&msg);
                 if !hashes.contains(&h) {
-                    hashes.push(h);
+                    hashes.push(h.clone());
                 }
                 match &message {
                     None => message = Some(msg),
@@ -221,17 +295,10 @@ impl Collector {
                     }
                     _ => {}
                 }
-                if !self.relayers.contains(&sig.relayer) {
-                    return Err(RelayerError::UnknownRelayer(sig.relayer.to_string()));
-                }
-                if by_relayer.insert(sig.relayer, sig).is_some() {
-                    return Err(RelayerError::DuplicateRelayer(
-                        // insert replaced an entry only if the key existed;
-                        // we returned the pubkey string above is lost, so
-                        // reconstruct it here.
-                        by_relayer_key_string(&path),
-                    ));
-                }
+                // Duplicate from the same relayer over the same
+                // verified message: keep the first, ignore the copy
+                // (sync tools create variant-name duplicates).
+                by_relayer.entry(sig.relayer).or_insert(sig);
             }
         }
 
@@ -259,13 +326,6 @@ impl Collector {
         .map_err(|e| RelayerError::InvalidSignature(format!("attestation failed verification: {e:?}")))?;
         Ok((message, signatures))
     }
-}
-
-fn by_relayer_key_string(path: &Path) -> String {
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_string()
 }
 
 #[cfg(test)]
@@ -375,15 +435,18 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // Malformed exchange files must fail CLOSED (backlog #4).
+    // Malformed exchange files are never COUNTED (backlog #4,
+    // revised by debate scope-2, 2026-11-17).
     //
     // Exchange files are untrusted input: another relayer's host, a
     // synced folder, or an attacker with write access to the share
     // can put anything in the directory. For every malformed shape
-    // below, `collect` must return an error — never panic, never
-    // hand the submitter a partial attestation, and never let the
-    // malformed file substitute for a valid signature toward the
-    // quorum threshold.
+    // below, `collect` must never panic, never hand the submitter a
+    // partial attestation, and never let the malformed file
+    // substitute for a valid signature toward the quorum threshold.
+    // A malformed file is skipped; if that leaves no quorum, the
+    // result is QuorumNotReached — and if a verified quorum IS
+    // present, the junk file cannot block it.
     // ---------------------------------------------------------------
 
     fn fresh_dir(name: &str) -> PathBuf {
@@ -414,7 +477,7 @@ mod tests {
         let c = Collector { relayers: pubs, quorum: 3 };
         assert!(matches!(
             c.collect(&dir, Direction::SolanaToMachine, 7, 500),
-            Err(RelayerError::Json(_))
+            Err(RelayerError::QuorumNotReached { have: 2, need: 3 })
         ));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -442,7 +505,7 @@ mod tests {
         let c = Collector { relayers: pubs, quorum: 3 };
         assert!(matches!(
             c.collect(&dir, Direction::SolanaToMachine, 7, 500),
-            Err(RelayerError::Json(_))
+            Err(RelayerError::QuorumNotReached { have: 2, need: 3 })
         ));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -465,7 +528,7 @@ mod tests {
         let c = Collector { relayers: pubs, quorum: 3 };
         assert!(matches!(
             c.collect(&dir, Direction::SolanaToMachine, 7, 500),
-            Err(RelayerError::InvalidSignature(_))
+            Err(RelayerError::QuorumNotReached { have: 2, need: 3 })
         ));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -492,7 +555,7 @@ mod tests {
         let c = Collector { relayers: pubs, quorum: 3 };
         assert!(matches!(
             c.collect(&dir, Direction::SolanaToMachine, 7, 500),
-            Err(RelayerError::InvalidSignature(_))
+            Err(RelayerError::QuorumNotReached { have: 2, need: 3 })
         ));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -515,7 +578,7 @@ mod tests {
         let c = Collector { relayers: pubs, quorum: 3 };
         assert!(matches!(
             c.collect(&dir, Direction::SolanaToMachine, 7, 500),
-            Err(RelayerError::InvalidSignature(_))
+            Err(RelayerError::QuorumNotReached { have: 2, need: 3 })
         ));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -546,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_file_fails_closed_even_when_quorum_is_present() {
+    fn malformed_file_skipped_when_quorum_is_present() {
         let (signers, pubs, msg) = setup();
         let dir = fresh_dir("mixedbad");
         // A full valid quorum of 3, plus a fourth relayer's file
@@ -557,7 +620,43 @@ mod tests {
         let name = format!("solana-to-machine-7-{}.json", signers[3].pubkey());
         write_raw(&dir, &name, b"{\"direction\": torn write");
         let c = Collector { relayers: pubs, quorum: 3 };
-        assert!(c.collect(&dir, Direction::SolanaToMachine, 7, 500).is_err());
+        // Debate scope-2: the junk file is skipped; the verified
+        // quorum that is present collects.
+        let (m, sigs) = c.collect(&dir, Direction::SolanaToMachine, 7, 500).unwrap();
+        assert_eq!(m, msg);
+        assert_eq!(sigs.len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- Debate scope-2 regression tests (2026-11-17) ---
+
+    #[test]
+    fn junk_file_does_not_block_a_present_verified_quorum() {
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("junkquorum");
+        write_n(&dir, &signers, &msg, 3);
+        write_raw(&dir, "solana-to-machine-7-attacker.json", b"garbage");
+        let c = Collector { relayers: pubs, quorum: 3 };
+        let (m, sigs) = c.collect(&dir, Direction::SolanaToMachine, 7, 500).unwrap();
+        assert_eq!(m, msg);
+        assert_eq!(sigs.len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_to_refuses_to_overwrite_a_different_message() {
+        let (signers, _pubs, msg) = setup();
+        let dir = fresh_dir("overwrite");
+        let f1 = AttestationFile::new(Direction::SolanaToMachine, &msg, &signers[0].sign(&msg));
+        f1.write_to(&dir).unwrap();
+        // Identical re-write (crash recovery) stays idempotent.
+        f1.write_to(&dir).unwrap();
+        let mut other = msg.clone();
+        other.amount = 42;
+        let f2 = AttestationFile::new(Direction::SolanaToMachine, &other, &signers[0].sign(&other));
+        assert!(f2.write_to(&dir).is_err());
+        let on_disk = AttestationFile::read_from(&dir.join(f1.file_name())).unwrap();
+        assert_eq!(on_disk, f1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -572,7 +671,10 @@ mod tests {
         let name = format!("solana-to-machine-7-{}.json", signers[2].pubkey());
         write_raw(&dir, &name, b"garbage");
         let c = Collector { relayers: pubs, quorum: 3 };
-        assert!(c.collect(&dir, Direction::SolanaToMachine, 7, 500).is_err());
+        assert!(matches!(
+            c.collect(&dir, Direction::SolanaToMachine, 7, 500),
+            Err(RelayerError::QuorumNotReached { have: 2, need: 3 })
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

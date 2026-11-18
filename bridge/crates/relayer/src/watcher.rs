@@ -45,15 +45,38 @@ impl RelayerState {
     }
     pub fn load(path: &str, start_nonce: u64) -> Result<Self> {
         match std::fs::read_to_string(path) {
-            Ok(text) => Ok(serde_json::from_str(&text)?),
+            Ok(text) => {
+                let state: Self = serde_json::from_str(&text)?;
+                // A cursor below the configured start nonce means the
+                // file predates this deployment or was tampered with;
+                // refuse rather than silently re-walk or skip.
+                if state.solana_to_machine_next_nonce < start_nonce
+                    || state.machine_to_solana_next_nonce < start_nonce
+                {
+                    return Err(RelayerError::InvalidConfig(format!(
+                        "state file {path} has a cursor below start_nonce {start_nonce}"
+                    )));
+                }
+                Ok(state)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::new(start_nonce)),
             Err(e) => Err(e.into()),
         }
     }
     pub fn save(&self, path: &str) -> Result<()> {
         let tmp = format!("{path}.tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(self)?)?;
+        {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(serde_json::to_string_pretty(self)?.as_bytes())?;
+            f.sync_all()?;
+        }
         std::fs::rename(&tmp, path)?;
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            if !parent.as_os_str().is_empty() {
+                crate::attestation::sync_dir(parent);
+            }
+        }
         Ok(())
     }
     pub fn next_nonce(&self, direction: Direction) -> u64 {
@@ -106,6 +129,14 @@ pub fn poll_once(
         return Ok(PollOutcome::NotFinalized { nonce: next_nonce });
     }
     let event = chain.enrich(&record)?;
+    // The finality gate above checked THIS record; the message must
+    // be built from exactly that record, never from whatever an
+    // enrich implementation substitutes for it.
+    if event.record != record {
+        return Err(RelayerError::InvalidConfig(
+            "enrich returned a record different from the one that passed finality".into(),
+        ));
+    }
     let message = build_message(direction, &event, source_mint, expiry_window_slots)?;
     Ok(PollOutcome::Ready { message })
 }
@@ -196,6 +227,35 @@ mod tests {
     }
 
     #[test]
+    fn poll_once_rejects_enrich_returning_a_different_record() {
+        struct DivergingChain(MockChain);
+        impl SourceChain for DivergingChain {
+            fn event_program_id(&self) -> Pubkey { self.0.event_program_id() }
+            fn finalized_slot(&self) -> Result<u64> { self.0.finalized_slot() }
+            fn event_record(&self, pda: &Pubkey) -> Result<Option<EventRecord>> { self.0.event_record(pda) }
+            fn enrich(&self, record: &EventRecord) -> Result<ObservedEvent> {
+                let mut ev = self.0.enrich(record)?;
+                ev.record.slot += 500; // a record that never passed the finality gate
+                Ok(ev)
+            }
+        }
+        let program = Pubkey::new_unique();
+        let chain = MockChain { program, finalized: 2_000, records: RefCell::new(HashMap::new()), sender: Pubkey::new_unique() };
+        let (pda, rec) = record(program, 3, 990);
+        chain.records.borrow_mut().insert(pda, rec);
+        let diverging = DivergingChain(chain);
+        assert!(poll_once(&diverging, Direction::SolanaToMachine, 3, Pubkey::new_unique(), 100_000, 16).is_err());
+    }
+
+    #[test]
+    fn state_load_rejects_cursor_below_start_nonce() {
+        let path = std::env::temp_dir().join(format!("relayer-state-low-{}.json", std::process::id())).to_string_lossy().to_string();
+        RelayerState::new(1).save(&path).unwrap();
+        assert!(RelayerState::load(&path, 5).is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn state_cursors_are_per_direction_and_persist() {
         let mut state = RelayerState::new(1);
         state.advance(Direction::SolanaToMachine);
@@ -206,7 +266,7 @@ mod tests {
             .to_string_lossy()
             .to_string();
         state.save(&path).unwrap();
-        let loaded = RelayerState::load(&path, 99).unwrap();
+        let loaded = RelayerState::load(&path, 1).unwrap();
         assert_eq!(loaded.solana_to_machine_next_nonce, 2);
         let _ = std::fs::remove_file(&path);
     }

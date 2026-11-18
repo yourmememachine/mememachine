@@ -216,6 +216,13 @@ pub fn sender_from_verified_source_transfer(
     source_program: &Pubkey,
     record_pda: &Pubkey,
 ) -> Result<Pubkey> {
+    // A failed transaction created nothing: refuse it here rather
+    // than relying on the signature-list filter upstream.
+    if tx.pointer("/meta/err").map(|e| !e.is_null()).unwrap_or(false) {
+        return Err(RelayerError::SourceTransferNotVerified(
+            "source transaction has a non-null meta.err; refusing to sign".into(),
+        ));
+    }
     // Locate the instruction that created this record.
     let top_level = tx
         .pointer("/transaction/message/instructions")
@@ -261,6 +268,14 @@ pub fn sender_from_verified_source_transfer(
         }
     }
     for ix in candidates {
+        // The transfer must come from the SPL Token program itself,
+        // not merely carry a token-shaped parsed payload.
+        let is_token_program = ix["program"].as_str() == Some("spl-token")
+            || ix["programId"].as_str()
+                == Some("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+        if !is_token_program {
+            continue;
+        }
         let parsed = &ix["parsed"];
         if parsed["type"].as_str().unwrap_or("") != kind {
             continue;

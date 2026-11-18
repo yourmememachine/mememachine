@@ -21,6 +21,19 @@ impl RelayerSigner {
     /// (32-byte seed || 32-byte public key), as produced by
     /// `solana-keygen new -o relayer.json`.
     pub fn load(path: &str) -> Result<Self> {
+        // A signing key readable by group/other users on a shared
+        // host is a relayer identity waiting to be taken; refuse it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(path)?.permissions().mode();
+            if mode & 0o077 != 0 {
+                return Err(RelayerError::InvalidKeypair(format!(
+                    "{path}: keypair file permissions {:o} are too open; require 0600",
+                    mode & 0o777
+                )));
+            }
+        }
         let text = std::fs::read_to_string(path)?;
         let bytes: Vec<u8> = serde_json::from_str(&text).map_err(|e| {
             RelayerError::InvalidKeypair(format!("{path}: not a JSON byte array: {e}"))

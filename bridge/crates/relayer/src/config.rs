@@ -48,7 +48,8 @@ pub struct RelayerConfig {
     /// re-process or skip events.
     pub state_path: String,
     /// Tamper-evident audit log file (audit_log.rs). Optional:
-    /// defaults to `relayer-audit.jsonl` inside `attestation_dir`.
+    /// defaults to `relayer-audit.jsonl` next to `state_path` (local,
+    /// never inside the shared `attestation_dir`).
     /// The relayer fails closed if the existing log does not
     /// verify — it will not sign, collect, or submit without its
     /// evidence trail.
@@ -108,6 +109,48 @@ impl RelayerConfig {
                 "expiry_window_slots must be > 0".into(),
             ));
         }
+        // Upper bound: 1,000,000 slots is ~4.6 days on Solana — far
+        // beyond the 100,000 default; anything larger is a fat-finger
+        // that would keep unexecuted attestations valid for weeks.
+        if self.expiry_window_slots > 1_000_000 {
+            return Err(RelayerError::InvalidConfig(
+                "expiry_window_slots must be <= 1_000_000".into(),
+            ));
+        }
+        if self.poll_interval_secs == 0 {
+            return Err(RelayerError::InvalidConfig(
+                "poll_interval_secs must be > 0 (0 busy-loops both RPCs)".into(),
+            ));
+        }
+        // BRIDGE.md 2.5 fixes the Solana margin at finalized + 16; a
+        // lower local value silently weakens that rule for one
+        // operator, invisibly to the others.
+        if self.solana_safety_margin_slots < 16 {
+            return Err(RelayerError::InvalidConfig(
+                "solana_safety_margin_slots must be >= 16 (BRIDGE.md 2.5)".into(),
+            ));
+        }
+        // The attestation directory is shared and peer-writable:
+        // keypairs and local state must never live inside it.
+        let shared = self.attestation_dir.trim_end_matches('/');
+        for (field, p) in [
+            ("relayer_keypair_path", &self.relayer_keypair_path),
+            ("payer_keypair_path", &self.payer_keypair_path),
+            ("state_path", &self.state_path),
+        ] {
+            if p == shared || p.starts_with(&format!("{shared}/")) {
+                return Err(RelayerError::InvalidConfig(format!(
+                    "{field} must not be inside the shared attestation_dir"
+                )));
+            }
+        }
+        if let Some(audit) = &self.audit_log_path {
+            if audit == shared || audit.starts_with(&format!("{shared}/")) {
+                return Err(RelayerError::InvalidConfig(
+                    "audit_log_path must not be inside the shared attestation_dir".into(),
+                ));
+            }
+        }
         // Parse every pubkey field now so a typo fails at startup,
         // not after an event has been observed.
         parse_pubkey("lock_program_id", &self.lock_program_id)?;
@@ -137,14 +180,17 @@ impl RelayerConfig {
         parse_pubkey("vault", &self.vault).expect("validated")
     }
 
-    /// The audit log path in effect: the configured value, or the
-    /// default inside the attestation exchange directory.
+    /// The audit log path in effect: the configured value, or a
+    /// default NEXT TO the local state file — never inside the
+    /// shared, peer-writable attestation directory (debate scope-2).
     pub fn audit_log_path(&self) -> String {
         self.audit_log_path.clone().unwrap_or_else(|| {
-            format!(
-                "{}/relayer-audit.jsonl",
-                self.attestation_dir.trim_end_matches('/')
-            )
+            match std::path::Path::new(&self.state_path).parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => {
+                    format!("{}/relayer-audit.jsonl", parent.display())
+                }
+                _ => "relayer-audit.jsonl".to_string(),
+            }
         })
     }
 }
@@ -181,7 +227,7 @@ mod tests {
         assert_eq!(cfg.machine_safety_margin_slots, 0);
         assert_eq!(cfg.poll_interval_secs, 10);
         assert!(!cfg.submit_enabled);
-        assert_eq!(cfg.audit_log_path(), "/tmp/attestations/relayer-audit.jsonl");
+        assert_eq!(cfg.audit_log_path(), "/tmp/relayer-audit.jsonl");
     }
 
     #[test]
@@ -189,6 +235,31 @@ mod tests {
         let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
         cfg.vault = "not-a-pubkey".into();
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn unsafe_operating_values_rejected() {
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.poll_interval_secs = 0;
+        assert!(cfg.validate().is_err(), "poll_interval_secs=0 must be rejected");
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.solana_safety_margin_slots = 0;
+        assert!(cfg.validate().is_err(), "solana margin below 16 must be rejected");
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.expiry_window_slots = 10_000_000;
+        assert!(cfg.validate().is_err(), "unbounded expiry must be rejected");
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.relayer_keypair_path = "/tmp/attestations/relayer.json".into();
+        assert!(cfg.validate().is_err(), "keypair inside shared attestation_dir must be rejected");
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.state_path = "/tmp/attestations/state.json".into();
+        assert!(cfg.validate().is_err(), "state inside shared attestation_dir must be rejected");
+    }
+
+    #[test]
+    fn default_audit_log_is_not_inside_shared_attestation_dir() {
+        let cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        assert!(!cfg.audit_log_path().starts_with(&cfg.attestation_dir), "default audit log must be local, got {}", cfg.audit_log_path());
     }
 
     #[test]

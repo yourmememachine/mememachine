@@ -51,7 +51,19 @@ impl SourceChain for RpcSource {
     }
     fn enrich(&self, record: &EventRecord) -> Result<ObservedEvent> {
         let (record_pda, _) = nonce_pda(&self.program_id, self.direction.nonce_dir(), record.nonce);
-        let (source_tx, _slot) = self.client.first_signature_for_address(&record_pda)?;
+        let (source_tx, slot) = self.client.first_signature_for_address(&record_pda)?;
+        // Bind the candidate transaction to THIS record: the
+        // creating transaction must sit in the record's own slot.
+        // A different slot means the oldest-signature heuristic
+        // picked a transaction that merely references the PDA
+        // (pre-spam or a window overflow) — fail closed instead of
+        // stalling on it or signing against it.
+        if slot != record.slot {
+            return Err(RelayerError::SourceTransferNotVerified(format!(
+                "oldest signature for record {record_pda} is at slot {slot}, but the record is at slot {}; refusing to sign",
+                record.slot
+            )));
+        }
         let tx = self.client.transaction_parsed(&source_tx)?;
         // The sender is proven, not asserted: the source transaction
         // must contain the transfer behind this record — into the
@@ -101,6 +113,16 @@ fn log_event(cfg: &RelayerConfig, event: AuditEvent) -> Result<()> {
     Ok(())
 }
 
+/// Verify the audit log's existing chain WITHOUT appending. This
+/// is the gate the log's invariant promises: it runs BEFORE an
+/// attestation is published or a transaction is sent, so a tampered
+/// log actually fails the action closed instead of being discovered
+/// after the irreversible step.
+fn verify_audit_log(cfg: &RelayerConfig) -> Result<()> {
+    AuditLog::open(Path::new(&cfg.audit_log_path()))?;
+    Ok(())
+}
+
 fn source_for(cfg: &RelayerConfig, direction: Direction) -> Result<RpcSource> {
     use borsh::BorshDeserialize;
     match direction {
@@ -113,6 +135,18 @@ fn source_for(cfg: &RelayerConfig, direction: Direction) -> Result<RpcSource> {
             })?;
             let config =
                 bridge_common::LockConfig::try_from_slice(&data).map_err(RelayerError::Borsh)?;
+            if config.discriminator != bridge_common::DISCRIMINATOR_CONFIG {
+                return Err(RelayerError::Rpc(format!(
+                    "lock config at {config_pda} has wrong discriminator"
+                )));
+            }
+            if config.source_mint != cfg.source_mint() {
+                return Err(RelayerError::Rpc(format!(
+                    "on-chain source_mint {} does not match config file {}",
+                    config.source_mint,
+                    cfg.source_mint()
+                )));
+            }
             Ok(RpcSource {
                 client,
                 program_id,
@@ -130,6 +164,18 @@ fn source_for(cfg: &RelayerConfig, direction: Direction) -> Result<RpcSource> {
             })?;
             let config = bridge_common::MachineConfig::try_from_slice(&data)
                 .map_err(RelayerError::Borsh)?;
+            if config.discriminator != bridge_common::DISCRIMINATOR_CONFIG {
+                return Err(RelayerError::Rpc(format!(
+                    "bridge config at {config_pda} has wrong discriminator"
+                )));
+            }
+            if config.wrapped_mint != cfg.wrapped_mint() {
+                return Err(RelayerError::Rpc(format!(
+                    "on-chain wrapped_mint {} does not match config file {}",
+                    config.wrapped_mint,
+                    cfg.wrapped_mint()
+                )));
+            }
             Ok(RpcSource {
                 client,
                 program_id,
@@ -188,6 +234,9 @@ fn sign_once(
             Ok(false)
         }
         PollOutcome::Ready { message } => {
+            // Gate BEFORE publishing: a tampered audit log must stop
+            // the signature from reaching the shared directory.
+            verify_audit_log(cfg)?;
             let sig = signer.sign(&message);
             let path = AttestationFile::new(direction, &message, &sig)
                 .write_to(Path::new(&cfg.attestation_dir))?;
@@ -218,7 +267,7 @@ fn sign_once(
     }
 }
 
-fn registered_relayers(cfg: &RelayerConfig, direction: Direction) -> Result<[Pubkey; 5]> {
+fn registered_relayers(cfg: &RelayerConfig, direction: Direction) -> Result<([Pubkey; 5], u8)> {
     // Read the destination program's config: its relayer set is the
     // set that will verify the attestation on-chain, so collect
     // against exactly that set. (Both programs are initialized with
@@ -236,14 +285,50 @@ fn registered_relayers(cfg: &RelayerConfig, direction: Direction) -> Result<[Pub
         Direction::SolanaToMachine => {
             let c = bridge_common::MachineConfig::try_from_slice(&data)
                 .map_err(RelayerError::Borsh)?;
-            Ok(c.relayers.relayers)
+            if c.discriminator != bridge_common::DISCRIMINATOR_CONFIG {
+                return Err(RelayerError::Rpc("destination config has wrong discriminator".into()));
+            }
+            if c.paused || c.killed {
+                return Err(RelayerError::Rpc(
+                    "destination bridge is paused or killed on-chain".into(),
+                ));
+            }
+            // Use the ON-CHAIN quorum, not the compiled-in constant:
+            // governance can change it, and the destination program
+            // will enforce the on-chain value.
+            Ok((c.relayers.relayers, c.relayers.quorum))
         }
         Direction::MachineToSolana => {
             let c = bridge_common::LockConfig::try_from_slice(&data)
                 .map_err(RelayerError::Borsh)?;
-            Ok(c.relayers.relayers)
+            if c.discriminator != bridge_common::DISCRIMINATOR_CONFIG {
+                return Err(RelayerError::Rpc("destination config has wrong discriminator".into()));
+            }
+            if c.paused {
+                return Err(RelayerError::Rpc(
+                    "destination bridge is paused on-chain".into(),
+                ));
+            }
+            Ok((c.relayers.relayers, c.relayers.quorum))
         }
     }
+}
+
+/// Fail at startup if this signer is not in the destination's
+/// registered relayer set: an unregistered key would sign forever
+/// and every peer's collector would discard its files.
+fn check_signer_registered(cfg: &RelayerConfig, signer: &RelayerSigner) -> Result<()> {
+    for direction in [Direction::SolanaToMachine, Direction::MachineToSolana] {
+        let (relayers, _) = registered_relayers(cfg, direction)?;
+        if !relayers.contains(&signer.pubkey()) {
+            return Err(RelayerError::InvalidConfig(format!(
+                "signer {} is not in the registered relayer set for {}",
+                signer.pubkey(),
+                direction.label()
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn collect(
@@ -251,11 +336,8 @@ fn collect(
     direction: Direction,
     nonce: u64,
 ) -> Result<(bridge_common::BridgeMessage, Vec<bridge_common::RelayerSignature>)> {
-    let relayers = registered_relayers(cfg, direction)?;
-    let collector = Collector {
-        relayers,
-        quorum: bridge_common::QUORUM,
-    };
+    let (relayers, quorum) = registered_relayers(cfg, direction)?;
+    let collector = Collector { relayers, quorum };
     let dest_slot = dest_client(cfg, direction).finalized_slot()?;
     match collector.collect(Path::new(&cfg.attestation_dir), direction, nonce, dest_slot) {
         Ok((message, signatures)) => {
@@ -297,7 +379,62 @@ fn submit(
     nonce: u64,
     destination_token_account: &Pubkey,
 ) -> Result<()> {
+    // Already processed on the destination? The receipt PDA is the
+    // on-chain proof; if it exists there is nothing to submit, and
+    // re-sending would only waste RPC cycles every poll.
+    {
+        let (dest_program, dir_u8) = match direction {
+            Direction::SolanaToMachine => (
+                cfg.machine_program_id(),
+                bridge_common::DIR_SOLANA_TO_MACHINE,
+            ),
+            Direction::MachineToSolana => (
+                cfg.lock_program_id(),
+                bridge_common::DIR_MACHINE_TO_SOLANA,
+            ),
+        };
+        let (receipt, _) = bridge_common::receipt_pda(&dest_program, dir_u8, nonce);
+        if dest_client(cfg, direction).account_data(&receipt)?.is_some() {
+            println!(
+                "{}: nonce {} already processed on the destination (receipt exists); skipping",
+                direction.label(),
+                nonce
+            );
+            return Ok(());
+        }
+    }
     let (message, signatures) = collect(cfg, direction, nonce)?;
+    // The destination token account must belong to the message
+    // recipient and hold the expected mint. The destination program
+    // enforces both, but checking here turns a guaranteed on-chain
+    // rejection (and a wrong-recipient run-loop configuration) into
+    // a clear local error before any transaction is built.
+    {
+        let data = dest_client(cfg, direction)
+            .account_data(destination_token_account)?
+            .ok_or_else(|| {
+                RelayerError::Rpc(format!(
+                    "no destination token account at {destination_token_account}"
+                ))
+            })?;
+        if data.len() < 64 {
+            return Err(RelayerError::Rpc(
+                "destination token account data too short".into(),
+            ));
+        }
+        let mint = Pubkey::try_from(&data[0..32]).unwrap();
+        let owner = Pubkey::try_from(&data[32..64]).unwrap();
+        let expected_mint = match direction {
+            Direction::SolanaToMachine => cfg.wrapped_mint(),
+            Direction::MachineToSolana => cfg.source_mint(),
+        };
+        if mint != expected_mint || owner != message.recipient {
+            return Err(RelayerError::Rpc(format!(
+                "destination token account {destination_token_account} has mint {mint} / owner {owner}, expected mint {expected_mint} / recipient {}",
+                message.recipient
+            )));
+        }
+    }
     println!(
         "{}: quorum for nonce {} ({} signatures), amount {} to {}",
         direction.label(),
@@ -379,6 +516,9 @@ fn submit(
             data: ix.data.clone(),
         })
         .collect();
+    // Gate BEFORE broadcasting: a tampered audit log must stop the
+    // transaction from being sent, not be noticed afterwards.
+    verify_audit_log(cfg)?;
     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
         &sdk_ixs,
         Some(&payer_pubkey),
@@ -429,6 +569,7 @@ fn run() -> Result<()> {
     match command.as_str() {
         "sign-once" => {
             let signer = RelayerSigner::load(&cfg.relayer_keypair_path)?;
+            check_signer_registered(&cfg, &signer)?;
             let mut state = RelayerState::load(&cfg.state_path, cfg.start_nonce)?;
             for direction in [Direction::SolanaToMachine, Direction::MachineToSolana] {
                 sign_once(&cfg, &signer, &mut state, direction)?;
@@ -473,8 +614,15 @@ fn run() -> Result<()> {
         }
         "run" => {
             let signer = RelayerSigner::load(&cfg.relayer_keypair_path)?;
+            check_signer_registered(&cfg, &signer)?;
             let mut state = RelayerState::load(&cfg.state_path, cfg.start_nonce)?;
-            let dest_arg = arg_value(&args, "--destination-token-account");
+            // Validate the destination account ONCE at startup: a
+            // typo must fail loudly here, not silently disable every
+            // submission for the life of the daemon.
+            let dest = match arg_value(&args, "--destination-token-account") {
+                Some(s) => Some(parse_pubkey("destination-token-account", &s)?),
+                None => None,
+            };
             println!(
                 "relayer {} running (submit_enabled={})",
                 signer.pubkey(),
@@ -485,19 +633,18 @@ fn run() -> Result<()> {
                     if let Err(e) = sign_once(&cfg, &signer, &mut state, direction) {
                         eprintln!("{}: sign: {e}", direction.label());
                     }
-                    // If a quorum already exists for the nonce we just
-                    // passed (or an earlier one), try to submit it when
-                    // a destination token account was supplied.
-                    if let Some(dest_str) = &dest_arg {
-                        if let Ok(dest) = parse_pubkey("destination-token-account", dest_str) {
-                            // The last signed nonce in this direction:
-                            let nonce = state.next_nonce(direction).saturating_sub(1);
-                            if state.next_nonce(direction) > cfg.start_nonce {
-                                if let Err(e) = submit(&cfg, direction, nonce, &dest) {
-                                    // QuorumNotReached / already processed are
-                                    // normal in the loop; report and continue.
-                                    eprintln!("{}: submit nonce {}: {e}", direction.label(), nonce);
-                                }
+                    // Submit EVERY signed-but-unprocessed nonce in
+                    // this direction, not only the most recent one:
+                    // a quorum that forms late for an earlier nonce
+                    // must still be submitted. `submit` itself skips
+                    // nonces whose destination receipt already exists,
+                    // so re-scanning processed nonces is cheap.
+                    if let Some(dest) = &dest {
+                        for nonce in cfg.start_nonce..state.next_nonce(direction) {
+                            if let Err(e) = submit(&cfg, direction, nonce, dest) {
+                                // QuorumNotReached is normal in the
+                                // loop; report and continue.
+                                eprintln!("{}: submit nonce {}: {e}", direction.label(), nonce);
                             }
                         }
                     }

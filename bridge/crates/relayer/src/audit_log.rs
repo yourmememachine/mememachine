@@ -312,6 +312,9 @@ impl AuditLog {
             .open(&self.path)?;
         writeln!(file, "{}", serde_json::to_string(&entry)?)?;
         file.flush()?;
+        // flush() only reaches the OS page cache; sync so the entry
+        // survives a host crash / power loss, as the docs claim.
+        file.sync_all()?;
         self.entries.push(entry.clone());
         Ok(entry)
     }
