@@ -6,4 +6,5 @@ members = [
     "crates/solana-lock",
     "crates/relayer",
     "crates/proof-bundle",
+    "crates/receipt-indexer",
 ]

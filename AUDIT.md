@@ -191,6 +191,24 @@ chain configuration gates any public chain launch. Both scopes:
 > workspace 167 → 173. **Off-chain only: no program change, no
 > SBF rebuild, no scope change.** Auditors should still quote
 > against the current `main` HEAD.
+>
+> **Scope update (2026-11-18):** a new off-chain receipt indexer
+> (`bridge/crates/receipt-indexer/`, binary `receipt-index`; doc
+> `bridge/RECEIPT-INDEXER.md`) performs the binding BRIDGE.md 4.5
+> leaves to indexers: it derives a crossing receipt's PDA,
+> parses the receipt account strictly (owner, exact length,
+> discriminator, self-derivation), resolves the PDA's creating
+> transaction as the oldest successful signature for the address
+> (failed replay attempts are skipped), and verifies that
+> transaction executed in exactly the slot the receipt records
+> with a destination-program instruction writing the PDA. More
+> than one successful signature for a receipt PDA is flagged in
+> the record as an anomaly rather than hidden. 15 new tests (14
+> unit + 1 end-to-end against a real program-test crossing and a
+> failed on-chain replay); bridge workspace 173 → 188.
+> **Off-chain tooling only: no program change, no SBF rebuild,
+> no scope change.** Auditors should still quote against the
+> current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |

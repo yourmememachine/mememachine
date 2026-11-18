@@ -1,0 +1,27 @@
+[package]
+name = "receipt-indexer"
+version = "0.1.0"
+edition = "2021"
+description = "Off-chain receipt indexer for the Machine bridge: resolves a CrossingReceipt PDA to the transaction that created it and prints the full crossing record — the binding BRIDGE.md 4.5 leaves to indexers."
+
+[[bin]]
+name = "receipt-index"
+path = "src/main.rs"
+
+[dependencies]
+borsh = "1"
+bridge-common = { path = "../bridge-common" }
+relayer = { path = "../relayer" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bs58 = "0.5"
+base64 = "0.22"
+solana-program = "2.3"
+ureq = { version = "2", features = ["json"] }
+
+[dev-dependencies]
+solana-program-test = "2.3"
+solana-sdk = "2.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+machine-bridge = { path = "../machine-bridge", features = ["no-entrypoint"] }
+spl-token = { version = "4", features = ["no-entrypoint"] }

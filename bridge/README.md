@@ -13,6 +13,7 @@ crossed. Nothing here holds real funds.**
 bridge/
 ├── Cargo.toml                  # workspace (resolver 2)
 ├── README.md                   # this file
+├── RECEIPT-INDEXER.md          # the receipt indexer's binding checks
 ├── RELAYER-LOG.md              # the relayer's tamper-evident audit log
 ├── VERIFY.md                   # real build/test output
 └── crates/
@@ -30,8 +31,11 @@ bridge/
     │   └── src/                  # watcher, signing, attestation
     │                           # collector, submitter, RPC, CLI,
     │                           # hash-chained audit log + relayer-log
-    └── proof-bundle/           # off-chain crossing proof bundles:
-                                # export + offline verify (PROOF-BUNDLE.md)
+    ├── proof-bundle/           # off-chain crossing proof bundles:
+    │                           # export + offline verify (PROOF-BUNDLE.md)
+    └── receipt-indexer/        # off-chain receipt indexer: resolves
+                                # a receipt PDA to its creating
+                                # transaction (RECEIPT-INDEXER.md)
 ```
 
 ## Design (from BRIDGE.md)

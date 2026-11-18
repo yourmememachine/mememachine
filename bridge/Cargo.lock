@@ -3382,6 +3382,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "receipt-indexer"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "borsh 1.8.1",
+ "bridge-common",
+ "bs58",
+ "machine-bridge",
+ "relayer",
+ "serde",
+ "serde_json",
+ "solana-program",
+ "solana-program-test",
+ "solana-sdk",
+ "spl-token",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
