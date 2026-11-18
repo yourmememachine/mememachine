@@ -4,18 +4,33 @@ Real commands and their real output. Nothing here is claimed without a
 run behind it. Verified 2026-11-14 ~11:07 UTC, in the bridge workspace
 directory.
 
-## Current state (2026-11-17, latest commits — read this first)
+## Current state (2026-11-18, latest commits — read this first)
 
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **173 passed, 0 failed** (37
+- **Tests:** bridge workspace **188 passed, 0 failed** (37
   bridge-common unit + 31 machine-bridge + 25 solana-lock + 1
-  precompile-cost + 60 relayer + 19 proof bundle, including the
+  precompile-cost + 60 relayer + 19 proof bundle + 15 receipt
+  indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **34 passed** and registry export **11 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-17: **241 passed, 0 failed**.
+  Full `make verify` 2026-11-18: **256 passed, 0 failed**.
+- **Receipt indexer (2026-11-18, commit `e0d0a24`):** new
+  off-chain crate `crates/receipt-indexer/` (binary
+  `receipt-index`) performing the binding BRIDGE.md 4.5 leaves to
+  indexers: it derives a crossing receipt's PDA, parses the
+  receipt account strictly, resolves the PDA's creating
+  transaction as the oldest successful signature for the address,
+  and verifies that transaction executed in exactly the slot the
+  receipt records with a destination-program instruction writing
+  the PDA. 15 tests: 14 library (the tamper matrix over the
+  account, signature-list, and transaction views) and 1
+  end-to-end (a real program-test MintWrapped crossing plus a
+  failed on-chain replay of the same nonce, bound in-process and
+  through the shipped binary). See `RECEIPT-INDEXER.md`.
+  Off-chain only — no program change, no SBF rebuild.
 - **Tamper-evident relayer audit log (2026-11-17, commit
   `1a76c91`):** new `audit_log` module in the relayer crate plus a
   `relayer-log` inspector binary. Every sign, quorum collection,

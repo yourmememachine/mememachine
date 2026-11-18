@@ -7,6 +7,16 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-18 — `e0d0a24`** Receipt indexer (new off-chain
+  tooling, no program change): a crossing receipt PDA can now be
+  resolved to the single transaction that created it, with the
+  receipt parsed strictly and the transaction cross-pinned to
+  the slot the receipt itself records. Failed replay attempts
+  against a nonce are skipped during resolution; extra
+  successful signatures for a receipt PDA are flagged as an
+  anomaly in the emitted record. This is the audit trail the
+  Ankr-style recycled-receipt attack (Nov 2026) would have to
+  survive. 15 new tests; bridge workspace 173 → 188.
 - **2026-11-17 — `9cf00cf`** Code-review debate round 2
   (relayer; two independent reviews, every finding debated to a
   conclusion before any fix). Fixes: quorum collection counts

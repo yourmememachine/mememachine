@@ -165,7 +165,7 @@ The locks are also machine-readable: the [registry export](programs/crates/regis
 
 ## Bridge
 
-Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 94 program tests passing (173 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (60 tests passing) and the crossing-proof bundle tool in `bridge/crates/proof-bundle/` (19 tests passing; [bridge/PROOF-BUNDLE.md](bridge/PROOF-BUNDLE.md)). SBF-measured: MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
+Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 94 program tests passing (188 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (60 tests passing), the crossing-proof bundle tool in `bridge/crates/proof-bundle/` (19 tests passing; [bridge/PROOF-BUNDLE.md](bridge/PROOF-BUNDLE.md)), and the receipt indexer in `bridge/crates/receipt-indexer/` (15 tests passing; [bridge/RECEIPT-INDEXER.md](bridge/RECEIPT-INDEXER.md)) that resolves a crossing receipt to the transaction that created it. SBF-measured: MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
 
 ## Support
 

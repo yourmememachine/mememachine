@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `9cf00cf` (2026-11-17; `make verify` green —
-bridge workspace 173 passed, LaunchGuard 34 passed, registry export
+Last verified commit: `e0d0a24` (2026-11-18; `make verify` green —
+bridge workspace 188 passed, LaunchGuard 34 passed, registry export
 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -222,7 +222,7 @@ chain configuration gates any public chain launch. Both scopes:
 
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
-cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle (173)
+cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (188)
 cd programs && cargo test --release # LaunchGuard 34 tests (16 integration + 17 adversarial + 1 demo launch) + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```
