@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `e0d0a24` (2026-11-18; `make verify` green —
-bridge workspace 188 passed, LaunchGuard 34 passed, registry export
+Last verified commit: `10840ba` (2026-11-18; `make verify` green —
+bridge workspace 188 passed, LaunchGuard 35 passed, registry export
 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -209,6 +209,33 @@ chain configuration gates any public chain launch. Both scopes:
 > **Off-chain tooling only: no program change, no SBF rebuild,
 > no scope change.** Auditors should still quote against the
 > current `main` HEAD.
+>
+> **Scope update (2026-11-18, debate round 3 — PROGRAM CHANGE,
+> SBF REBUILT):** two independent reviews of LaunchGuard
+> (`programs/crates/launch-guard/`), debated finding-by-finding.
+> One code fix: `ExtendLock`'s cap was `clock.slot +
+> MAX_LOCK_SLOTS` — a sliding window that let repeated
+> extensions push a lock's total duration past the documented
+> 5-year maximum without bound (reproduced before the fix: a
+> max-length lock extended by 1 slot reached MAX + 1 total).
+> The cap is now `registered_slot + MAX_LOCK_SLOTS`, checked
+> arithmetic, failing closed. 1 new adversarial regression test;
+> LaunchGuard 34 → 35. Three further agreed findings are
+> documented limits in `programs/LAUNCH-GUARD.md`, not code
+> changes, because no on-chain check can decide them:
+> registration is permissionless and first-come among ≥10%
+> holders (the record's creator is the registrant, not a
+> verified issuer — creators should register before
+> distributing supply); a holder account frozen before the
+> freeze authority was revoked stays frozen forever and is
+> invisible to the program; and the reputation counters are
+> unweighted (a dust-supply completion counts the same as a
+> large launch). Killed in debate: two unchecked slot additions
+> are unreachable at any real slot height (the extension site
+> was replaced by checked arithmetic as part of the cap fix).
+> SBF rebuilt: launch_guard.so `9aceb092…` (135,416 B);
+> bridge programs untouched. **Program scope changed —
+> auditors must quote against the new HEAD.**
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
@@ -223,7 +250,7 @@ chain configuration gates any public chain launch. Both scopes:
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
 cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (188)
-cd programs && cargo test --release # LaunchGuard 34 tests (16 integration + 17 adversarial + 1 demo launch) + registry export 11
+cd programs && cargo test --release # LaunchGuard 35 tests (16 integration + 18 adversarial + 1 demo launch) + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```
 

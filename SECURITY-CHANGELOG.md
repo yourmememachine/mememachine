@@ -7,6 +7,28 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-18 — `10840ba`** Code-review debate round 3
+  (LaunchGuard; two independent reviews, every finding debated
+  to a conclusion before any fix). One code fix: `ExtendLock`
+  capped extensions against `clock.slot + MAX_LOCK_SLOTS`, a
+  sliding window — a lock registered at the 5-year maximum
+  could be extended again after any time passed, and repeated
+  extensions made the total duration unbounded, contradicting
+  the documented maximum lock period (reproduced before the
+  fix). The cap is now `registered_slot + MAX_LOCK_SLOTS` with
+  checked arithmetic. 1 new adversarial regression test
+  (LaunchGuard 34 → 35). Three agreed findings were closed as
+  documented limits in `programs/LAUNCH-GUARD.md` because no
+  on-chain check can decide them: registration is
+  permissionless and first-come among ≥10% holders, so the
+  record's creator is the registrant, not a verified issuer;
+  a holder account frozen before freeze-authority revocation
+  stays frozen forever and is invisible to the program; the
+  reputation counters are unweighted, so a dust-supply
+  completion counts the same as a large launch. Killed in
+  debate: the unchecked `clock.slot` additions are unreachable
+  at any real slot height. SBF rebuilt: launch_guard.so
+  `9aceb092…` (135,416 B).
 - **2026-11-18 — `e0d0a24`** Receipt indexer (new off-chain
   tooling, no program change): a crossing receipt PDA can now be
   resolved to the single transaction that created it, with the

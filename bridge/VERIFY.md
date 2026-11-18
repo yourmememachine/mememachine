@@ -14,9 +14,9 @@ the current state and supersedes their numbers.
   precompile-cost + 60 relayer + 19 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
-  LaunchGuard **34 passed** and registry export **11 passed**
+  LaunchGuard **35 passed** and registry export **11 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-18: **256 passed, 0 failed**.
+  Full `make verify` 2026-11-18: **257 passed, 0 failed**.
 - **Receipt indexer (2026-11-18, commit `e0d0a24`):** new
   off-chain crate `crates/receipt-indexer/` (binary
   `receipt-index`) performing the binding BRIDGE.md 4.5 leaves to

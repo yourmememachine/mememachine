@@ -263,3 +263,29 @@ Released record at a wrong address fails CloseVault with
 (135,488 B; deterministic — two builds, identical hash).
 `make verify` green against `8e84d18`; repo total **214**
 (146 bridge workspace + 45 programs + 23 fork). Not deployed.
+
+### Addendum — code-review debate round 3 (2026-11-18)
+
+Two independent reviews of the LaunchGuard crate, debated
+finding-by-finding; every surviving finding was reproduced in
+program-test against the pre-fix code before any change. One
+code fix, in commit `10840ba`: `ExtendLock` capped extensions
+against `clock.slot + MAX_LOCK_SLOTS` — a sliding window, so a
+lock registered at the 5-year maximum could be extended again
+after any warp and repeated extensions made the total duration
+unbounded. The cap is now `registered_slot + MAX_LOCK_SLOTS`
+(checked arithmetic). New adversarial regression test
+`attack_extend_cannot_push_total_past_five_years`: a max-length
+lock cannot be extended at all, and a minimum lock can be
+extended exactly to the total cap, never one slot past. Three
+further agreed findings were reproduced and closed as
+documented limits in `LAUNCH-GUARD.md` (no on-chain check can
+decide them): permissionless first-come registration by any
+≥10% holder, pre-revocation frozen holder accounts staying
+frozen forever, and unweighted reputation counters. Suite now
+**35 passed, 0 failed** (16 integration + 18 adversarial + 1
+demo launch). SBF rebuilt: launch_guard.so
+`9aceb092789c5afb593945ab002d3ece779326182a39a34e2b3aa8586f86cccf`
+(135,416 B; deterministic — two builds, identical hash).
+`make verify` green against `10840ba`; repo total **257**
+(188 bridge workspace + 46 programs + 23 fork). Not deployed.

@@ -108,6 +108,20 @@ Same standalone-tree method (`~/workspace/sbf-build/`, saved
 | `solana_lock.so` | 211,648 | `e0586b1948f553cb268a69137fe6849a1bc0889110d318d2ece5c61b07765814` |
 | `machine_bridge.so` | 213,880 | `56d23895278069e078177765c09d3ef9da92e90199b4669581814c2fbb351cdb` |
 
+**Rebuilt 2026-11-18** from the code-review debate round 3
+change (`10840ba`: LaunchGuard's ExtendLock cap is measured
+from the registration slot, so a lock's total duration can no
+longer exceed the documented 5-year maximum; see the AUDIT.md
+scope update). LaunchGuard only — the bridge programs were not
+touched and their binaries above stand. Same standalone-tree
+method (`~/workspace/sbf-lg/`, saved `programs/sbf-Cargo.lock`).
+The build is deterministic: two consecutive builds produced
+the identical hash.
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `launch_guard.so` | 135,416 | `9aceb092789c5afb593945ab002d3ece779326182a39a34e2b3aa8586f86cccf` |
+
 ## Why the build does not run directly against the bridge workspace
 
 `bridge/deploy/build-sbf.sh` against the workspace fails before any
