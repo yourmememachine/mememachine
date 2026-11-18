@@ -7,6 +7,30 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-17 — `9cf00cf`** Code-review debate round 2
+  (relayer; two independent reviews, every finding debated to a
+  conclusion before any fix). Fixes: quorum collection counts
+  only individually verified signatures (junk exchange files are
+  skipped, verified disagreement still fails closed, attestation
+  files cannot be silently overwritten with a different
+  message); the source transaction is bound to the event
+  record's slot and the source-transfer check requires the SPL
+  Token program and a successful transaction; the audit log is
+  verified before publishing/signing and before sending, its
+  default path leaves the shared directory, and persistence
+  writes are fsynced; the `run` loop validates its destination
+  account at startup, scans all signed-but-unprocessed nonces,
+  skips receipt-proven nonces, and verifies the destination
+  token account's mint and owner; collection uses the on-chain
+  quorum and refuses paused/killed destinations; config, state
+  and keypair-file validation hardened; the watcher refuses an
+  enrich result that differs from the finality-checked record.
+  6 new regression tests (relayer 54 → 60). Killed in debate:
+  the missing relayer-side cap check is intentional layering
+  (caps are destination state, enforced on-chain). Recorded,
+  not patched: `Submitted` is still logged on RPC acceptance
+  without a confirmation poll, and there is no single-instance
+  lock against two relayer processes sharing one config.
 - **2026-11-17 — `0efccbc`** Code-review debate round 1
   (machine-bridge + solana-lock; two independent reviews, every
   finding debated to a conclusion before any fix). Six fixes:

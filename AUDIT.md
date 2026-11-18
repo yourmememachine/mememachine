@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `0efccbc` (2026-11-17; `make verify` green —
-bridge workspace 167 passed, LaunchGuard 34 passed, registry export
+Last verified commit: `9cf00cf` (2026-11-17; `make verify` green —
+bridge workspace 173 passed, LaunchGuard 34 passed, registry export
 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -162,6 +162,35 @@ chain configuration gates any public chain launch. Both scopes:
 > (hashes in `bridge/deploy/SBF-BUILD-NOTES.md`); LaunchGuard was
 > not touched. **Program scope changed — auditors must quote
 > against the current `main` HEAD, not any earlier tree.**
+>
+> **Scope update (2026-11-17, debate round 2):** the off-chain
+> relayer changed under the same two-reviewer debate process
+> (commit `9cf00cf`). Quorum collection now counts only
+> individually verified signatures — junk files in the shared
+> exchange directory are skipped instead of blocking a present
+> quorum, while a verified signature over a different message
+> still fails collection as equivocation; attestation files can
+> no longer be silently overwritten with a different message.
+> The source transaction is bound to the event record's own slot,
+> and the source-transfer check requires the SPL Token program
+> and a successful transaction. The audit log is verified before
+> an attestation is published or a transaction is sent (it was
+> only consulted afterwards); its default path moved out of the
+> shared attestation directory, next to the local state file.
+> The `run` loop validates its destination account at startup,
+> submits every signed-but-unprocessed nonce (not only the
+> latest), skips nonces whose destination receipt already
+> exists, and verifies the destination token account's mint and
+> owner against the message before submitting. Collection uses
+> the on-chain quorum and refuses a paused/killed destination;
+> config validation rejects a zero poll interval, a Solana
+> safety margin below 16, an expiry window above 1,000,000
+> slots, and keypair/state paths inside the shared directory;
+> signing-key files with group/other permissions are refused.
+> Writes are fsynced. 6 new tests; relayer 54 → 60, bridge
+> workspace 167 → 173. **Off-chain only: no program change, no
+> SBF rebuild, no scope change.** Auditors should still quote
+> against the current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
@@ -175,7 +204,7 @@ chain configuration gates any public chain launch. Both scopes:
 
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
-cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle (167)
+cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle (173)
 cd programs && cargo test --release # LaunchGuard 34 tests (16 integration + 17 adversarial + 1 demo launch) + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```

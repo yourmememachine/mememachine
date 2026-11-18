@@ -9,13 +9,13 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **167 passed, 0 failed** (37
+- **Tests:** bridge workspace **173 passed, 0 failed** (37
   bridge-common unit + 31 machine-bridge + 25 solana-lock + 1
-  precompile-cost + 54 relayer + 19 proof bundle, including the
+  precompile-cost + 60 relayer + 19 proof bundle, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **34 passed** and registry export **11 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-17: **235 passed, 0 failed**.
+  Full `make verify` 2026-11-17: **241 passed, 0 failed**.
 - **Tamper-evident relayer audit log (2026-11-17, commit
   `1a76c91`):** new `audit_log` module in the relayer crate plus a
   `relayer-log` inspector binary. Every sign, quorum collection,
