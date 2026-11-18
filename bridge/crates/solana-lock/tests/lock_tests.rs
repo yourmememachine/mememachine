@@ -1302,3 +1302,220 @@ async fn deposit_with_substitute_token_program_fails() {
         0
     );
 }
+
+
+// ---------------------------------------------------------------------------
+// Debate round 2026-11-17 (scope 1): regression tests for the findings
+// that survived the two-reviewer debate.
+// ---------------------------------------------------------------------------
+
+async fn send_unlock_to(
+    env: &mut Env,
+    message: BridgeMessage,
+    signatures: Vec<RelayerSignature>,
+    destination: Pubkey,
+) -> Result<(), solana_program_test::BanksClientError> {
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (nonce_pda, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
+    let (receipt_pda, _) = receipt_pda(&program_id, DIR_MACHINE_TO_SOLANA, message.nonce);
+    let (authority_pda, _) = authority_pda(&program_id);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let ed25519_ix = build_ed25519_instruction(&message.hash(), &signatures);
+    let ix = Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Unlock { message },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(env.vault, false),
+            AccountMeta::new(destination, false),
+            AccountMeta::new(nonce_pda, false),
+            AccountMeta::new_readonly(authority_pda, false),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::id(), false),
+            AccountMeta::new(receipt_pda, false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[ed25519_ix, ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer],
+        blockhash,
+    );
+    env.context.banks_client.process_transaction(tx).await
+}
+
+#[tokio::test]
+async fn debate_unlock_with_wrong_source_mint_fails() {
+    // B1/A4: an attestation naming a different source mint than the
+    // one this deployment custodies must not release vault tokens,
+    // even with a valid quorum.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    let wrong_mint = Pubkey::new_unique();
+    let msg = burn_message(1, 500, env.user.pubkey(), wrong_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_unlock(&mut env, msg, sigs).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.vault).await,
+        50_000
+    );
+    assert_eq!(total_locked(&mut env).await, 50_000);
+}
+
+#[tokio::test]
+async fn debate_unlock_to_vault_itself_fails() {
+    // A5: the vault as its own unlock destination would debit
+    // total_locked while the token transfer moves nothing.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    let (authority_pda, _) = authority_pda(&program_id());
+    let msg = burn_message(1, 500, authority_pda, env.source_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let vault = env.vault;
+    let result = send_unlock_to(&mut env, msg, sigs, vault).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+    assert_eq!(total_locked(&mut env).await, 50_000);
+}
+
+#[tokio::test]
+async fn debate_initialize_rejects_non_token_program_vault() {
+    // B4/A9: a vault account whose bytes parse as a token account
+    // (owner = authority PDA, mint = source mint, state initialized)
+    // but which is NOT owned by the token program must be rejected
+    // at Initialize. Seeded directly, because no normal instruction
+    // can write those bytes into a system-owned account.
+    let program_id = program_id();
+    let deployer = Keypair::new();
+    let (vault_authority, _) = authority_pda(&program_id);
+    let source_mint = Pubkey::new_unique();
+    let fake_vault = Pubkey::new_unique();
+    let mut vault_data = vec![0u8; spl_token::state::Account::LEN];
+    let fake_state = spl_token::state::Account {
+        mint: source_mint,
+        owner: vault_authority,
+        amount: 0,
+        delegate: solana_program::program_option::COption::None,
+        state: spl_token::state::AccountState::Initialized,
+        is_native: solana_program::program_option::COption::None,
+        delegated_amount: 0,
+        close_authority: solana_program::program_option::COption::None,
+    };
+    solana_program::program_pack::Pack::pack_into_slice(&fake_state, &mut vault_data[..]);
+    let mut program_test = ProgramTest::new(
+        "solana_lock",
+        program_id,
+        solana_program_test::processor!(solana_lock::processor::process),
+    );
+    program_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    seed_programdata(&mut program_test, &deployer.pubkey());
+    program_test.add_account(
+        fake_vault,
+        Account {
+            lamports: 10_000_000,
+            data: vault_data,
+            owner: solana_sdk::system_program::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+    let mut context = program_test.start_with_context().await;
+    let recent_blockhash = context.last_blockhash;
+    let fund_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &context.payer.pubkey(),
+            &deployer.pubkey(),
+            1_000_000_000,
+        )],
+        Some(&context.payer.pubkey()),
+        &[&context.payer],
+        recent_blockhash,
+    );
+    context.banks_client.process_transaction(fund_tx).await.unwrap();
+    let ix = initialize_ix(
+        &deployer.pubkey(),
+        relayer_pubkeys(&relayer_keypairs()),
+        admin_pubkeys(&admin_keypairs()),
+        source_mint,
+        fake_vault,
+        100_000,
+        500_000,
+        2_000_000,
+    );
+    let blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&context.payer.pubkey()),
+        &[&context.payer, &deployer],
+        blockhash,
+    );
+    let result = context.banks_client.process_transaction(tx).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}
+
+#[tokio::test]
+async fn debate_pause_with_non_pda_config_fails() {
+    // A6/B5: admin handlers must re-derive the config PDA. Seed a
+    // fake LockConfig (attacker's admins) at a non-PDA address owned
+    // by the program; a Pause signed by its admins must fail.
+    let program_id = program_id();
+    let admins = admin_keypairs();
+    let fake_config = LockConfig::new(
+        relayer_pubkeys(&relayer_keypairs()),
+        admin_pubkeys(&admins),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        255,
+        100_000,
+        500_000,
+        2_000_000,
+        254,
+    );
+    let fake_addr = Pubkey::new_unique();
+    let mut data = vec![0u8; LockConfig::LEN];
+    borsh::to_writer(&mut data[..], &fake_config).unwrap();
+    let deployer = Keypair::new();
+    let mut program_test = ProgramTest::new(
+        "solana_lock",
+        program_id,
+        solana_program_test::processor!(solana_lock::processor::process),
+    );
+    program_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    seed_programdata(&mut program_test, &deployer.pubkey());
+    program_test.add_account(
+        fake_addr,
+        Account {
+            lamports: 10_000_000,
+            data,
+            owner: program_id,
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+    let mut context = program_test.start_with_context().await;
+    let blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+    let pause_ix = Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Pause,
+        vec![
+            AccountMeta::new(fake_addr, false),
+            AccountMeta::new_readonly(admins[0].pubkey(), true),
+            AccountMeta::new_readonly(admins[1].pubkey(), true),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[pause_ix],
+        Some(&context.payer.pubkey()),
+        &[&context.payer, &admins[0], &admins[1]],
+        blockhash,
+    );
+    let result = context.banks_client.process_transaction(tx).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}

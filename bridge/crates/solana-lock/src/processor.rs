@@ -84,6 +84,15 @@ fn save_config(account: &AccountInfo, config: &LockConfig) -> ProgramResult {
     Ok(())
 }
 
+
+fn check_config_pda(program_id: &Pubkey, account: &AccountInfo) -> ProgramResult {
+    let (expected, _) = config_pda(program_id);
+    if *account.key != expected {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    Ok(())
+}
+
 fn signer_pubkeys(accounts: &[AccountInfo], start: usize) -> Vec<Pubkey> {
     accounts[start..]
         .iter()
@@ -204,8 +213,19 @@ fn process_initialize(
     // The vault is created by the deployer before initialization; the
     // program only verifies ownership, it never takes custody from a key.
     let (vault_authority, vault_authority_bump) = authority_pda(program_id);
+    // Debate round 2026-11-17 (B4/A9): TokenAccount::unpack is only byte
+    // parsing -- it does not prove the account is a token account at all.
+    // Require the token program as owner and an initialized (not frozen,
+    // not uninitialized) account state, as the Machine side already does
+    // for its mint, before trusting the parsed owner/mint fields.
+    if vault_account.owner != &spl_token::id() {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
     let vault_state = TokenAccount::unpack(&vault_account.try_borrow_data()?)?;
-    if vault_state.owner != vault_authority || vault_state.mint != source_mint {
+    if vault_state.owner != vault_authority
+        || vault_state.mint != source_mint
+        || vault_state.state != spl_token::state::AccountState::Initialized
+    {
         return Err(BridgeError::InvalidAccountData.into());
     }
     // Self-audit F-3: the same member-set validation SetRelayers
@@ -272,6 +292,7 @@ fn process_deposit(
     if token_program.key != &spl_token::id() {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     config.check_active()?;
     if amount == 0 {
@@ -400,6 +421,23 @@ fn process_unlock(
     }
     let (authority_pda, authority_bump) = authority_pda(program_id);
     if *authority_account.key != authority_pda {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    // Debate round 2026-11-17 (B1/A4): bind the attested message to this
+    // deployment's asset. The destination account's mint was checked, but
+    // message.source_mint never was -- a quorum attestation for a burn of
+    // a different (e.g. worthless) asset sharing the relayer set would
+    // otherwise release this vault's tokens.
+    if message.source_mint != config.source_mint {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    // Debate round 2026-11-17 (A5): the vault itself must never be the
+    // unlock destination. Its owner is the authority PDA, so it passes
+    // the recipient check below, and a vault-to-vault transfer is a
+    // no-op in the token program -- total_locked would be debited while
+    // the real balance does not move, desyncing the accounting every
+    // other holder's caps are computed from.
+    if *destination_account.key == config.vault || message.recipient == authority_pda {
         return Err(BridgeError::InvalidAccountData.into());
     }
 
@@ -550,6 +588,7 @@ fn process_pause(program_id: &Pubkey, accounts: &[AccountInfo], pause: bool) -> 
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     if pause {
         verify_pause_authority(
@@ -591,6 +630,7 @@ fn process_set_cap(
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     verify_admins(&signers, &config.admins.admins, config.admins.threshold)?;
     if per_tx_cap == 0 || daily_cap == 0 || daily_cap < per_tx_cap {
@@ -614,6 +654,7 @@ fn process_set_relayers(
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     verify_admins(&signers, &config.admins.admins, config.admins.threshold)?;
     // Shared with Initialize (self-audit F-3): identical checks,

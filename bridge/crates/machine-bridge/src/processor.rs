@@ -75,6 +75,15 @@ fn save_config(account: &AccountInfo, config: &MachineConfig) -> ProgramResult {
     Ok(())
 }
 
+
+fn check_config_pda(program_id: &Pubkey, account: &AccountInfo) -> ProgramResult {
+    let (expected, _) = config_pda(program_id);
+    if *account.key != expected {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    Ok(())
+}
+
 /// Collect the pubkeys of all signer accounts after `start`.
 fn signer_pubkeys(accounts: &[AccountInfo], start: usize) -> Vec<Pubkey> {
     accounts[start..]
@@ -197,7 +206,23 @@ fn process_initialize(
     {
         return Err(BridgeError::InvalidAccountData.into());
     }
-    Mint::unpack(&wrapped_mint_account.try_borrow_data()?)?;
+    // Debate round 2026-11-17 (A1/B3): the unpacked mint must be
+    // controlled by the bridge-authority PDA. Checking only that the
+    // account parses as a mint left an initializer able to keep a
+    // personal mint authority (unbacked minting outside every cap and
+    // quorum check, surviving program immutability) or a personal
+    // freeze authority (censoring any holder's exit), and a mint whose
+    // authority is anyone else bricks every MintWrapped CPI.
+    let mint_state = Mint::unpack(&wrapped_mint_account.try_borrow_data()?)?;
+    let (authority_pda, _) = authority_pda(program_id);
+    if mint_state.mint_authority != solana_program::program_option::COption::Some(authority_pda) {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    if let solana_program::program_option::COption::Some(freeze) = mint_state.freeze_authority {
+        if freeze != authority_pda {
+            return Err(BridgeError::InvalidAccountData.into());
+        }
+    }
     // Self-audit F-3: the same member-set validation SetRelayers
     // applies — no default keys, no duplicates, for either set.
     validate_member_set(&relayers)?;
@@ -264,6 +289,14 @@ fn process_mint_wrapped(
     }
     let (authority_pda, authority_bump) = authority_pda(program_id);
     if *authority_account.key != authority_pda {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    // Debate round 2026-11-17 (A5 mirror): tokens minted to an account
+    // owned by the authority PDA can never be burned -- Burn requires
+    // the account owner as a transaction signer and a PDA cannot sign
+    // outside a CPI this program never makes -- so backing would be
+    // stranded against unburnable supply. Reject that recipient.
+    if message.recipient == authority_pda {
         return Err(BridgeError::InvalidAccountData.into());
     }
 
@@ -423,9 +456,16 @@ fn process_burn(
     if token_program.key != &spl_token::id() {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     // Kill-switch does NOT stop burns: burning is the exit path.
     config.check_burn_allowed()?;
+    // Debate round 2026-11-17 (A8/B6): pin the mint account explicitly,
+    // as MintWrapped does, instead of relying on the token program's
+    // burn check to reject a mismatched mint inside the CPI.
+    if *mint_account.key != config.wrapped_mint {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
     if amount == 0 {
         return Err(BridgeError::InvalidAmount.into());
     }
@@ -515,6 +555,7 @@ fn process_pause(program_id: &Pubkey, accounts: &[AccountInfo], pause: bool) -> 
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     if pause {
         // 2-of-3 admins OR any 2 of 5 relayers may pause.
@@ -548,6 +589,7 @@ fn process_set_cap(
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     verify_admins(&signers, &config.admins.admins, config.admins.threshold)?;
     if per_tx_cap == 0 || daily_cap == 0 || daily_cap < per_tx_cap {
@@ -571,6 +613,7 @@ fn process_set_relayers(
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     verify_admins(&signers, &config.admins.admins, config.admins.threshold)?;
     // Shared with Initialize (self-audit F-3): identical checks,
@@ -589,6 +632,7 @@ fn process_kill_switch(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
     if *config_account.owner != *program_id {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    check_config_pda(program_id, config_account)?;
     let mut config = load_config(config_account)?;
     verify_admins(&signers, &config.admins.admins, config.admins.threshold)?;
     config.killed = true;
