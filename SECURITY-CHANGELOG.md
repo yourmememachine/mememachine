@@ -7,6 +7,33 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-17 — `0efccbc`** Code-review debate round 1
+  (machine-bridge + solana-lock; two independent reviews, every
+  finding debated to a conclusion before any fix). Six fixes:
+  (1) `Unlock` never compared the attested message's
+  `source_mint` to the config's — a quorum attestation for a
+  different asset sharing the relayer set released this vault's
+  tokens; now bound. (2) Machine `Initialize` discarded the
+  parsed mint: a personal mint authority (unbacked minting
+  outside caps/quorum, surviving program immutability) or freeze
+  authority passed; now the mint authority must be the
+  bridge-authority PDA and any freeze authority that PDA or
+  none. (3) Lock `Initialize` trusted `TokenAccount::unpack`
+  bytes with no token-program owner or account-state check; both
+  now required. (4) `Unlock` accepted the vault itself as
+  destination (a no-op transfer that still debited
+  `total_locked`) and `MintWrapped` accepted the authority PDA
+  as recipient (unburnable tokens, stranded backing); both
+  rejected. (5) `Burn` did not pin its mint account; pinned.
+  (6) The config PDA was re-derived in only the two attested
+  paths; every handler in both programs now re-derives it.
+  8 new regression tests; bridge SBF binaries rebuilt
+  (`e0586b19…` / `56d23895…`). Recorded, not patched (design
+  decisions): over-cap burns/deposits can strand a crossing,
+  MintWrapped attestations cannot yet be bound to a source mint
+  (no such field in the Machine config), attestation expiry has
+  no program-side maximum, and direct transfers into the vault
+  remain unrecoverable.
 - **2026-11-17 — `8e84d18`** LaunchGuard CloseVault (external
   review triage). The review's stuck-funds point was real: the
   vault is a normal SPL token account, anyone can transfer extra

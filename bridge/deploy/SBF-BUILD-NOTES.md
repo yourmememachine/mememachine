@@ -93,6 +93,21 @@ produced the identical hash.
 |---|---|---|
 | `launch_guard.so` | 135,488 | `915dc769e342b695dc11c37548184a1edff2e7534603410cb0bb787c8fb33788` |
 
+**Rebuilt 2026-11-17** from the code-review debate round 1
+change (`0efccbc`: attested-mint binding in Unlock, mint /
+freeze authority check in Machine Initialize, vault owner and
+state check in Lock Initialize, authority-PDA / vault
+destination guards, Burn mint pin, config-PDA re-derivation in
+every handler; see the AUDIT.md scope update). Bridge programs
+only — LaunchGuard was not touched and its binary above stands.
+Same standalone-tree method (`~/workspace/sbf-build/`, saved
+`bridge/deploy/sbf-Cargo.lock`).
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 211,648 | `e0586b1948f553cb268a69137fe6849a1bc0889110d318d2ece5c61b07765814` |
+| `machine_bridge.so` | 213,880 | `56d23895278069e078177765c09d3ef9da92e90199b4669581814c2fbb351cdb` |
+
 ## Why the build does not run directly against the bridge workspace
 
 `bridge/deploy/build-sbf.sh` against the workspace fails before any
