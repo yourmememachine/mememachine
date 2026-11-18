@@ -23,7 +23,10 @@ pub const BPS_DENOMINATOR: u64 = 10_000;
 /// determinism rule the bridge uses (BRIDGE.md): slot counts cannot
 /// drift or be nudged the way validator timestamps can.
 pub const MIN_LOCK_SLOTS: u64 = 6_480_000;
-/// Maximum lock period (also the cap for extensions): 5 years.
+/// Maximum lock period: 5 years, measured from registration.
+/// Extensions are capped at registered_slot + MAX_LOCK_SLOTS, so
+/// no sequence of extensions can push a lock's total duration
+/// past this.
 pub const MAX_LOCK_SLOTS: u64 = 394_200_000;
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]

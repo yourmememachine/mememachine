@@ -37,7 +37,7 @@ is not the classic SPL Token program is not a LaunchGuard launch.
 | Instruction | What it does |
 |---|---|
 | `RegisterAndLock { lock_amount, lock_slots }` | Verifies revoked authorities + fixed supply, creates the launch record and vault PDAs, transfers `lock_amount` from the creator into the vault. Fails if: authorities not revoked, supply is zero, lock < 10% of supply, lock period < 30 days or > 5 years, or a record already exists for the mint. |
-| `ExtendLock { additional_slots }` | Creator only, while locked. Pushes the release slot further out (never past +5 years from now). There is deliberately no instruction that moves it earlier. |
+| `ExtendLock { additional_slots }` | Creator only, while locked. Pushes the release slot further out (never past 5 years from the registration slot — the maximum is a total lock period, not a per-extension window). There is deliberately no instruction that moves it earlier. |
 | `Release {}` | Creator only, only after the lock expires. Returns the full locked amount from the vault to the creator and marks the record Released. Before expiry it always fails. |
 | `CloseVault {}` | Creator only, and only after `Release` has completed. Sweeps any residual balance out of the vault and closes the vault account, returning its rent to the creator. The vault is a normal token account, so anyone can send extra tokens into it; `Release` moves exactly the locked amount, and without this instruction the excess would be stuck forever. Because it is gated on the record's Released state — set only after the full locked amount has left the vault — it has no path to any part of the lock: while a launch is locked or merely expired-but-unreleased, it always fails. |
 
@@ -68,11 +68,18 @@ updated by the program only:
 
 Any wallet, explorer, or other program can read this account —
 it's the creator's public track record, written by the chain, not
-by a website. Two honest limits: reputation is **per key** (a
+by a website. Three honest limits: reputation is **per key** (a
 creator can always start over with a fresh keypair at zero, so a
 long history is meaningful precisely because it can't be bought or
-transferred), and it counts only what LaunchGuard can see —
-launches and completions inside this standard.
+transferred); it counts only what LaunchGuard can see —
+launches and completions inside this standard; and the counters
+are **unweighted** — a completed lock on a dust-supply mint (a
+19-token supply locking 2 tokens satisfies the 10% floor) counts
+exactly the same as a completed lock on a large launch, so a
+reputation count alone proves only that locks were waited out,
+never how much value stood behind them. Anyone weighing a
+creator's reputation should read it alongside each launch
+record's `locked_amount` and `total_supply`.
 
 ## What LaunchGuard does NOT do (honest limits)
 
@@ -90,6 +97,25 @@ launches and completions inside this standard.
 - It does not judge token quality, team identity, or intent. A
   registered launch is *provably fixed-supply with a locked creator
   stake* — nothing more. Marketing it as more than that would be a lie.
+- Registration is **permissionless and first-come**. The record's
+  `creator` is the wallet that registered the mint, not a verified
+  issuer: once a mint's authorities are revoked, no on-chain record
+  of who issued it remains, so the program can only check that the
+  registrant signs and locks at least 10% of supply. Any holder of
+  ≥10% who registers first occupies the mint's one record —
+  permanently, since there is no close or supersede instruction —
+  and is recorded as its creator. Creators should therefore
+  register **before** distributing supply; a mint distributed past
+  the 10% line before registration can be squatted by a holder.
+- Revoking the freeze authority prevents **future** freezes; it
+  cannot undo existing ones. A token account frozen by the issuer
+  *before* revocation stays frozen forever — thawing needs the
+  freeze authority that revocation just destroyed — and the
+  program cannot see it: holder accounts are not enumerable
+  on-chain, and registration inspects only the mint and the
+  registrant's own account. Holders of a registered launch should
+  check their own account is not frozen rather than assume the
+  revoked authority means no account is.
 - It is **not audited and not deployed**. It joins the audit scope
   (AUDIT.md) and the same BRIDGE.md §5-style gates before any real
   launch is pointed at it.
@@ -128,9 +154,10 @@ For a mint `M` and the LaunchGuard program `P`, inspect:
    recorded creator, only after `lock_until_slot`.
 
 If all four check out, the lock is real: the supply cannot grow,
-accounts cannot be frozen by the creator, and the locked tokens
-cannot move early — those are SPL- and program-level facts, not
-promises.
+no account can be frozen by the creator from that point on (an
+account frozen *before* revocation stays frozen — see the honest
+limits above), and the locked tokens cannot move early — those
+are SPL- and program-level facts, not promises.
 
 ## Registry export (machine-readable)
 

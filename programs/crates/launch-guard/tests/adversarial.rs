@@ -762,6 +762,80 @@ async fn attack_lock_can_only_move_later() {
 }
 
 #[tokio::test]
+async fn attack_extend_cannot_push_total_past_five_years() {
+    // Debate round 3 regression (2026-11-18): the extension cap
+    // was clock.slot + MAX_LOCK_SLOTS — a sliding window. A lock
+    // registered at the 5-year maximum could be extended again
+    // after any warp, and repeated extensions made the total
+    // duration unbounded, contradicting the documented maximum
+    // lock period. The cap is now registered_slot + MAX_LOCK_SLOTS:
+    // a max-length lock cannot be extended at all, and a shorter
+    // lock can be extended exactly up to the total cap, never past.
+    let mut ctx = start().await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint(&mut ctx, &creator).await;
+    send(
+        &mut ctx,
+        &[register_ix(
+            &creator.pubkey(),
+            &mint,
+            &token,
+            LOCK,
+            MAX_LOCK_SLOTS,
+        )],
+        &[&creator],
+    )
+    .await
+    .expect("register at the maximum period");
+    let rec = record(&mut ctx, &mint).await;
+    assert_eq!(rec.lock_until_slot - rec.registered_slot, MAX_LOCK_SLOTS);
+
+    // Any extension, however small and however much time has
+    // passed, exceeds the total cap.
+    let clock = clock_slot(&mut ctx).await;
+    ctx.warp_to_slot(clock + 1_000).unwrap();
+    let err = send(
+        &mut ctx,
+        &[extend_ix(&creator.pubkey(), &mint, 1)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::LockPeriodTooLong as u32);
+    assert_eq!(
+        record(&mut ctx, &mint).await.lock_until_slot,
+        rec.lock_until_slot,
+        "rejected extension must not move the lock"
+    );
+
+    // A minimum-length lock can still be extended right up to the
+    // cap — and not one slot further.
+    let creator2 = Keypair::new();
+    let (mint2, token2) = register(&mut ctx, &creator2).await;
+    let headroom = MAX_LOCK_SLOTS - MIN_LOCK_SLOTS;
+    send(
+        &mut ctx,
+        &[extend_ix(&creator2.pubkey(), &mint2, headroom)],
+        &[&creator2],
+    )
+    .await
+    .expect("extend exactly to the total cap");
+    let rec2 = record(&mut ctx, &mint2).await;
+    assert_eq!(rec2.lock_until_slot - rec2.registered_slot, MAX_LOCK_SLOTS);
+    let _ = token2;
+    let clock = clock_slot(&mut ctx).await;
+    ctx.warp_to_slot(clock + 1).unwrap();
+    let err = send(
+        &mut ctx,
+        &[extend_ix(&creator2.pubkey(), &mint2, 1)],
+        &[&creator2],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::LockPeriodTooLong as u32);
+}
+
+#[tokio::test]
 async fn attack_two_creators_interleaved_reputations_stay_separate() {
     // Two creators launch interleaved mints. Each creator's
     // reputation counts only their own launches and completions,

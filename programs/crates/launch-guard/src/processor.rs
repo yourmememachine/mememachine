@@ -413,12 +413,23 @@ fn process_extend(
     if additional_slots == 0 {
         return Err(LaunchError::LockPeriodTooShort.into());
     }
-    let clock = Clock::get()?;
     let new_until = record
         .lock_until_slot
         .checked_add(additional_slots)
         .ok_or(ProgramError::ArithmeticOverflow)?;
-    if new_until > clock.slot + MAX_LOCK_SLOTS {
+    // The 5-year maximum is a maximum lock PERIOD, measured from
+    // registration — the same basis RegisterAndLock applies to the
+    // initial lock_slots. Capping against clock.slot + MAX instead
+    // made it a sliding window: every extension re-opened a fresh
+    // 5 years, so the total duration was unbounded (code-review
+    // debate round 3, 2026-11-18; reproduced before the fix: a
+    // max-length lock extended by 1 slot after a 1,000-slot warp
+    // reached MAX_LOCK_SLOTS + 1 total).
+    let max_until = record
+        .registered_slot
+        .checked_add(MAX_LOCK_SLOTS)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+    if new_until > max_until {
         return Err(LaunchError::LockPeriodTooLong.into());
     }
     record.lock_until_slot = new_until;
