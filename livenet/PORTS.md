@@ -10,13 +10,13 @@ them there, change them here too.
 | Port(s) | Protocol | Validator | Purpose |
 |---|---|---|---|
 | 8001 | UDP | 1 | Gossip (validator 1) — how validators find each other |
-| 8002–8010 | UDP | 1 | Dynamic range: TPU, TPU-forwards, repair, serve-repair |
+| 10000–10999 | UDP | 1 | Dynamic range (1,000 ports): TPU, TPU-vote, TPU-forwards, repair, serve-repair, QUIC endpoints |
 | 8899 | TCP | 1 | **Public JSON-RPC** — the endpoint wallets and apps use |
 | 8011 | UDP | 2 | Gossip (validator 2) |
-| 8012–8020 | UDP | 2 | Dynamic range (validator 2) |
+| 11000–11999 | UDP | 2 | Dynamic range (validator 2) |
 | 8900 | TCP | 2 | RPC (validator 2, localhost-only by default) |
 | 8021 | UDP | 3 | Gossip (validator 3) |
-| 8022–8030 | UDP | 3 | Dynamic range (validator 3) |
+| 12000–12999 | UDP | 3 | Dynamic range (validator 3) |
 | 8901 | TCP | 3 | RPC (validator 3, localhost-only by default) |
 | 22 | TCP | all | SSH (your access — restrict to your IP if you can) |
 
@@ -37,11 +37,11 @@ provider (see DEPLOY.md step 2).
 ```bash
 sudo ufw allow 22/tcp
 sudo ufw allow 8001/udp
-sudo ufw allow 8002:8010/udp
+sudo ufw allow 10000:10999/udp
 sudo ufw allow 8011/udp
-sudo ufw allow 8012:8020/udp
+sudo ufw allow 11000:11999/udp
 sudo ufw allow 8021/udp
-sudo ufw allow 8022:8030/udp
+sudo ufw allow 12000:12999/udp
 sudo ufw allow 8899/tcp
 sudo ufw enable
 sudo ufw status numbered
@@ -54,26 +54,26 @@ On the validator 1 host:
 ```bash
 sudo ufw allow 22/tcp
 sudo ufw allow 8001/udp
-sudo ufw allow 8002:8010/udp
+sudo ufw allow 10000:10999/udp
 sudo ufw allow 8899/tcp
 sudo ufw enable
 ```
 
-On the validator 2 host (replace 8011/8012–8020, no public RPC):
+On the validator 2 host (replace 8011/11000–11999, no public RPC):
 
 ```bash
 sudo ufw allow 22/tcp
 sudo ufw allow 8011/udp
-sudo ufw allow 8012:8020/udp
+sudo ufw allow 11000:11999/udp
 sudo ufw enable
 ```
 
-On the validator 3 host (replace 8021/8022–8030, no public RPC):
+On the validator 3 host (replace 8021/12000–12999, no public RPC):
 
 ```bash
 sudo ufw allow 22/tcp
 sudo ufw allow 8021/udp
-sudo ufw allow 8022:8030/udp
+sudo ufw allow 12000:12999/udp
 sudo ufw enable
 ```
 
