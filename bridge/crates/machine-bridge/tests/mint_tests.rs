@@ -168,6 +168,7 @@ fn initialize_ix(
     relayers: [Pubkey; 5],
     admins: [Pubkey; 3],
     wrapped_mint: Pubkey,
+    source_mint: Pubkey,
     per_tx_cap: u64,
     daily_cap: u64,
 ) -> Instruction {
@@ -179,6 +180,7 @@ fn initialize_ix(
             relayers,
             admins,
             wrapped_mint,
+            source_mint,
             per_tx_cap,
             daily_cap,
         },
@@ -252,6 +254,7 @@ async fn setup(per_tx_cap: u64, daily_cap: u64) -> Env {
         &deployer.pubkey(),
         relayer_pubkeys(&relayers),
         admin_pubkeys(&admins),
+        wrapped_mint,
         wrapped_mint,
         per_tx_cap,
         daily_cap,
@@ -1209,7 +1212,7 @@ async fn send_init_as(
     admins: [Pubkey; 3],
     wrapped_mint: Pubkey,
 ) -> Result<(), solana_program_test::BanksClientError> {
-    let ix = initialize_ix(&payer.pubkey(), relayers, admins, wrapped_mint, 100_000, 500_000);
+    let ix = initialize_ix(&payer.pubkey(), relayers, admins, wrapped_mint, wrapped_mint, 100_000, 500_000);
     let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -1278,6 +1281,9 @@ async fn stranger_cannot_initialize_but_upgrade_authority_can() {
     assert_eq!(cfg.relayers.relayers, relayer_pubkeys(&relayers));
     assert_eq!(cfg.admins.admins, admin_pubkeys(&admins));
     assert_eq!(cfg.wrapped_mint, fx.wrapped_mint);
+    // Debate round 2026-11-18 (A-1): Initialize stores the registered
+    // source mint (this fixture registers the wrapped mint value).
+    assert_eq!(cfg.source_mint, fx.wrapped_mint);
 }
 
 #[tokio::test]
@@ -1600,6 +1606,7 @@ async fn debate_pause_with_non_pda_config_fails() {
         relayer_pubkeys(&relayer_keypairs()),
         admin_pubkeys(&admins),
         Pubkey::new_unique(),
+        Pubkey::new_unique(),
         100_000,
         500_000,
         255,
@@ -1643,5 +1650,18 @@ async fn debate_pause_with_non_pda_config_fails() {
         blockhash,
     );
     let result = context.banks_client.process_transaction(tx).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}
+
+#[tokio::test]
+async fn debate_mint_with_wrong_source_mint_fails() {
+    // Debate round 2026-11-18 (A-1/B-F1): a quorum attestation naming
+    // a different source mint than the deployment's registered
+    // source_mint must be rejected. Pre-fix there was no source-mint
+    // binding on the mint path at all, and this minted.
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), Pubkey::new_unique());
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_mint(&mut env, msg, sigs).await;
     assert_custom_error(result, BridgeError::InvalidAccountData);
 }

@@ -4,8 +4,10 @@
 //! independent checker needs to confirm that a bridge crossing
 //! satisfied the bridge's own rules:
 //!
-//! - the **crossing receipt** the destination program wrote in the
-//!   same transaction that moved the value (BRIDGE.md 4.5);
+//! - the **crossing receipt** as exported from the receipt the
+//!   destination program wrote in the same transaction that moved
+//!   the value (BRIDGE.md 4.5) — carried as stated fields, not as
+//!   an authenticated artifact (see the limits below);
 //! - the canonical **`BridgeMessage`** the relayers attested to, in
 //!   the same wire form the relayer exchange uses
 //!   (`relayer::attestation::MessageFile`);
@@ -15,7 +17,10 @@
 //!   against — stated in the bundle, and pinned by the verifier to
 //!   the protocol constants (exactly `MAX_RELAYERS` members,
 //!   quorum exactly `QUORUM`), so a bundle cannot quietly weaken
-//!   the rules it claims to prove compliance with.
+//!   the rules it claims to prove compliance with. The set's
+//!   *shape* is pinned, not its *identity*: the set is the bundle's
+//!   own statement, and `verify_bundle_against_set` exists for a
+//!   verifier who wants to pin it to the registered set.
 //!
 //! Verification is fully offline and re-runs the bridge's own
 //! checks: the message hash is recomputed from the canonical
@@ -28,10 +33,17 @@
 //! completed, which is when the on-chain program evaluated it too).
 //!
 //! What a valid bundle proves — and only this: a quorum of the
-//! stated relayer set signed this exact message, and the
-//! destination program recorded a receipt matching it. It does not
-//! prove the bridge is safe, audited, or deployed; see
-//! bridge/PROOF-BUNDLE.md for the honest limits.
+//! stated relayer set signed this exact message, and the bundle
+//! contains a receipt whose fields match that message. The receipt
+//! is unauthenticated data in the bundle (debate round 2026-11-18,
+//! A-4): nothing in the file binds it to the destination chain, so
+//! the bundle does *not* by itself prove the destination program
+//! ever wrote that receipt — confirming a crossing on-chain (the
+//! receipt PDA in the destination program's account space) is a
+//! separate lookup, exactly as confirming the stated relayer set
+//! against the on-chain config is. It does not prove the bridge is
+//! safe, audited, or deployed; see bridge/PROOF-BUNDLE.md for the
+//! honest limits.
 
 use bridge_common::{
     validate_member_set, verify_attestation, BridgeError, BridgeMessage, CrossingReceipt,
@@ -150,6 +162,12 @@ pub enum BundleError {
     QuorumMismatch { claimed: u8, required: u8 },
     /// A receipt field disagrees with the attested message.
     ReceiptMismatch { field: &'static str },
+    /// The message amount is zero — a crossing both programs reject
+    /// on-chain (debate round 2026-11-18, A-8).
+    ZeroAmount,
+    /// The bundle's stated relayer set differs from the expected set
+    /// the caller pinned (debate round 2026-11-18, A-5).
+    RelayerSetMismatch,
     /// The stated message hash is not the hash of the stated message.
     MessageHashMismatch,
     /// bridge-common's attestation verification rejected the set.
@@ -189,6 +207,12 @@ impl fmt::Display for BundleError {
             BundleError::ReceiptMismatch { field } => {
                 write!(f, "receipt {field} does not match the attested message")
             }
+            BundleError::ZeroAmount => {
+                write!(f, "message amount is zero; the bridge programs reject zero-amount crossings")
+            }
+            BundleError::RelayerSetMismatch => {
+                write!(f, "bundle relayer set does not match the expected relayer set")
+            }
             BundleError::MessageHashMismatch => {
                 write!(f, "stated message hash does not equal sha256(domain separator || canonical message)")
             }
@@ -216,10 +240,16 @@ fn hex_decode_32(field: &str, s: &str) -> Result<[u8; 32], BundleError> {
     if s.len() != 64 {
         return Err(invalid("expected 64 hex characters (32 bytes)"));
     }
+    // Debate round 2026-11-18 (A-6/B-F5): decode from the byte view.
+    // Slicing the &str at byte offsets panicked on a 64-byte string
+    // whose multi-byte characters crossed an even boundary — a
+    // verifier run on other people's files must reject, not crash.
+    let bytes = s.as_bytes();
     let mut out = [0u8; 32];
     for i in 0..32 {
-        out[i] = u8::from_str_radix(&s[2 * i..2 * i + 2], 16)
+        let pair = std::str::from_utf8(&bytes[2 * i..2 * i + 2])
             .map_err(|_| invalid("not hex"))?;
+        out[i] = u8::from_str_radix(pair, 16).map_err(|_| invalid("not hex"))?;
     }
     Ok(out)
 }
@@ -258,6 +288,11 @@ pub struct VerificationReport {
     pub distinct_signers: usize,
     pub quorum: u8,
     pub relayer_set_size: usize,
+    /// The relayer set the signatures were verified against, in
+    /// config order (debate round 2026-11-18, A-5: the report
+    /// previously recorded only the set's size, so a consumer of the
+    /// verdict could not tell *whose* quorum it was).
+    pub relayer_set: Vec<Pubkey>,
     /// Destination slot at which the crossing completed (receipt).
     pub receipt_slot: u64,
     /// Destination timestamp at which the crossing completed (receipt).
@@ -271,16 +306,41 @@ pub struct VerificationReport {
 /// 3. the relayer set is exactly `MAX_RELAYERS` valid, distinct,
 ///    non-default members, and the claimed quorum equals the
 ///    protocol constant — a bundle may not weaken the rules;
-/// 4. every receipt field that the message also carries agrees
+/// 4. the message amount is non-zero (a protocol invariant both
+///    programs enforce on-chain);
+/// 5. every receipt field that the message also carries agrees
 ///    with the message (direction, nonce, amount, recipient,
 ///    source transaction);
-/// 5. the stated message hash (bundle and receipt) equals the
+/// 6. the stated message hash (bundle and receipt) equals the
 ///    recomputed sha256 over the canonical encoding;
-/// 6. bridge-common's `verify_attestation` accepts the signature
+/// 7. bridge-common's `verify_attestation` accepts the signature
 ///    set against the stated relayer set — signatures valid over
 ///    the recomputed hash, signers registered and distinct, quorum
 ///    reached, message unexpired at the receipt's slot.
+///
+/// The relayer set is the bundle's own statement: this function
+/// checks its shape, not its identity. To pin the set to a known
+/// registered set, use `verify_bundle_against_set`.
 pub fn verify_bundle(bundle: &CrossingBundle) -> Result<VerificationReport, BundleError> {
+    verify_bundle_inner(bundle, None)
+}
+
+/// Verify a bundle and additionally require its stated relayer set
+/// to equal `expected_set` (debate round 2026-11-18, A-5). A bundle
+/// is self-asserting about *which* set signed; pinning is how a
+/// careful verifier anchors the verdict to the set actually
+/// registered in the on-chain config.
+pub fn verify_bundle_against_set(
+    bundle: &CrossingBundle,
+    expected_set: &[Pubkey; MAX_RELAYERS],
+) -> Result<VerificationReport, BundleError> {
+    verify_bundle_inner(bundle, Some(expected_set))
+}
+
+fn verify_bundle_inner(
+    bundle: &CrossingBundle,
+    expected_set: Option<&[Pubkey; MAX_RELAYERS]>,
+) -> Result<VerificationReport, BundleError> {
     if bundle.bundle_version != BUNDLE_VERSION {
         return Err(BundleError::UnsupportedBundleVersion(bundle.bundle_version));
     }
@@ -310,6 +370,18 @@ pub fn verify_bundle(bundle: &CrossingBundle) -> Result<VerificationReport, Bund
             claimed: bundle.quorum,
             required: QUORUM,
         });
+    }
+    if let Some(expected) = expected_set {
+        if relayer_set.as_slice() != expected.as_slice() {
+            return Err(BundleError::RelayerSetMismatch);
+        }
+    }
+    // Debate round 2026-11-18 (A-8): both programs reject a
+    // zero-amount crossing on-chain, and the shipped relayer refuses
+    // to build one; a bundle for one is not a proof under the
+    // bridge's rules.
+    if message.amount == 0 {
+        return Err(BundleError::ZeroAmount);
     }
 
     let receipt = bundle.receipt.to_receipt()?;
@@ -370,6 +442,7 @@ pub fn verify_bundle(bundle: &CrossingBundle) -> Result<VerificationReport, Bund
         distinct_signers: distinct.len(),
         quorum: QUORUM,
         relayer_set_size: MAX_RELAYERS,
+        relayer_set,
         receipt_slot: receipt.slot,
         receipt_timestamp: receipt.timestamp,
     })
@@ -381,14 +454,21 @@ pub fn verify_bundle(bundle: &CrossingBundle) -> Result<VerificationReport, Bund
 
 /// Assemble a bundle from its parts and verify it before returning:
 /// export never emits a bundle its own verifier would reject.
+///
+/// `collection_quorum` is the threshold the signatures were
+/// gathered under; the bundle itself always stamps the protocol
+/// constant `QUORUM` (debate round 2026-11-18, B-F7: stamping the
+/// collection argument made a stronger 5-of-5 export fail its own
+/// verification with a quorum mismatch).
 pub fn build_bundle(
     direction: Direction,
     message: &BridgeMessage,
     signatures: &[RelayerSignature],
     relayer_set: &[Pubkey; MAX_RELAYERS],
-    quorum: u8,
+    collection_quorum: u8,
     receipt: &CrossingReceipt,
 ) -> Result<CrossingBundle, BundleError> {
+    let _ = collection_quorum; // collection-only; the stamp is QUORUM
     let bundle = CrossingBundle {
         bundle_version: BUNDLE_VERSION,
         direction: direction.label().to_string(),
@@ -402,7 +482,7 @@ pub fn build_bundle(
             })
             .collect(),
         relayer_set: relayer_set.iter().map(|p| p.to_string()).collect(),
-        quorum,
+        quorum: QUORUM,
         receipt: ReceiptFile::from(receipt),
     };
     verify_bundle(&bundle)?;
@@ -511,6 +591,128 @@ mod tests {
         assert_eq!(report.relayer_set_size, MAX_RELAYERS);
         assert_eq!(report.message_hash, fx.message.hash());
         assert_eq!(report.receipt_slot, 50_000);
+    }
+
+    #[test]
+    fn debate_non_ascii_message_hash_rejected_not_panic() {
+        // Debate round 2026-11-18 (A-6/B-F5): a 64-byte hash string
+        // with a multi-byte character crossing an even byte boundary
+        // panicked hex_decode_32 (string slicing), crashing the
+        // verifier instead of returning INVALID.
+        let fx = fixture();
+        let mut bundle = fx.bundle.clone();
+        bundle.message_hash = format!("a\u{20ac}{}", "x".repeat(60));
+        assert_eq!(bundle.message_hash.len(), 64);
+        assert_eq!(
+            verify_bundle(&bundle),
+            Err(BundleError::InvalidEncoding {
+                field: "message_hash".to_string(),
+                reason: "not hex".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn debate_zero_amount_bundle_rejected() {
+        // Debate round 2026-11-18 (A-8): a zero-amount message with a
+        // matching receipt and valid signatures verified, although
+        // both programs reject zero-amount crossings on-chain.
+        let fx = fixture();
+        let mut message = fx.message.clone();
+        message.amount = 0;
+        let signatures: Vec<RelayerSignature> =
+            fx.signers.iter().take(3).map(|s| s.sign(&message)).collect();
+        let receipt = CrossingReceipt {
+            discriminator: DISCRIMINATOR_RECEIPT,
+            direction: DIR_SOLANA_TO_MACHINE,
+            nonce: message.nonce,
+            message_hash: message.hash(),
+            source_tx: message.source_tx,
+            amount: 0,
+            recipient: message.recipient,
+            slot: 50_000,
+            timestamp: 1_763_000_000,
+        };
+        let relayer_set: [Pubkey; MAX_RELAYERS] = fx
+            .signers
+            .iter()
+            .map(|s| s.pubkey())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        assert_eq!(
+            build_bundle(
+                Direction::SolanaToMachine,
+                &message,
+                &signatures,
+                &relayer_set,
+                QUORUM,
+                &receipt,
+            ),
+            Err(BundleError::ZeroAmount)
+        );
+    }
+
+    #[test]
+    fn debate_stronger_collection_quorum_stamps_protocol_quorum() {
+        // Debate round 2026-11-18 (B-F7): build_bundle stamped the
+        // collection quorum into the bundle, so a 5-of-5 export
+        // failed its own verification (claimed 5, required 3).
+        let fx = fixture();
+        let signatures: Vec<RelayerSignature> =
+            fx.signers.iter().map(|s| s.sign(&fx.message)).collect();
+        let relayer_set: [Pubkey; MAX_RELAYERS] = fx
+            .signers
+            .iter()
+            .map(|s| s.pubkey())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let receipt = CrossingReceipt {
+            discriminator: DISCRIMINATOR_RECEIPT,
+            direction: DIR_SOLANA_TO_MACHINE,
+            nonce: fx.message.nonce,
+            message_hash: fx.message.hash(),
+            source_tx: fx.message.source_tx,
+            amount: fx.message.amount,
+            recipient: fx.message.recipient,
+            slot: 50_000,
+            timestamp: 1_763_000_000,
+        };
+        let bundle = build_bundle(
+            Direction::SolanaToMachine,
+            &fx.message,
+            &signatures,
+            &relayer_set,
+            5,
+            &receipt,
+        )
+        .unwrap();
+        assert_eq!(bundle.quorum, QUORUM);
+        assert_eq!(verify_bundle(&bundle).unwrap().distinct_signers, 5);
+    }
+
+    #[test]
+    fn debate_verify_against_expected_set() {
+        // Debate round 2026-11-18 (A-5): the report now carries the
+        // set that was verified against, and a caller can pin it.
+        let fx = fixture();
+        let relayer_set: [Pubkey; MAX_RELAYERS] = fx
+            .signers
+            .iter()
+            .map(|s| s.pubkey())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let report = verify_bundle(&fx.bundle).unwrap();
+        assert_eq!(report.relayer_set, relayer_set.to_vec());
+        verify_bundle_against_set(&fx.bundle, &relayer_set).unwrap();
+        let other: [Pubkey; MAX_RELAYERS] =
+            (0..5u8).map(|i| Pubkey::new_from_array([100 + i; 32])).collect::<Vec<_>>().try_into().unwrap();
+        assert_eq!(
+            verify_bundle_against_set(&fx.bundle, &other),
+            Err(BundleError::RelayerSetMismatch)
+        );
     }
 
     #[test]

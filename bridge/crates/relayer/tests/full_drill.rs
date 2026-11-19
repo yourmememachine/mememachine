@@ -402,6 +402,7 @@ async fn setup_chains() -> Chains {
             relayers,
             admins: admin_pubs,
             wrapped_mint,
+            source_mint,
             per_tx_cap: 10_000_000,
             daily_cap: 25_000_000,
         },

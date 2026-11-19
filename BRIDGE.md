@@ -106,7 +106,8 @@ cryptography.
 
 - **Nonce registry:** each direction maintains a strictly increasing nonce counter and a set of processed nonces (PDA per nonce). `unlock` / `mint_wrapped` reject any nonce already processed.
 - **Chain binding:** `source_chain` and `dest_chain` are part of the signed hash, so an attestation for one direction cannot be replayed in the other.
-- **Expiry:** attestations carry an `expiry_slot`. Stale attestations (older than the expiry) are rejected, so a captured attestation cannot be replayed later.
+- **Expiry:** attestations carry an `expiry_slot`. Stale attestations (older than the expiry) are rejected, so a captured attestation cannot be replayed later. The lifetime itself is bounded on-chain (debate round 2026-11-18): `validate_message` rejects any message whose `expiry_slot - source_slot` exceeds 1,000,000 slots (or whose expiry precedes its source slot), so a quorum-signed message cannot become a permanent bearer instrument.
+- **Asset binding:** both destination programs bind `message.source_mint` to the mint registered in their config at initialization (lock side since 2026-11-17; Machine side since the 2026-11-18 debate round, which added `source_mint` to `MachineConfig`), so an attestation for a different asset sharing the relayer set cannot move this deployment's tokens.
 - **Source-tx binding:** the source transaction signature is in the message, so one deposit cannot fund two mints even if a relayer double-signs.
 
 ### 2.5 Finality requirements before minting / unlocking

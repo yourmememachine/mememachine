@@ -31,6 +31,8 @@ cd bridge && cargo build --release -p proof-bundle
 ./target/release/crossing-proof verify bundle.json
 # VALID crossing proof ...   (exit 0)
 # INVALID: <specific reason> (exit 1)
+# Optionally pin the verdict to the registered relayer set:
+./target/release/crossing-proof verify bundle.json --expected-relayers <PK1>,<PK2>,<PK3>,<PK4>,<PK5>
 ```
 
 The verifier is fully offline and re-runs the bridge's own checks,
@@ -47,7 +49,8 @@ in this order:
 4. **Receipt ↔ message agreement:** direction, nonce, amount,
    recipient, and source transaction in the receipt equal the
    attested message's fields, field by field; a mismatch names the
-   field.
+   field. The amount must also be non-zero — both programs reject
+   zero-amount crossings on-chain (2026-11-18).
 5. **Hash recomputation:** the stated message hash (in the bundle
    and in the receipt) equals the recomputed
    `sha256(domain separator || canonical encoding)`.
@@ -93,7 +96,7 @@ A valid bundle proves exactly this:
 - a quorum (3-of-5) of the stated relayer set signed **this
   exact message** — its hash binds the amount, recipient, nonce,
   source transaction, both chains, and the expiry; and
-- the destination program recorded a **receipt matching that
+- the bundle contains a **receipt whose fields match that
   message** — direction, nonce, amount, recipient, source
   transaction — at the stated destination slot.
 
@@ -104,7 +107,15 @@ It does **not** prove:
 - that the stated relayer set is the *real* registered set — the
   bundle states the set it is checked against; confirming that set
   against the on-chain config account is a separate lookup (and
-  is precisely why the set is stated in the open, not hidden);
+  is precisely why the set is stated in the open, not hidden).
+  The verifier prints the set it used, and
+  `verify --expected-relayers <PK,PK,PK,PK,PK>` pins the verdict
+  to a set you supply (debate round 2026-11-18);
+- that the destination program ever wrote the receipt — the
+  receipt is carried as stated fields, not as an authenticated
+  artifact (debate round 2026-11-18). Confirming a crossing
+  on-chain — the receipt PDA in the destination program's
+  account space — is a separate lookup, like the set check above;
 - anything about a live crossing. The bridge is undeployed and
   runs only against local program-test banks today, so every
   bundle in existence is from a local drill with worthless test
@@ -115,7 +126,7 @@ It does **not** prove:
 
 `cargo test --release -p proof-bundle` (bridge workspace):
 
-- **Library (18 tests):** a valid 3-of-5 and 5-of-5 bundle verify;
+- **Library (22 tests):** a valid 3-of-5 and 5-of-5 bundle verify;
   the JSON round-trip verifies; and the tamper matrix — amount
   flipped in the message, in the receipt, in both, and in both
   plus the hash fields (rejected in turn on receipt mismatch,
@@ -124,7 +135,11 @@ It does **not** prove:
   a non-relayer key; a duplicated attestation; a corrupted
   signature; a swapped relayer-set member; a weakened quorum
   claim; completion recorded after expiry; a wrong direction
-  label; an unsupported bundle version.
+  label; an unsupported bundle version. The 2026-11-18 debate
+  round added: a non-ASCII message hash rejected (not a panic),
+  a zero-amount bundle rejected, a stronger collection quorum
+  (5-of-5 export) stamping the protocol quorum, and verification
+  pinned to an expected relayer set.
 - **End-to-end (1 test):** a real crossing through the existing
   drill harness (deposit on the lock program → attestation files
   → collector → `MintWrapped` → the receipt the program wrote) is

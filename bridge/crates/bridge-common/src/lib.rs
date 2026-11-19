@@ -72,6 +72,19 @@ pub const PAUSE_RELAYER_THRESHOLD: u8 = 2;
 /// Clock sysvar's timestamp, a slot cannot be skewed by a validator.
 pub const SLOTS_PER_DAY: u64 = 216_000;
 
+/// Maximum attestation lifetime in slots: a message's
+/// `expiry_slot - source_slot` may not exceed this (debate round
+/// 2026-11-18, scope 4, finding A-2/B-F2). Matches the relayer config
+/// cap on `expiry_window_slots`; enforced here, in the one shared
+/// validator every verification path funnels through, so a
+/// quorum-signed message with a far-future expiry cannot become a
+/// permanent bearer instrument. The bound is on the source-chain
+/// basis — the relayer derives `expiry_slot = source_slot + window`,
+/// and both fields live in the message — because source and
+/// destination slot sequences are independent and a destination-basis
+/// bound could false-reject honest crossings.
+pub const MAX_ATTESTATION_LIFETIME_SLOTS: u64 = 1_000_000;
+
 /// Basis-point denominator for the dynamic percentage caps.
 pub const BPS_DENOMINATOR: u64 = 10_000;
 /// Dynamic per-transaction cap: 1% of the reference supply (BRIDGE.md
@@ -230,7 +243,9 @@ pub struct RelayerSignature {
 
 /// The non-signature attestation checks, shared by the on-chain
 /// (precompile) and off-chain (dalek) verification paths: version,
-/// chain binding, and expiry against the current slot.
+/// chain binding, a bounded attestation lifetime
+/// (`expiry_slot - source_slot <= MAX_ATTESTATION_LIFETIME_SLOTS`),
+/// and expiry against the current slot.
 pub fn validate_message(
     message: &BridgeMessage,
     expected_source: u8,
@@ -245,6 +260,14 @@ pub fn validate_message(
     }
     if message.dest_chain != expected_dest {
         return Err(BridgeError::WrongDestChain);
+    }
+    // Debate round 2026-11-18 (A-2/B-F2): bound the attestation
+    // lifetime on the source basis. An expiry before the source slot,
+    // or more than MAX_ATTESTATION_LIFETIME_SLOTS after it, is not a
+    // message the shipped relayer can honestly produce.
+    match message.expiry_slot.checked_sub(message.source_slot) {
+        Some(lifetime) if lifetime <= MAX_ATTESTATION_LIFETIME_SLOTS => {}
+        _ => return Err(BridgeError::ExpiredAttestation),
     }
     if current_slot > message.expiry_slot {
         return Err(BridgeError::ExpiredAttestation);
@@ -269,6 +292,14 @@ pub fn verify_attestation(
     current_slot: u64,
 ) -> Result<(), BridgeError> {
     validate_message(message, expected_source, expected_dest, current_slot)?;
+
+    // Debate round 2026-11-18 (A-3/B-F3): a zero (or impossible)
+    // quorum must never verify — with quorum 0 an empty signature
+    // list passed this check. These shared verifiers are the last
+    // line for caller-supplied and deserialized values alike.
+    if quorum == 0 || quorum as usize > MAX_RELAYERS {
+        return Err(BridgeError::QuorumNotReached);
+    }
 
     let hash = message.hash();
     let mut distinct_valid: u8 = 0;
@@ -316,6 +347,15 @@ pub fn build_ed25519_instruction(
     signatures: &[RelayerSignature],
 ) -> solana_program::instruction::Instruction {
     use solana_program::instruction::Instruction;
+    // Debate round 2026-11-18 (A-7/B-F6): the count is written as a
+    // u8 and the offsets as u16s, so an oversized set silently
+    // truncated into a malformed instruction. The only legitimate
+    // input is a registered relayer set's signatures; refuse more
+    // loudly instead of corrupting them.
+    assert!(
+        signatures.len() <= MAX_RELAYERS,
+        "ed25519 attestation instruction holds at most MAX_RELAYERS signatures"
+    );
     let n = signatures.len();
     let data_start = 2 + 14 * n;
     let mut data = Vec::with_capacity(data_start + 96 * n + 32);
@@ -443,6 +483,11 @@ pub fn verify_precompile_attestation(
     instructions_sysvar: &solana_program::account_info::AccountInfo,
 ) -> Result<(), BridgeError> {
     use solana_program::sysvar::instructions as ix_sysvar;
+    // Debate round 2026-11-18 (A-3/B-F3): quorum 0 verified with no
+    // ed25519 instruction in the transaction at all.
+    if quorum == 0 || quorum as usize > MAX_RELAYERS {
+        return Err(BridgeError::QuorumNotReached);
+    }
     if *instructions_sysvar.key != ix_sysvar::ID {
         return Err(BridgeError::MissingAttestation);
     }
@@ -644,6 +689,11 @@ pub fn verify_admins(
     admins: &[Pubkey; MAX_ADMINS],
     threshold: u8,
 ) -> Result<(), BridgeError> {
+    // Debate round 2026-11-18 (A-3/B-F3): threshold 0 authorized
+    // with zero signers.
+    if threshold == 0 || threshold as usize > MAX_ADMINS {
+        return Err(BridgeError::Unauthorized);
+    }
     if count_signers_in_set(signer_pubkeys, admins) < threshold {
         return Err(BridgeError::Unauthorized);
     }
@@ -737,6 +787,11 @@ pub fn verify_pause_authority(
     admin_threshold: u8,
     relayers: &[Pubkey; MAX_RELAYERS],
 ) -> Result<(), BridgeError> {
+    // Debate round 2026-11-18 (A-3/B-F3): admin_threshold 0
+    // authorized with zero signers.
+    if admin_threshold == 0 || admin_threshold as usize > MAX_ADMINS {
+        return Err(BridgeError::Unauthorized);
+    }
     let admin_count = count_signers_in_set(signer_pubkeys, admins);
     if admin_count >= admin_threshold {
         return Ok(());
@@ -776,6 +831,14 @@ pub struct MachineConfig {
     pub relayers: RelayerSet,
     pub admins: AdminSet,
     pub wrapped_mint: Pubkey,
+    /// The Solana-side mint this deployment wraps (debate round
+    /// 2026-11-18, scope 4, finding A-1/B-F1: the leftover B2).
+    /// `MintWrapped` binds `message.source_mint` to this value,
+    /// mirroring the Unlock-side binding added in the 2026-11-17
+    /// round — without it, a quorum attestation for a deposit of a
+    /// different asset sharing the relayer set minted this
+    /// deployment's wrapped tokens unbacked.
+    pub source_mint: Pubkey,
     pub per_tx_cap: u64,
     pub daily_cap: u64,
     pub daily_minted: DailyUsage,
@@ -787,12 +850,13 @@ pub struct MachineConfig {
 }
 
 impl MachineConfig {
-    pub const LEN: usize = 1 + 1 + 1 + (32 * 5 + 1) + (32 * 3 + 1) + 32 + 8 + 8 + (8 + 8) + 8 + 1;
+    pub const LEN: usize = 1 + 1 + 1 + (32 * 5 + 1) + (32 * 3 + 1) + 32 + 32 + 8 + 8 + (8 + 8) + 8 + 1;
 
     pub fn new(
         relayers: [Pubkey; MAX_RELAYERS],
         admins: [Pubkey; MAX_ADMINS],
         wrapped_mint: Pubkey,
+        source_mint: Pubkey,
         per_tx_cap: u64,
         daily_cap: u64,
         bump: u8,
@@ -810,6 +874,7 @@ impl MachineConfig {
                 threshold: ADMIN_THRESHOLD,
             },
             wrapped_mint,
+            source_mint,
             per_tx_cap,
             daily_cap,
             daily_minted: DailyUsage::default(),
@@ -1043,6 +1108,7 @@ pub enum MachineInstruction {
         relayers: [Pubkey; MAX_RELAYERS],
         admins: [Pubkey; MAX_ADMINS],
         wrapped_mint: Pubkey,
+        source_mint: Pubkey,
         per_tx_cap: u64,
         daily_cap: u64,
     },
@@ -1251,6 +1317,80 @@ mod tests {
             verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 10_001),
             Err(BridgeError::ExpiredAttestation)
         );
+    }
+
+    #[test]
+    fn debate_unbounded_attestation_lifetime_rejected() {
+        // Debate round 2026-11-18 (A-2/B-F2): expiry = u64::MAX was a
+        // permanent bearer instrument; expiry before the source slot
+        // was also accepted. The bound is source-basis:
+        // expiry - source <= MAX_ATTESTATION_LIFETIME_SLOTS.
+        let (keys, pubs) = make_relayers();
+        let mut msg = test_message();
+        msg.expiry_slot = u64::MAX;
+        let sigs = sign_all(&msg, &keys, 3);
+        assert_eq!(
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            Err(BridgeError::ExpiredAttestation)
+        );
+        let mut msg = test_message();
+        msg.expiry_slot = msg.source_slot - 1;
+        let sigs = sign_all(&msg, &keys, 3);
+        assert_eq!(
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 500),
+            Err(BridgeError::ExpiredAttestation)
+        );
+        // Exactly at the cap passes; one slot past it fails.
+        let mut msg = test_message();
+        msg.expiry_slot = msg.source_slot + MAX_ATTESTATION_LIFETIME_SLOTS;
+        let sigs = sign_all(&msg, &keys, 3);
+        assert!(
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000)
+                .is_ok()
+        );
+        msg.expiry_slot += 1;
+        let sigs = sign_all(&msg, &keys, 3);
+        assert_eq!(
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            Err(BridgeError::ExpiredAttestation)
+        );
+    }
+
+    #[test]
+    fn debate_zero_quorum_and_thresholds_rejected() {
+        // Debate round 2026-11-18 (A-3/B-F3): quorum/threshold 0
+        // verified with no signatures at all.
+        let (_keys, pubs) = make_relayers();
+        let msg = test_message();
+        assert_eq!(
+            verify_attestation(&msg, &[], &pubs, 0, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            Err(BridgeError::QuorumNotReached)
+        );
+        assert_eq!(
+            verify_attestation(&msg, &[], &pubs, 6, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            Err(BridgeError::QuorumNotReached)
+        );
+        let admins = [Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique()];
+        assert_eq!(verify_admins(&[], &admins, 0), Err(BridgeError::Unauthorized));
+        assert_eq!(
+            verify_pause_authority(&[], &admins, 0, &pubs),
+            Err(BridgeError::Unauthorized)
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "at most MAX_RELAYERS signatures")]
+    fn debate_ed25519_builder_refuses_oversized_set() {
+        // Debate round 2026-11-18 (A-7/B-F6): the count byte silently
+        // truncated for >255 signatures (and offsets for far fewer
+        // than the format can honestly hold beyond the relayer set).
+        let sigs: Vec<RelayerSignature> = (0..6)
+            .map(|_| RelayerSignature {
+                relayer: Pubkey::new_unique(),
+                signature: [1u8; 64],
+            })
+            .collect();
+        let _ = build_ed25519_instruction(&[9u8; 32], &sigs);
     }
 
     #[test]
@@ -1491,7 +1631,7 @@ mod tests {
     fn kill_switch_blocks_mint_but_not_burn() {
         let (_keys, relayers) = make_relayers();
         let admins = [Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique()];
-        let mut cfg = MachineConfig::new(relayers, admins, Pubkey::new_unique(), 1000, 10_000, 255);
+        let mut cfg = MachineConfig::new(relayers, admins, Pubkey::new_unique(), Pubkey::new_unique(), 1000, 10_000, 255);
         assert!(cfg.check_mint_allowed().is_ok());
         assert!(cfg.check_burn_allowed().is_ok());
         cfg.killed = true;
@@ -1505,7 +1645,7 @@ mod tests {
     fn config_serializes_to_declared_len() {
         let (_keys, relayers) = make_relayers();
         let admins = [Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique()];
-        let cfg = MachineConfig::new(relayers, admins, Pubkey::new_unique(), 1000, 10_000, 255);
+        let cfg = MachineConfig::new(relayers, admins, Pubkey::new_unique(), Pubkey::new_unique(), 1000, 10_000, 255);
         let bytes = borsh::to_vec(&cfg).unwrap();
         assert_eq!(bytes.len(), MachineConfig::LEN);
         let back = MachineConfig::try_from_slice(&bytes).unwrap();
@@ -1608,6 +1748,32 @@ mod sysvar_parser_tests {
             rent_epoch: 0,
         };
         verify_precompile_attestation(message, &pubs, 3, &account)
+    }
+
+    #[test]
+    fn debate_precompile_zero_quorum_rejected() {
+        // Debate round 2026-11-18 (A-3/B-F3): with quorum 0 the
+        // precompile path returned Ok with no ed25519 instruction in
+        // the transaction at all.
+        let pubs = relayer_pubs();
+        let key = solana_program::sysvar::instructions::ID;
+        let owner = solana_program::sysvar::ID;
+        let mut lamports = 0u64;
+        let mut data = sysvar_bytes(&[], 0);
+        let account = AccountInfo {
+            key: &key,
+            is_signer: false,
+            is_writable: false,
+            lamports: Rc::new(RefCell::new(&mut lamports)),
+            data: Rc::new(RefCell::new(&mut data)),
+            owner: &owner,
+            executable: false,
+            rent_epoch: 0,
+        };
+        assert_eq!(
+            verify_precompile_attestation(&test_message(), &pubs, 0, &account),
+            Err(BridgeError::QuorumNotReached)
+        );
     }
 
     #[test]

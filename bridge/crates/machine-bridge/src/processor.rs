@@ -32,9 +32,10 @@ pub fn process(
             relayers,
             admins,
             wrapped_mint,
+            source_mint,
             per_tx_cap,
             daily_cap,
-        } => process_initialize(program_id, accounts, relayers, admins, wrapped_mint, per_tx_cap, daily_cap),
+        } => process_initialize(program_id, accounts, relayers, admins, wrapped_mint, source_mint, per_tx_cap, daily_cap),
         MachineInstruction::MintWrapped { message } => {
             process_mint_wrapped(program_id, accounts, message)
         }
@@ -170,6 +171,7 @@ fn process_initialize(
     relayers: [Pubkey; MAX_RELAYERS],
     admins: [Pubkey; MAX_ADMINS],
     wrapped_mint: Pubkey,
+    source_mint: Pubkey,
     per_tx_cap: u64,
     daily_cap: u64,
 ) -> ProgramResult {
@@ -240,7 +242,7 @@ fn process_initialize(
         &[SEED_CONFIG, &[bump]],
     )?;
 
-    let config = MachineConfig::new(relayers, admins, wrapped_mint, per_tx_cap, daily_cap, bump);
+    let config = MachineConfig::new(relayers, admins, wrapped_mint, source_mint, per_tx_cap, daily_cap, bump);
     save_config(config_account, &config)?;
     msg!("Machine bridge initialized; wrapped mint {}", wrapped_mint);
     Ok(())
@@ -289,6 +291,16 @@ fn process_mint_wrapped(
     }
     let (authority_pda, authority_bump) = authority_pda(program_id);
     if *authority_account.key != authority_pda {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    // Debate round 2026-11-18 (A-1/B-F1, the scope-1 leftover B2):
+    // bind the attested message to this deployment's asset, mirroring
+    // the Unlock-side check. The destination mint account was pinned
+    // to config.wrapped_mint, but message.source_mint never was -- a
+    // quorum attestation for a deposit of a different (e.g.
+    // worthless) asset sharing the relayer set would otherwise mint
+    // this deployment's wrapped tokens unbacked.
+    if message.source_mint != config.source_mint {
         return Err(BridgeError::InvalidAccountData.into());
     }
     // Debate round 2026-11-17 (A5 mirror): tokens minted to an account

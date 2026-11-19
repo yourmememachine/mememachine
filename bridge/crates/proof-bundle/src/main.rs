@@ -19,14 +19,36 @@
 //! Export verifies the assembled bundle before writing it: the
 //! tool never emits a bundle its own verifier would reject.
 
-use proof_bundle::{export_bundle, verify_bundle, CrossingBundle, ReceiptFile};
+use proof_bundle::{
+    export_bundle, verify_bundle, verify_bundle_against_set, CrossingBundle, ReceiptFile,
+};
 use relayer::message::Direction;
 use solana_program::pubkey::Pubkey;
 use std::{env, path::Path, process::ExitCode, str::FromStr};
 
+/// Cap on files the CLI will load into memory (debate round
+/// 2026-11-18, B-F8): the verifier exists to be run on files handed
+/// over by other people, and a real bundle is a few kilobytes — an
+/// unbounded read let a crafted multi-GB "bundle" exhaust memory
+/// before any check ran. The relayer caps its exchange files at
+/// 64 KiB for the same reason; 1 MiB is generous headroom here.
+const MAX_INPUT_BYTES: u64 = 1 << 20;
+
+fn read_capped(path: &str) -> Result<String, String> {
+    let len = std::fs::metadata(path)
+        .map_err(|e| format!("cannot read {path}: {e}"))?
+        .len();
+    if len > MAX_INPUT_BYTES {
+        return Err(format!(
+            "{path} is {len} bytes, over the {MAX_INPUT_BYTES}-byte input cap"
+        ));
+    }
+    std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))
+}
+
 fn usage() -> ! {
     eprintln!("usage:");
-    eprintln!("  crossing-proof verify <BUNDLE_JSON>");
+    eprintln!("  crossing-proof verify <BUNDLE_JSON> [--expected-relayers <PK,PK,PK,PK,PK>]");
     eprintln!("  crossing-proof export --attestations <DIR> --receipt <RECEIPT_JSON> \\");
     eprintln!("      --direction <solana-to-machine|machine-to-solana> --nonce <N> \\");
     eprintln!("      --relayers <PK,PK,PK,PK,PK> [--quorum 3] [--out <PATH>]");
@@ -48,11 +70,53 @@ fn main() -> ExitCode {
 }
 
 fn cmd_verify(args: &[String]) -> ExitCode {
-    let [path] = args else { usage() };
-    let text = match std::fs::read_to_string(path) {
+    // verify <BUNDLE_JSON> [--expected-relayers <PK,PK,PK,PK,PK>]
+    let mut path: Option<&String> = None;
+    let mut expected: Option<[Pubkey; bridge_common::MAX_RELAYERS]> = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--expected-relayers" => {
+                let Some(v) = it.next() else { usage() };
+                let mut set = Vec::new();
+                for part in v.split(',') {
+                    match Pubkey::from_str(part.trim()) {
+                        Ok(pk) => set.push(pk),
+                        Err(_) => {
+                            eprintln!("error: --expected-relayers entry is not a pubkey: {part}");
+                            return ExitCode::from(2);
+                        }
+                    }
+                }
+                match set.try_into() {
+                    Ok(s) => expected = Some(s),
+                    Err(v) => {
+                        eprintln!(
+                            "error: --expected-relayers must list exactly {} pubkeys, got {}",
+                            bridge_common::MAX_RELAYERS,
+                            v.len()
+                        );
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            other if other.starts_with("--") => {
+                eprintln!("error: unknown argument: {other}");
+                usage();
+            }
+            _ => {
+                if path.is_some() {
+                    usage();
+                }
+                path = Some(arg);
+            }
+        }
+    }
+    let Some(path) = path else { usage() };
+    let text = match read_capped(path) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("INVALID: cannot read {path}: {e}");
+            eprintln!("INVALID: {e}");
             return ExitCode::from(1);
         }
     };
@@ -63,7 +127,11 @@ fn cmd_verify(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    match verify_bundle(&bundle) {
+    let verified = match &expected {
+        Some(set) => verify_bundle_against_set(&bundle, set),
+        None => verify_bundle(&bundle),
+    };
+    match verified {
         Ok(report) => {
             println!("VALID crossing proof");
             println!("  direction:       {}", report.direction);
@@ -75,8 +143,24 @@ fn cmd_verify(args: &[String]) -> ExitCode {
                 "  attestations:    {} distinct relayers (quorum {} of {})",
                 report.distinct_signers, report.quorum, report.relayer_set_size
             );
+            // Debate round 2026-11-18 (A-5): name the set the verdict
+            // is about — a count alone hid whose quorum it was.
             println!(
-                "  receipt:         matches the attested message (destination slot {}, timestamp {})",
+                "  relayer set:     {}",
+                report
+                    .relayer_set
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            if expected.is_some() {
+                println!("  set check:       matches the expected set given on the command line");
+            }
+            // Debate round 2026-11-18 (A-4): the receipt fields are
+            // the bundle's statement, not an on-chain observation.
+            println!(
+                "  receipt:         stated fields match the attested message (stated destination slot {}, timestamp {})",
                 report.receipt_slot, report.receipt_timestamp
             );
             ExitCode::SUCCESS
@@ -185,10 +269,10 @@ fn cmd_export(args: &[String]) -> ExitCode {
                 return ExitCode::from(2);
             }
         };
-    let receipt_text = match std::fs::read_to_string(&args.receipt) {
+    let receipt_text = match read_capped(&args.receipt) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("error: cannot read receipt file {}: {e}", args.receipt);
+            eprintln!("error: {e}");
             return ExitCode::from(1);
         }
     };

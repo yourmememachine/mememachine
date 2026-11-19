@@ -176,6 +176,17 @@ fn source_for(cfg: &RelayerConfig, direction: Direction) -> Result<RpcSource> {
                     cfg.wrapped_mint()
                 )));
             }
+            // Debate round 2026-11-18 (A-1): the Machine config now
+            // registers the source mint; cross-check it the same way
+            // the lock side does, so a relayer configured for a
+            // different asset fails at startup, not at mint time.
+            if config.source_mint != cfg.source_mint() {
+                return Err(RelayerError::Rpc(format!(
+                    "on-chain source_mint {} does not match config file {}",
+                    config.source_mint,
+                    cfg.source_mint()
+                )));
+            }
             Ok(RpcSource {
                 client,
                 program_id,
