@@ -26,6 +26,14 @@ hold anything.)
 > 2026). For that submission it therefore counts as **pre-existing
 > work**, and is listed as such — the LaunchGuard program and this
 > demo both predate the hackathon weekend.
+>
+> **Reproduction note (2026-11-19):** since the dust floor
+> landed, reproducing this demo requires running `Initialize`
+> first (the demo harness uses a floor of 1,000) — registration
+> before Initialize now fails closed with
+> `ConfigNotInitialized`, by design. The demo test performs the
+> Initialize step itself; the recorded 2026-11-16 run above
+> predates the instruction and is unchanged.
 
 ## What was created
 

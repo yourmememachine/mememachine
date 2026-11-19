@@ -38,12 +38,77 @@ fn pda(seeds: &[&[u8]]) -> Pubkey {
 }
 
 async fn start() -> ProgramTestContext {
-    let test = ProgramTest::new(
+    let authority = Keypair::new();
+    let mut test = ProgramTest::new(
         "launch_guard",
         program_id(),
         processor!(launch_guard::process_instruction),
     );
-    test.start_with_context().await
+    seed_programdata(&mut test, &authority.pubkey());
+    let mut ctx = test.start_with_context().await;
+    initialize(&mut ctx, &authority, TEST_FLOOR).await;
+    ctx
+}
+
+/// Dust floor `start()` initializes the config with — far below
+/// the locks these tests register, so the export behaviour under
+/// test is unchanged.
+const TEST_FLOOR: u64 = 1_000;
+
+/// The program's ProgramData address under the BPF upgradeable
+/// loader — where `Initialize` looks for the upgrade authority.
+#[allow(deprecated)]
+fn programdata_address() -> Pubkey {
+    solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id())
+}
+
+/// Seed a ProgramData account naming `authority` as the program's
+/// upgrade authority (loader bincode layout: variant tag 3, slot,
+/// option tag, authority — the layout the program parses). Native
+/// program-test has no real loader state for a `processor!`
+/// program, so the account is constructed directly.
+#[allow(deprecated)]
+fn seed_programdata(test: &mut ProgramTest, authority: &Pubkey) {
+    let mut data = vec![0u8; 45];
+    data[0..4].copy_from_slice(&3u32.to_le_bytes());
+    data[12] = 1;
+    data[13..45].copy_from_slice(authority.as_ref());
+    test.add_account(
+        programdata_address(),
+        Account {
+            lamports: 10_000_000,
+            data,
+            owner: solana_program::bpf_loader_upgradeable::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+}
+
+fn initialize_ix(authority: &Pubkey, min_lock_amount: u64) -> Instruction {
+    Instruction {
+        program_id: program_id(),
+        accounts: vec![
+            AccountMeta::new(*authority, true),
+            AccountMeta::new(pda(&[SEED_CONFIG]), false),
+            AccountMeta::new_readonly(programdata_address(), false),
+            AccountMeta::new_readonly(solana_program::system_program::id(), false),
+        ],
+        data: borsh::to_vec(&LaunchInstruction::Initialize { min_lock_amount }).unwrap(),
+    }
+}
+
+/// Fund the upgrade authority from the payer and run Initialize.
+async fn initialize(ctx: &mut ProgramTestContext, authority: &Keypair, floor: u64) {
+    let fund = system_instruction::transfer(
+        &ctx.payer.pubkey(),
+        &authority.pubkey(),
+        1_000_000_000,
+    );
+    send(ctx, &[fund], &[]).await.expect("fund authority");
+    send(ctx, &[initialize_ix(&authority.pubkey(), floor)], &[authority])
+        .await
+        .expect("initialize config");
 }
 
 async fn send(
@@ -163,6 +228,7 @@ async fn register_launch(
             AccountMeta::new_readonly(spl_token::id(), false),
             AccountMeta::new_readonly(solana_program::system_program::id(), false),
             AccountMeta::new(pda(&[SEED_REPUTATION, creator.pubkey().as_ref()]), false),
+            AccountMeta::new_readonly(pda(&[SEED_CONFIG]), false),
         ],
         data,
     };

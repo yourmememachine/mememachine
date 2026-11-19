@@ -34,6 +34,9 @@ pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Pr
         }
         LaunchInstruction::Release {} => process_release(program_id, accounts),
         LaunchInstruction::CloseVault {} => process_close_vault(program_id, accounts),
+        LaunchInstruction::Initialize { min_lock_amount } => {
+            process_initialize(program_id, accounts, min_lock_amount)
+        }
     }
 }
 
@@ -162,6 +165,77 @@ fn authority_pda(program_id: &Pubkey, mint: &Pubkey) -> (Pubkey, u8) {
 fn reputation_pda(program_id: &Pubkey, creator: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[SEED_REPUTATION, creator.as_ref()], program_id)
 }
+fn config_pda(program_id: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[SEED_CONFIG], program_id)
+}
+
+/// Prove `payer` is the program's upgrade authority, from the
+/// ProgramData account — the same check the bridge programs run
+/// in their Initialize (bridge-common's `verify_upgrade_authority`,
+/// self-audit F-1), mirrored here because this crate is a separate
+/// workspace. Structural problems with the account are
+/// InvalidAccountData; a well-formed account naming a different
+/// authority is NotUpgradeAuthority. A program with no upgrade
+/// authority (immutable) has nobody who can initialize it — the
+/// authority option tag is 0 and the check fails closed.
+#[allow(deprecated)]
+fn verify_upgrade_authority(
+    program_id: &Pubkey,
+    programdata_account: &AccountInfo,
+    payer: &Pubkey,
+) -> ProgramResult {
+    use solana_program::bpf_loader_upgradeable;
+    let expected = bpf_loader_upgradeable::get_program_data_address(program_id);
+    if programdata_account.key != &expected
+        || programdata_account.owner != &bpf_loader_upgradeable::id()
+    {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let data = programdata_account.try_borrow_data()?;
+    // Variant tags follow the enum's declaration order in
+    // solana-loader-v3-interface: Uninitialized 0, Buffer 1,
+    // Program 2, ProgramData 3.
+    const PROGRAMDATA_METADATA_LEN: usize = 45;
+    const VARIANT_PROGRAM_DATA: u32 = 3;
+    if data.len() < PROGRAMDATA_METADATA_LEN
+        || u32::from_le_bytes(data[0..4].try_into().unwrap()) != VARIANT_PROGRAM_DATA
+    {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    // Authority option tag at byte 12 (after tag + slot). Anything
+    // other than 1 (Some) — including 0 (None, an immutable
+    // program) — means there is no upgrade authority to bind to.
+    if data[12] != 1 {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let authority = Pubkey::new_from_array(data[13..45].try_into().unwrap());
+    if authority != *payer {
+        return Err(LaunchError::NotUpgradeAuthority.into());
+    }
+    Ok(())
+}
+
+fn load_config(account: &AccountInfo, program_id: &Pubkey) -> Result<GuardConfig, ProgramError> {
+    // An account the program does not own at the config PDA is a
+    // not-yet-created config (system-owned shell or nothing at
+    // all): Initialize has not run, and registration fails closed
+    // rather than skipping the floor check.
+    if account.owner != program_id {
+        return Err(LaunchError::ConfigNotInitialized.into());
+    }
+    let data = account.try_borrow_data()?;
+    if data.is_empty() || data[0] != DISCRIMINATOR_CONFIG {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    GuardConfig::try_from_slice(&data).map_err(|_| ProgramError::InvalidAccountData)
+}
+
+fn save_config(account: &AccountInfo, config: &GuardConfig) -> ProgramResult {
+    let mut data = account.try_borrow_mut_data()?;
+    let bytes = borsh::to_vec(config).map_err(|_| ProgramError::AccountDataTooSmall)?;
+    data[..bytes.len()].copy_from_slice(&bytes);
+    Ok(())
+}
 
 fn load_reputation(account: &AccountInfo) -> Result<CreatorReputation, ProgramError> {
     let data = account.try_borrow_data()?;
@@ -175,6 +249,68 @@ fn save_reputation(account: &AccountInfo, reputation: &CreatorReputation) -> Pro
     let mut data = account.try_borrow_mut_data()?;
     let bytes = borsh::to_vec(reputation).map_err(|_| ProgramError::AccountDataTooSmall)?;
     data[..bytes.len()].copy_from_slice(&bytes);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Initialize — one-time setup. Creates the config account carrying
+// the dust floor. Bound to the program's upgrade authority (proven
+// against ProgramData, the bridge F-1 pattern): the floor is a
+// deployment decision, and the upgrade authority is the key that
+// already controls the program binary at the loader level, so this
+// grants it no power it does not structurally have. What it does
+// NOT create is an admin: after this one call there is no
+// instruction that changes the floor, and the authority has no
+// path to any launch, vault, or reputation account.
+// ---------------------------------------------------------------------------
+
+fn process_initialize(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    min_lock_amount: u64,
+) -> ProgramResult {
+    let iter = &mut accounts.iter();
+    let authority = next_account_info(iter)?;
+    let config_account = next_account_info(iter)?;
+    let programdata_account = next_account_info(iter)?;
+    let system_program = next_account_info(iter)?;
+
+    if !authority.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let (config_pda, config_bump) = config_pda(program_id);
+    if config_account.key != &config_pda {
+        return Err(LaunchError::InvalidPda.into());
+    }
+    // Exactly once. A program-owned config account means the floor
+    // is already set — refuse, whatever bytes it carries, rather
+    // than letting a second call reinterpret them.
+    if config_account.owner == program_id {
+        return Err(LaunchError::ConfigAlreadyInitialized.into());
+    }
+    verify_upgrade_authority(program_id, programdata_account, authority.key)?;
+    // Create-or-adopt like every other PDA here (self-audit F-2):
+    // the config address is just as predictable as the record's,
+    // and a dust pre-fund must not be able to brick setup forever.
+    create_pda_account(
+        authority,
+        config_account,
+        system_program,
+        program_id,
+        GuardConfig::LEN,
+        &[SEED_CONFIG, &[config_bump]],
+    )?;
+    save_config(
+        config_account,
+        &GuardConfig {
+            discriminator: DISCRIMINATOR_CONFIG,
+            min_lock_amount,
+        },
+    )?;
+    msg!(
+        "LaunchGuard: initialized — dust floor {} raw units",
+        min_lock_amount
+    );
     Ok(())
 }
 
@@ -198,6 +334,7 @@ fn process_register(
     let token_program = next_account_info(iter)?;
     let system_program = next_account_info(iter)?;
     let reputation_account = next_account_info(iter)?;
+    let config_account = next_account_info(iter)?;
 
     if !creator.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
@@ -224,6 +361,16 @@ fn process_register(
         return Err(LaunchError::InvalidPda.into());
     }
 
+    // The dust floor, from the config Initialize created. Loaded
+    // before any account is created: an uninitialized config fails
+    // the registration closed, and a wrong address is InvalidPda —
+    // there is no account a registrant can substitute to skip it.
+    let (config_pda, _) = config_pda(program_id);
+    if config_account.key != &config_pda {
+        return Err(LaunchError::InvalidPda.into());
+    }
+    let config = load_config(config_account, program_id)?;
+
     // The anti-rug core: supply must be provably fixed forever.
     let mint = Mint::unpack(&mint_account.try_borrow_data()?)?;
     if mint.mint_authority.is_some() {
@@ -247,12 +394,21 @@ fn process_register(
     // floor division let a 19-token supply register with a 1-token
     // lock — 5.26%, below the advertised minimum. A floor that
     // protects the protocol must never round in the user's favor.
-    // u128 throughout: supply * 10,000 + 9,999 cannot overflow.
+    // u128 throughout: supply * MIN_LOCK_BPS (1,000) plus the
+    // BPS_DENOMINATOR - 1 (9,999) ceiling term cannot overflow.
     let min_lock = ((mint.supply as u128) * (MIN_LOCK_BPS as u128)
         + (BPS_DENOMINATOR as u128 - 1))
         / (BPS_DENOMINATOR as u128);
     if (lock_amount as u128) < min_lock || lock_amount == 0 {
         return Err(LaunchError::LockTooSmall.into());
+    }
+    // The dust floor binds on top of the share: the effective
+    // minimum is max(10% of supply rounded up, floor). Checked
+    // after the share so a lock failing both is reported as the
+    // share failure it primarily is, and a lock passing the share
+    // but failing the floor names the floor.
+    if lock_amount < config.min_lock_amount {
+        return Err(LaunchError::LockBelowDustFloor.into());
     }
 
     // Creator's source account must be theirs, of this mint, and funded.
@@ -639,4 +795,178 @@ fn process_close_vault(program_id: &Pubkey, accounts: &[AccountInfo]) -> Program
         residual
     );
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for the mirrored upgrade-authority check. The
+// integration suite can only seed a well-formed ProgramData
+// account, so the structural rejections — wrong address, wrong
+// owner, truncated data, wrong variant, immutable program — are
+// pinned here, against this crate's own copy of the check
+// (war-room review of the dust floor, 2026-11-19: the mirror in
+// this crate must not be able to drift silently from the
+// bridge-common original it copies).
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{cell::RefCell, rc::Rc};
+
+    fn account<'a>(
+        key: &'a Pubkey,
+        owner: &'a Pubkey,
+        lamports: &'a mut u64,
+        data: &'a mut Vec<u8>,
+    ) -> AccountInfo<'a> {
+        AccountInfo {
+            key,
+            is_signer: false,
+            is_writable: true,
+            lamports: Rc::new(RefCell::new(lamports)),
+            data: Rc::new(RefCell::new(data)),
+            owner,
+            executable: false,
+            rent_epoch: 0,
+        }
+    }
+
+    fn programdata_bytes(authority: Option<Pubkey>) -> Vec<u8> {
+        let mut data = vec![0u8; 45];
+        data[0..4].copy_from_slice(&3u32.to_le_bytes());
+        data[4..12].copy_from_slice(&123u64.to_le_bytes());
+        if let Some(a) = authority {
+            data[12] = 1;
+            data[13..45].copy_from_slice(a.as_ref());
+        }
+        data
+    }
+
+    fn check(
+        program_id: &Pubkey,
+        key: &Pubkey,
+        owner: &Pubkey,
+        data: Vec<u8>,
+        payer: &Pubkey,
+    ) -> ProgramResult {
+        let mut lamports = 1_000_000u64;
+        let mut data = data;
+        let acct = account(key, owner, &mut lamports, &mut data);
+        verify_upgrade_authority(program_id, &acct, payer)
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn upgrade_authority_accepts_the_recorded_authority() {
+        let loader = solana_program::bpf_loader_upgradeable::id();
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let pd = solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id);
+        let authority = Pubkey::new_unique();
+        assert_eq!(
+            check(
+                &program_id,
+                &pd,
+                &loader,
+                programdata_bytes(Some(authority)),
+                &authority
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn upgrade_authority_rejects_a_stranger() {
+        let loader = solana_program::bpf_loader_upgradeable::id();
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let pd = solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id);
+        let authority = Pubkey::new_unique();
+        let stranger = Pubkey::new_unique();
+        assert_eq!(
+            check(
+                &program_id,
+                &pd,
+                &loader,
+                programdata_bytes(Some(authority)),
+                &stranger
+            ),
+            Err(LaunchError::NotUpgradeAuthority.into())
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn upgrade_authority_rejects_an_immutable_program() {
+        // Option tag 0: no upgrade authority exists, so nobody can
+        // initialize — the check fails closed.
+        let loader = solana_program::bpf_loader_upgradeable::id();
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let pd = solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id);
+        let authority = Pubkey::new_unique();
+        assert_eq!(
+            check(
+                &program_id,
+                &pd,
+                &loader,
+                programdata_bytes(None),
+                &authority
+            ),
+            Err(ProgramError::InvalidAccountData)
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn upgrade_authority_rejects_wrong_address_and_wrong_owner() {
+        let loader = solana_program::bpf_loader_upgradeable::id();
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let pd = solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id);
+        let authority = Pubkey::new_unique();
+        // The right bytes at the wrong address prove nothing.
+        let wrong = Pubkey::new_unique();
+        assert_eq!(
+            check(
+                &program_id,
+                &wrong,
+                &loader,
+                programdata_bytes(Some(authority)),
+                &authority
+            ),
+            Err(ProgramError::InvalidAccountData)
+        );
+        // The right address not owned by the loader proves nothing.
+        assert_eq!(
+            check(
+                &program_id,
+                &pd,
+                &program_id,
+                programdata_bytes(Some(authority)),
+                &authority
+            ),
+            Err(ProgramError::InvalidAccountData)
+        );
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn upgrade_authority_rejects_truncated_and_wrong_variant_data() {
+        let loader = solana_program::bpf_loader_upgradeable::id();
+        let program_id = Pubkey::new_from_array([42u8; 32]);
+        let pd = solana_program::bpf_loader_upgradeable::get_program_data_address(&program_id);
+        let authority = Pubkey::new_unique();
+        // Truncated: shorter than the 45-byte metadata.
+        let mut short = programdata_bytes(Some(authority));
+        short.truncate(20);
+        assert_eq!(
+            check(&program_id, &pd, &loader, short, &authority),
+            Err(ProgramError::InvalidAccountData)
+        );
+        // Wrong variant tag (2 = Program, not 3 = ProgramData).
+        let mut wrong_variant = programdata_bytes(Some(authority));
+        wrong_variant[0..4].copy_from_slice(&2u32.to_le_bytes());
+        assert_eq!(
+            check(&program_id, &pd, &loader, wrong_variant, &authority),
+            Err(ProgramError::InvalidAccountData)
+        );
+    }
 }

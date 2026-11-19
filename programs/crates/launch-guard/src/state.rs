@@ -8,9 +8,11 @@ pub const SEED_LAUNCH: &[u8] = b"launch";
 pub const SEED_VAULT: &[u8] = b"vault";
 pub const SEED_AUTHORITY: &[u8] = b"launch-authority";
 pub const SEED_REPUTATION: &[u8] = b"reputation";
+pub const SEED_CONFIG: &[u8] = b"config";
 
 pub const DISCRIMINATOR_LAUNCH: u8 = 1;
 pub const DISCRIMINATOR_REPUTATION: u8 = 2;
+pub const DISCRIMINATOR_CONFIG: u8 = 3;
 
 pub const STATE_LOCKED: u8 = 1;
 pub const STATE_RELEASED: u8 = 2;
@@ -70,6 +72,37 @@ impl CreatorReputation {
     pub const LEN: usize = 1 + 32 + 8 + 8 + 8 + 8;
 }
 
+/// Program-wide configuration, created exactly once by
+/// `Initialize`. No instruction in this program edits it
+/// afterwards, so the dust floor below is set once at
+/// deployment, not an admin setting. (That holds for this
+/// program binary: whoever holds the upgrade authority can
+/// replace the binary itself, as with any upgradeable program
+/// — see LAUNCH-GUARD.md.)
+///
+/// The floor exists because the 10% rule alone admits dust
+/// launches: a 19-token supply satisfies it with a 2-token lock,
+/// and a completed dust lock counts the same in a creator's
+/// reputation as a large one (see LAUNCH-GUARD.md). A launch now
+/// must lock at least `min_lock_amount` raw units on top of the
+/// 10% share. The VALUE is deliberately not in the code: it is
+/// chosen when the program is initialized at deployment, with
+/// the auditor's input — the same deployment-gate treatment the
+/// bridge gives its minimum-transfer floor (THREAT-MODEL.md).
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
+pub struct GuardConfig {
+    pub discriminator: u8,
+    /// Dust floor: minimum lock size, in raw token units, that
+    /// `RegisterAndLock` accepts on top of the 10%-of-supply
+    /// minimum. Zero means the floor is set to nothing and only
+    /// the 10% rule binds.
+    pub min_lock_amount: u64,
+}
+
+impl GuardConfig {
+    pub const LEN: usize = 1 + 8;
+}
+
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq)]
 pub enum LaunchInstruction {
     /// Verify revoked authorities, create record + vault, lock tokens.
@@ -87,6 +120,14 @@ pub enum LaunchInstruction {
     /// only after the full locked amount has left the vault — it
     /// can never touch the lock itself.
     CloseVault {},
+    /// One-time setup: create the config account carrying the
+    /// dust floor (`GuardConfig::min_lock_amount`). The caller
+    /// must be the program's upgrade authority, proven against
+    /// the ProgramData account — the same binding the bridge
+    /// programs' Initialize uses (self-audit F-1). Appended last
+    /// so the existing variants keep their borsh indices. There
+    /// is no instruction that changes the floor afterwards.
+    Initialize { min_lock_amount: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -114,6 +155,23 @@ pub enum LaunchError {
     /// The vault stays sealed — residual recovery exists only once
     /// the locked amount itself is already out.
     NotReleased = 13,
+    /// The lock satisfies the 10%-of-supply minimum but is below
+    /// the dust floor set at Initialize (`GuardConfig`). The two
+    /// minimums are reported separately so a registrant can tell
+    /// which one rejected the lock.
+    LockBelowDustFloor = 14,
+    /// RegisterAndLock was called before Initialize created the
+    /// config account. Registration fails closed: without the
+    /// config there is no floor to check against, and silently
+    /// skipping the check would make the floor optional.
+    ConfigNotInitialized = 15,
+    /// Initialize's payer is not the program's upgrade authority
+    /// recorded in the ProgramData account.
+    NotUpgradeAuthority = 16,
+    /// Initialize was called after the config account already
+    /// exists. The floor is set exactly once; no instruction in
+    /// this program changes, raises, or lowers it afterwards.
+    ConfigAlreadyInitialized = 17,
 }
 
 impl From<LaunchError> for ProgramError {

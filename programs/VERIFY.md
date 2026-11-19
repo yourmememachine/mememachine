@@ -289,3 +289,30 @@ demo launch). SBF rebuilt: launch_guard.so
 (135,416 B; deterministic — two builds, identical hash).
 `make verify` green against `10840ba`; repo total **257**
 (188 bridge workspace + 46 programs + 23 fork). Not deployed.
+
+### Addendum — LaunchGuard dust floor (2026-11-19)
+
+LaunchGuard gained a fifth instruction, `Initialize`, and a
+config PDA carrying a dust floor (minimum lock size in raw
+units, enforced on top of the 10% share; spec:
+`programs/LAUNCH-GUARD.md`). `RegisterAndLock` now takes the
+config PDA as a tenth account — a breaking instruction-ABI
+change for the pre-floor 9-account form, which fails with
+`NotEnoughAccountKeys` (the program is not deployed; no live
+clients). The change was reviewed by six independent reviewer
+seats (program security, floor-math correctness, adversarial,
+tests/edge cases, honesty/docs, build/integration) and the
+surviving findings were fixed with regression tests: unit
+tests pinning every structural rejection of the mirrored
+`verify_upgrade_authority` (wrong address, wrong owner,
+truncated data, wrong variant, immutable program), and
+integration tests for the non-zero both-fail ordering, the
+floor == share tie, floors above supply and at `u64::MAX`,
+the legacy 9-account form, Initialize's wrong-PDA and
+non-signer rejections, and reputation counting across a floor
+rejection. Suite now **62 passed, 0 failed** (16 integration
++ 18 adversarial + 1 demo launch + 22 dust floor + 5 unit).
+SBF rebuilt: launch_guard.so
+`8153dd4f755e0b0c2be088635f0b125206d4f9d49214cfd1d63d2f4ba30a2c16`
+(139,352 B; deterministic — two builds, identical hash).
+Not deployed.

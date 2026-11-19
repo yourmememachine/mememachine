@@ -59,7 +59,10 @@ current limitations are in LIMITATIONS.md.
   and freeze authorities already revoked (an irreversible SPL
   state — a test proves they cannot be regained), at least 10% of
   supply locked for at least 30 days, releasable only to the
-  creator and only after expiry. There is no admin key.
+  creator and only after expiry. There is no admin key over
+  launches; the program's one privileged call is a one-time
+  Initialize (upgrade-authority-bound, §5) that sets the dust
+  floor and touches no launch account.
 - **Parser attacks.** The precompile/sysvar parser treats all
   transaction-supplied bytes as hostile: bounds-checked in-crate,
   fuzzed (which already caught one real panic in an upstream

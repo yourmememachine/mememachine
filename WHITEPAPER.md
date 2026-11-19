@@ -27,7 +27,9 @@ Machine's answer is to move the protections into the chain itself:
    registers with LaunchGuard must have its mint and freeze authorities
    permanently revoked, and its creator must lock at least 10% of supply
    for at least 30 days in a program vault. Locks can be extended, never
-   shortened. There is no admin key. Compliance is not a promise a
+   shortened. There is no admin key over launches or locks (the
+   program's only privileged call is a one-time setup that sets a
+   minimum lock size — §5.1). Compliance is not a promise a
    creator makes — it is a state any observer can verify from on-chain
    accounts, and every launch builds a public, permanent creator
    reputation record.
@@ -323,9 +325,21 @@ After registration:
   back to the creator and closes the vault; while a launch is locked
   or expired-but-unreleased it always fails, so it has no path to
   any part of the lock.
-- **There is no admin.** No pause, no override, no upgrade authority
-  held back by the team. The standard's credibility comes from the
-  absence of an escape hatch.
+- **There is no admin over launches.** No pause, no override, no
+  key that can touch a launch, a lock, a vault, or a reputation
+  record. The one privileged call in the program is its one-time
+  setup: `Initialize`, callable only by the program's upgrade
+  authority (proven against the ProgramData account), exactly
+  once, which sets a **dust floor** — a minimum lock size in raw
+  units on top of the 10% share — in a config account no later
+  instruction can change. Registration before `Initialize` fails
+  closed. The floor's value is a deployment-gate decision, not a
+  constant in the code; it may be zero (share rule only), and an
+  oversized value can make small-supply mints unregistrable,
+  which is why the choice belongs to the deployment gate. The
+  standard's credibility comes from the absence of an escape
+  hatch over launches — not from pretending setup needs no key
+  at all.
 
 ### 5.2 Creator reputation
 
@@ -636,7 +650,9 @@ not pretend otherwise. The genesis, fee schedule, and distributions
 are fixed in the repository and published; changing them requires a
 new genesis or a network upgrade — both public events. The bridge's
 admin powers are a 2-of-3 multisig limited to pause, unpause, kill,
-and relayer rotation; LaunchGuard has no admin at all. No governance
+and relayer rotation; LaunchGuard has no admin over launches (its
+only privileged call is the one-time, upgrade-authority-bound
+setup that sets the dust floor — §5.1). No governance
 token is planned. The direction — validator-set governance as the
 network becomes multi-validator, with changes proposed in the open —
 will be claimed only when a mechanism exists and has been used.

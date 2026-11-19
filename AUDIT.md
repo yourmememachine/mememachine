@@ -23,7 +23,7 @@ chain configuration gates any public chain launch. Both scopes:
 | Machine bridge program | `bridge/crates/machine-bridge/` | Mint/burn, kill-switch, no admin mint path exists — verify that claim. |
 | Shared logic | `bridge/crates/bridge-common/` | Message format (195-byte canonical encoding), hash, 3-of-5 attestation verification via the ed25519 precompile + instructions sysvar (switched from in-program ed25519-dalek in the 2026-11-14 code-review changes; the precompile-instruction parser in `verify_precompile_attestation` is a priority review target), nonce replay protection, absolute + dynamic percentage caps, authority checks. Scope size at those changes: 4,706 lines of Rust across the five in-scope crates (bridge-common 1,168, solana-lock 547, machine-bridge 518, relayer 2,010, LaunchGuard 463; tests excluded). |
 | Off-chain relayer | `bridge/crates/relayer/` | Finalized-only signing rule, deterministic message construction (expiry derived from source slot), quorum collection with disagreement blocking, submitter account ordering. A relayer bug that signs a non-finalized or mis-built message is in scope even though quorum + on-chain checks should contain it. |
-| LaunchGuard launch standard | `programs/crates/launch-guard/` | Added 2026-11-14. Gates LaunchGuard's own mainnet use (it custodies locked creator tokens), not the bridge. Verify: registration truly requires revoked mint+freeze authorities, the ≥10% / ≥30-day (6,480,000-slot) lock floor, no early-release or lock-shortening path, PDA authority over the vault. Spec: `programs/LAUNCH-GUARD.md`. |
+| LaunchGuard launch standard | `programs/crates/launch-guard/` | Added 2026-11-14. Gates LaunchGuard's own mainnet use (it custodies locked creator tokens), not the bridge. Verify: registration truly requires revoked mint+freeze authorities, the ≥10% / ≥30-day (6,480,000-slot) lock floor, no early-release or lock-shortening path, PDA authority over the vault. Dust floor added 2026-11-19: a one-time `Initialize` (upgrade authority proven against ProgramData — a hand-mirrored copy of bridge-common's `verify_upgrade_authority` lives in this crate's processor and is a priority review target) creates a config PDA carrying a minimum lock size in raw units that registration enforces on top of the 10% share; verify the floor cannot be bypassed or changed by any later instruction, and that registration fails closed before Initialize. Spec: `programs/LAUNCH-GUARD.md`. |
 | PQ Vault | `programs/crates/pq-vault/` | Added 2026-11-19. Gates PQ Vault's own mainnet use (it custodies stored funds), not the bridge. Withdrawals and rotation are authorized only by RFC 8391 WOTS+ one-time signatures; there is no Ed25519 path to the funds. Verify: one-time discipline is program-enforced (strict in-order spend, the index increments before the transfer), rotation cannot be authorized by anything but a one-time signature, exhaustion freezes fail-closed, the chunked signature buffer is bound to the exact withdrawal digest. Spec: `programs/PQ-VAULT.md`; verification record: `programs/PQ-VERIFY.md`. |
 | Key management | `bridge/deploy/DEPLOY-BRIDGE.md` step 2 | Fresh keys on deployment hosts, role separation, multisig + 48h timelock for upgrades. Process review, not code. |
 | Deployment + drills | `bridge/deploy/`, `bridge/drills/` | Caps translation (`caps.py`), initialization parameters, test-crossing / pause / outage drill results. |
@@ -291,6 +291,31 @@ chain configuration gates any public chain launch. Both scopes:
 > in `programs/PQ-VAULT.md`. SBF built: pq_vault.so
 > `b6a52b93…` (148,944 B, deterministic). Programs
 > workspace 46 → 63; repo total 283. **Program scope
+> changed — auditors must quote against the new HEAD.**
+>
+> **Scope update (2026-11-19, later — LaunchGuard dust
+> floor, SBF REBUILT):** LaunchGuard gained a fifth
+> instruction, `Initialize { min_lock_amount }`, and a
+> config PDA (seeds `["config"]`) carrying a dust floor —
+> a minimum lock size in raw units enforced by
+> `RegisterAndLock` on top of the 10% share (effective
+> minimum: max(ceiling-divided share, floor)). Initialize
+> is one-time and bound to the program's upgrade authority
+> via a ProgramData check mirrored from bridge-common
+> (self-audit F-1 pattern); registration before Initialize
+> fails closed. **Breaking instruction-ABI change:**
+> `RegisterAndLock` now takes the config PDA as a tenth
+> account (appended last); the pre-floor 9-account form
+> fails with `NotEnoughAccountKeys`. The program is not
+> deployed and has no live clients. The change went
+> through a six-seat review (program security, floor-math
+> correctness, adversarial, tests/edge cases, honesty/docs,
+> build/integration) before shipping; the floor's honest
+> limits (raw units, no decimals awareness, zero is a
+> legitimate value, an oversized value can make a mint
+> unregistrable) are documented in
+> `programs/LAUNCH-GUARD.md`. SBF rebuilt: launch_guard.so
+> `8153dd4f…` (139,352 B, deterministic). **Program scope
 > changed — auditors must quote against the new HEAD.**
 
 ### Scope B — Chain configuration (gating: public chain claims)

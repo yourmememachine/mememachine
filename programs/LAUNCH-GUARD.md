@@ -17,9 +17,12 @@ program that ships **with Machine itself**:
    print more of that token.
 2. **Creator skin locked, by the program.** At registration the
    creator must lock at least **10% of total supply** in a vault owned
-   by a program PDA for at least **30 days**. There is no admin key,
-   no early-release instruction, and no instruction that shortens a
-   lock. The creator can only *extend* a lock, never reduce it.
+   by a program PDA for at least **30 days**. There is no admin key
+   over launches, locks, or vaults, no early-release instruction,
+   and no instruction that shortens a lock. The creator can only
+   *extend* a lock, never reduce it. The single privileged call in
+   the program is its one-time setup (`Initialize`, below), which
+   sets the dust floor and touches nothing else.
 
 Anyone can read a launch's record on-chain and verify both facts
 without trusting the creator, a launchpad, or us. That is the whole
@@ -36,23 +39,25 @@ is not the classic SPL Token program is not a LaunchGuard launch.
 
 | Instruction | What it does |
 |---|---|
-| `RegisterAndLock { lock_amount, lock_slots }` | Verifies revoked authorities + fixed supply, creates the launch record and vault PDAs, transfers `lock_amount` from the creator into the vault. Fails if: authorities not revoked, supply is zero, lock < 10% of supply, lock period < 30 days or > 5 years, or a record already exists for the mint. |
+| `RegisterAndLock { lock_amount, lock_slots }` | Verifies revoked authorities + fixed supply, creates the launch record and vault PDAs, transfers `lock_amount` from the creator into the vault. Fails if: authorities not revoked, supply is zero, lock < 10% of supply, lock below the dust floor (see `Initialize`), lock period < 30 days or > 5 years, a record already exists for the mint, or `Initialize` has not run yet (registration fails closed with `ConfigNotInitialized` — there is no way to register floor-less). **Breaking change (2026-11-19):** this instruction now takes a tenth account, the config PDA (appended last). Clients built against the old 9-account form fail with `NotEnoughAccountKeys`; the program is not deployed and has no live clients, so nothing in production breaks, but any testnet client must be rebuilt in lockstep. |
 | `ExtendLock { additional_slots }` | Creator only, while locked. Pushes the release slot further out (never past 5 years from the registration slot — the maximum is a total lock period, not a per-extension window). There is deliberately no instruction that moves it earlier. |
 | `Release {}` | Creator only, only after the lock expires. Returns the full locked amount from the vault to the creator and marks the record Released. Before expiry it always fails. |
 | `CloseVault {}` | Creator only, and only after `Release` has completed. Sweeps any residual balance out of the vault and closes the vault account, returning its rent to the creator. The vault is a normal token account, so anyone can send extra tokens into it; `Release` moves exactly the locked amount, and without this instruction the excess would be stuck forever. Because it is gated on the record's Released state — set only after the full locked amount has left the vault — it has no path to any part of the lock: while a launch is locked or merely expired-but-unreleased, it always fails. |
+| `Initialize { min_lock_amount }` | One-time setup, appended last so the existing instructions keep their indices. Creates the **config PDA** (seeds `["config"]`) carrying the **dust floor**: the minimum lock size, in raw token units, that `RegisterAndLock` accepts on top of the 10% share. The caller must be the program's **upgrade authority**, proven against the ProgramData account (the same binding the bridge programs use, self-audit F-1). It runs exactly once — a second call fails with `ConfigAlreadyInitialized` — and no instruction changes the floor afterwards. The upgrade authority gains no path to any launch, vault, or reputation account from this: after the one call it is exactly as powerless over launches as everyone else. (It retains the loader-level power any upgrade authority has — replacing the program binary — for as long as the program stays upgradeable; see the honest limits.) |
 
 Locks are counted in **slots, not wall-clock time** — the same
 determinism rule the bridge uses. Slot counts cannot drift or be
 nudged the way validator timestamps can, and a lock's expiry is
 exactly computable from the registration slot.
 
-## Parameters (v1, compile-time constants)
+## Parameters (v1)
 
 | Parameter | Value |
 |---|---|
-| Minimum lock share | 10% of total supply (1000 bps) |
-| Minimum lock period | 30 days = 6,480,000 slots (400 ms target slot time) |
-| Maximum lock period | 5 years = 394,200,000 slots |
+| Minimum lock share | 10% of total supply (1000 bps, compile-time constant) |
+| Minimum lock period | 30 days = 6,480,000 slots (400 ms target slot time; compile-time constant) |
+| Maximum lock period | 5 years = 394,200,000 slots (compile-time constant) |
+| Dust floor (`min_lock_amount`) | **Set once by `Initialize` at deployment — deliberately not a constant in the code.** The value is a deployment-gate decision (THREAT-MODEL.md §5), chosen with the auditor's input for the deployment's mint population. Zero is a legitimate choice: it leaves the 10% share as the only minimum. |
 
 ## Creator reputation (on-chain)
 
@@ -74,12 +79,17 @@ long history is meaningful precisely because it can't be bought or
 transferred); it counts only what LaunchGuard can see —
 launches and completions inside this standard; and the counters
 are **unweighted** — a completed lock on a dust-supply mint (a
-19-token supply locking 2 tokens satisfies the 10% floor) counts
+19-token supply locking 2 tokens satisfies the 10% share) counts
 exactly the same as a completed lock on a large launch, so a
 reputation count alone proves only that locks were waited out,
 never how much value stood behind them. Anyone weighing a
 creator's reputation should read it alongside each launch
-record's `locked_amount` and `total_supply`.
+record's `locked_amount` and `total_supply`. The dust floor
+(below) removes the degenerate tiny-supply shape — under a
+non-zero floor, a 19-token supply can no longer register with a
+2-token lock — but it does not weight the counters, and it does
+not make a lock *valuable*: see the floor's own limits in the
+next section.
 
 ## What LaunchGuard does NOT do (honest limits)
 
@@ -116,6 +126,23 @@ record's `locked_amount` and `total_supply`.
   registrant's own account. Holders of a registered launch should
   check their own account is not frozen rather than assume the
   revoked authority means no account is.
+- The **dust floor is a raw-unit count, and narrow by design**.
+  It eliminates sub-floor tiny-supply registrations (the
+  19-token / 2-token shape) and nothing more. It is priced in
+  units the issuer prints for free: a creator who sets a large
+  supply pays the floor out of their own issue at no more real
+  cost than before, so the floor does **not** stop reputation
+  farming or make a lock valuable — it only forbids the
+  degenerate small-supply form. It has **no decimals awareness**:
+  one global value means different whole-token amounts for
+  mints with different decimals, which the deployment gate must
+  reason about when choosing it. And because the value is set
+  exactly once and no instruction changes it, a badly chosen
+  value is permanent for that deployment: **zero** silently
+  leaves only the 10% share binding, and a floor **above a
+  mint's whole supply** makes that mint unregistrable (locking
+  the entire supply still fails the floor). Choose the value
+  like a deployment decision, because it is one.
 - It is **not audited and not deployed**. It joins the audit scope
   (AUDIT.md) and the same BRIDGE.md §5-style gates before any real
   launch is pointed at it.
@@ -152,8 +179,15 @@ For a mint `M` and the LaunchGuard program `P`, inspect:
    `P`. This program-derived address is the only authority that
    can move vault funds, and the program moves them only to the
    recorded creator, only after `lock_until_slot`.
+5. **The config PDA** — seeds `["config"]` under `P`. It must
+   exist (registration is impossible before `Initialize` creates
+   it) and its `min_lock_amount` is the dust floor the launch was
+   gated on: the record's `locked_amount` must be at least that
+   many raw units as well as at least 10% of supply. A floor of
+   zero means the deployment chose to run on the share rule
+   alone — check the value, don't assume it.
 
-If all four check out, the lock is real: the supply cannot grow,
+If all five check out, the lock is real: the supply cannot grow,
 no account can be frozen by the creator from that point on (an
 account frozen *before* revocation stays frozen — see the honest
 limits above), and the locked tokens cannot move early — those
@@ -174,7 +208,10 @@ invariants above instead of trusting the record. Parsing is strict
 (owner + discriminator + exact length), so foreign accounts are
 ignored, never misread — and the registry never claims a check it
 did not run: the `vault_*` / `authorities_revoked` fields are null
-without `--verify`. This is the piece that turns LaunchGuard from
+without `--verify`. One known gap: the export does not yet surface
+the config PDA or its dust floor, so floor compliance cannot be
+verified from the feed alone — read the config account directly
+(check 5 above) until the export carries it. This is the piece that turns LaunchGuard from
 a standard you can verify into a standard a checker can consume:
 launch standards elsewhere are PDFs; ours is a feed.
 
