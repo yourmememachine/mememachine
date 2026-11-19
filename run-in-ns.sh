@@ -14,6 +14,16 @@ set -e
 FAKE_DIR="${SYSCTL_FAKE_DIR:-/tmp/sysctl-fake}"
 for k in rmem_max wmem_max rmem_default wmem_default; do
     [ -f "$FAKE_DIR/$k" ] || { echo "missing fake sysctl file: $FAKE_DIR/$k" >&2; exit 1; }
+    # The default directory is a predictable path in a shared /tmp:
+    # never bind-mount contents nobody checked. Each file must hold
+    # exactly one positive integer (the sysctl value it stands for).
+    v=$(cat "$FAKE_DIR/$k")
+    case "$v" in
+        ''|*[!0-9]*)
+            echo "fake sysctl file $FAKE_DIR/$k does not contain a positive integer (got: '$v')" >&2
+            exit 1 ;;
+    esac
+    [ "$v" -gt 0 ] || { echo "fake sysctl file $FAKE_DIR/$k does not contain a positive integer (got: '$v')" >&2; exit 1; }
 done
 exec unshare --user --mount --map-root-user bash -c '
 mount --bind "$1/rmem_max" /proc/sys/net/core/rmem_max

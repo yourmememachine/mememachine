@@ -42,14 +42,19 @@ if [ "$FRESH" = 1 ]; then
     rm -rf ledger-test
 fi
 
-if [ ! -d ledger-test ]; then
+if [ ! -f ledger-test/genesis.bin ]; then
     echo "Creating working ledger from shipped genesis..."
+    rm -rf ledger-test
     cp -r ledger ledger-test
-    cp keys/founder.json ledger-test/validator-keypair.json
-    cp keys/vote.json ledger-test/vote-account-keypair.json
-    cp keys/stake.json ledger-test/stake-account-keypair.json
-    cp keys/faucet.json ledger-test/faucet-keypair.json
 fi
+# Complete an interrupted seeding: the keypair copies happen after
+# the ledger copy, so a first run killed in between leaves a
+# ledger-test that exists but has no keypairs — and the old
+# directory-exists check then skipped seeding forever.
+[ -f ledger-test/validator-keypair.json ] || cp keys/founder.json ledger-test/validator-keypair.json
+[ -f ledger-test/vote-account-keypair.json ] || cp keys/vote.json ledger-test/vote-account-keypair.json
+[ -f ledger-test/stake-account-keypair.json ] || cp keys/stake.json ledger-test/stake-account-keypair.json
+[ -f ledger-test/faucet-keypair.json ] || cp keys/faucet.json ledger-test/faucet-keypair.json
 
 echo "Starting Machine validator (genesis 32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb)..."
 echo "  RPC: http://127.0.0.1:8899   Faucet: http://127.0.0.1:9900"

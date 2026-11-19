@@ -45,6 +45,21 @@ if [ -d "$KEYS_DIR" ] && [ "$(ls -A "$KEYS_DIR" 2>/dev/null)" ]; then
         echo "Back them up first, or re-run with --force to delete and regenerate." >&2
         exit 1
     fi
+    # Once a genesis exists, it binds these exact pubkeys: the
+    # primordial balances and the three bootstrap validator identities
+    # are allocated to them at genesis, and these JSON files are the
+    # ONLY copies (generation is silent, no seed phrase is kept).
+    # Deleting them after that point makes the treasury, allocation
+    # buckets and validator identities permanently unusable while the
+    # chain referencing them still exists. Refuse outright — an
+    # operator who truly means to abandon that genesis must remove
+    # the ledger and genesis-info.env by hand first.
+    if [ -f "$SCRIPT_DIR/genesis-info.env" ] || [ -d "$SCRIPT_DIR/ledger" ]; then
+        echo "ERROR: a livenet genesis already exists (ledger/ / genesis-info.env) and is bound to these keypairs." >&2
+        echo "Refusing to delete the only copies of the keys that genesis allocates to." >&2
+        echo "If this network is being abandoned, delete livenet/ledger and livenet/genesis-info.env manually first." >&2
+        exit 1
+    fi
     echo "WARNING: --force given. Deleting existing keypairs in $KEYS_DIR ..."
     rm -rf "$KEYS_DIR"
 fi

@@ -5,4 +5,4 @@
 # ledger/, ledger-test/ or keys/. See test_fork_scripts.py header.
 set -e
 cd "$(dirname "$0")/.."
-python3 -m unittest tests.test_fork_scripts -v
+python3 -m unittest tests.test_fork_scripts tests.test_ops_scripts -v

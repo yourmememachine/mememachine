@@ -16,6 +16,15 @@ LimitNOFILE=1000000
 LimitNPROC=8192
 KillSignal=SIGTERM
 TimeoutStopSec=60
+# Sandboxing: the validator is the most exposed process on the host
+# (untrusted gossip/TPU/RPC input) and runs beside livenet/keys/.
+# Keep a compromise from reading the whole install tree, writing
+# outside the ledger dirs, or persisting through the start scripts.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/mememachine/livenet/ledgers
 
 [Install]
 WantedBy=multi-user.target

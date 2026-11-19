@@ -50,16 +50,9 @@ INFO="$SCRIPT_DIR/genesis-info.env"
 
 [ -x "$AGAVE_BIN/agave-validator" ] || { echo "ERROR: $AGAVE_BIN/agave-validator not found. Run ./install.sh from the repo root first." >&2; exit 1; }
 
-# agave-validator hard-requires a 1,000,000 file-descriptor limit.
-HARD_NOFILE=$(ulimit -Hn)
-if [ "$HARD_NOFILE" != "unlimited" ] && [ "$HARD_NOFILE" -lt 1000000 ]; then
-    echo "ERROR: file-descriptor hard limit is $HARD_NOFILE, agave-validator needs 1,000,000." >&2
-    echo "Fix it in /etc/security/limits.conf and systemd (DefaultLimitNOFILE=1000000), then reboot." >&2
-    echo "See DEPLOY.md step 2. This host cannot run a livenet validator as it stands." >&2
-    exit 1
-fi
-ulimit -n 1000000 2>/dev/null || true
-
+# Configuration and identity checks come before the host fd-limit
+# check below: a wrong keypair or a bad gossip address is an operator
+# error the operator should see first, on any host.
 eval "PUBLIC_IP=\$V${N}_PUBLIC_IP"
 eval "GOSSIP_PORT=\$V${N}_GOSSIP_PORT"
 eval "DYNAMIC_RANGE=\$V${N}_DYNAMIC_RANGE"
@@ -67,9 +60,16 @@ eval "RPC_PORT=\$V${N}_RPC_PORT"
 eval "RPC_BIND=\$V${N}_RPC_BIND"
 
 if [ -z "$PUBLIC_IP" ]; then
-    PUBLIC_IP=$(curl -s --max-time 10 https://ifconfig.me || true)
+    PUBLIC_IP=$(curl --fail -s --max-time 10 https://ifconfig.me || true)
     [ -n "$PUBLIC_IP" ] || { echo "ERROR: could not auto-detect the public IP. Set V${N}_PUBLIC_IP in validators.conf." >&2; exit 1; }
     echo "Auto-detected public IP: $PUBLIC_IP"
+fi
+# The gossip host is advertised to the whole network; never advertise
+# an unvalidated third-party response (an error page, a CDN address,
+# a hijacked answer) as this validator's identity.
+if ! printf '%s' "$PUBLIC_IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[0-9a-fA-F:]*:[0-9a-fA-F:]+$'; then
+    echo "ERROR: public IP '$PUBLIC_IP' is not a valid IP address. Set V${N}_PUBLIC_IP in validators.conf." >&2
+    exit 1
 fi
 
 KEYS_DIR="$SCRIPT_DIR/keys"
@@ -79,6 +79,19 @@ VOTE_KEY="$KEYS_DIR/v$N-vote.json"
 [ -f "$IDENTITY_KEY" ] || { echo "ERROR: $IDENTITY_KEY not found. Run ./generate-keys.sh first." >&2; exit 1; }
 [ -f "$VOTE_KEY" ] || { echo "ERROR: $VOTE_KEY not found." >&2; exit 1; }
 eval "VOTE_ACCOUNT=\$V${N}_VOTE"
+
+# The keypair on disk must be the validator the genesis expects.
+# Keys are copied between hosts for the 3-VPS setup, and a swapped or
+# regenerated identity otherwise "starts" fine and simply never votes
+# correctly — fail here, loudly, instead.
+[ -x "$AGAVE_BIN/solana-keygen" ] || { echo "ERROR: $AGAVE_BIN/solana-keygen not found. Run ./install.sh from the repo root first." >&2; exit 1; }
+eval "EXPECTED_IDENTITY=\$V${N}_IDENTITY"
+ACTUAL_IDENTITY=$("$AGAVE_BIN/solana-keygen" pubkey "$IDENTITY_KEY")
+if [ "$ACTUAL_IDENTITY" != "$EXPECTED_IDENTITY" ]; then
+    echo "ERROR: $IDENTITY_KEY does not match V${N}_IDENTITY in genesis-info.env (keypair is $ACTUAL_IDENTITY, genesis expects $EXPECTED_IDENTITY)." >&2
+    echo "The keypairs on this host are not the ones the genesis was built from. Restore the right keys; do not regenerate them." >&2
+    exit 1
+fi
 
 if [ ! -f "$LEDGER_DIR/genesis.bin" ]; then
     echo "First boot: copying canonical livenet genesis into $LEDGER_DIR ..."
@@ -113,7 +126,7 @@ if [ "$N" != "1" ]; then
         echo "WARNING: V1_PUBLIC_IP not set in validators.conf — assuming validator 1 is on this host."
         echo "If validator 1 runs on another host, set V1_PUBLIC_IP in validators.conf and restart."
     fi
-    ARGS+=( --entrypoint "$V1_PUBLIC_IP:8001" --known-validator "$V1_IDENTITY" )
+    ARGS+=( --entrypoint "$V1_PUBLIC_IP:$V1_GOSSIP_PORT" --known-validator "$V1_IDENTITY" )
 else
     # Validator 1 is the public RPC node: serve transaction history.
     ARGS+=( --enable-rpc-transaction-history )
@@ -122,7 +135,19 @@ fi
 echo "Starting Machine validator $N"
 echo "  genesis: $GENESIS_HASH (shred $SHRED_VERSION)"
 echo "  gossip:  $PUBLIC_IP:$GOSSIP_PORT   RPC: $RPC_BIND:$RPC_PORT"
-[ "$N" != "1" ] && echo "  entrypoint: $V1_PUBLIC_IP:8001 (validator 1)"
+[ "$N" != "1" ] && echo "  entrypoint: $V1_PUBLIC_IP:$V1_GOSSIP_PORT (validator 1)"
+
+# agave-validator hard-requires a 1,000,000 file-descriptor limit.
+# Checked last, just before launch, so the configuration and identity
+# errors above are what an operator sees first on a misconfigured host.
+HARD_NOFILE=$(ulimit -Hn)
+if [ "$HARD_NOFILE" != "unlimited" ] && [ "$HARD_NOFILE" -lt 1000000 ]; then
+    echo "ERROR: file-descriptor hard limit is $HARD_NOFILE, agave-validator needs 1,000,000." >&2
+    echo "Fix it in /etc/security/limits.conf and systemd (DefaultLimitNOFILE=1000000), then reboot." >&2
+    echo "See DEPLOY.md step 2. This host cannot run a livenet validator as it stands." >&2
+    exit 1
+fi
+ulimit -n 1000000 2>/dev/null || true
 
 if [ "$BACKGROUND" = 1 ]; then
     nohup "$AGAVE_BIN/agave-validator" "${ARGS[@]}" > "$SCRIPT_DIR/ledgers/v$N-stdout.log" 2>&1 &

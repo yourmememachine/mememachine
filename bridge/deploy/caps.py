@@ -12,15 +12,30 @@ vault's locked supply:
 At deployment the locked supply starts at 0, so caps must be set
 against the *planned* initial locked supply for the capped-mainnet
 phase, and revisited by multisig + timelock as it grows. This script
-does the arithmetic and refuses nonsense (daily < per-tx, zeros):
+does the arithmetic and refuses nonsense (daily < per-tx, zeros,
+percentages above 100, non-finite percentages, and results that do
+not fit the programs' u64 cap fields):
 
     python3 bridge/deploy/caps.py --planned-locked-supply 10000000000
 
 Output is in raw base units, the unit every program field uses.
+The arithmetic is exact (Decimal): at livenet scale (~1e18 base
+units) float64 cannot represent the supply, and a float cap can
+round UP above the intended percentage.
 """
 
 import argparse
 import sys
+from decimal import Decimal, InvalidOperation
+
+U64_MAX = 2**64 - 1
+
+
+def parse_pct(text):
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}")
 
 
 def main():
@@ -31,19 +46,35 @@ def main():
         required=True,
         help="planned initial locked supply, raw base units",
     )
-    ap.add_argument("--per-tx-pct", type=float, default=1.0)
-    ap.add_argument("--daily-pct", type=float, default=5.0)
+    ap.add_argument("--per-tx-pct", type=parse_pct, default=Decimal("1.0"))
+    ap.add_argument("--daily-pct", type=parse_pct, default=Decimal("5.0"))
     args = ap.parse_args()
 
     if args.planned_locked_supply <= 0:
         print("planned locked supply must be > 0", file=sys.stderr)
         return 1
-    per_tx = int(args.planned_locked_supply * args.per_tx_pct / 100)
-    daily = int(args.planned_locked_supply * args.daily_pct / 100)
+    for name, pct in (("per-tx", args.per_tx_pct), ("daily", args.daily_pct)):
+        if not pct.is_finite() or pct <= 0 or pct > 100:
+            print(
+                f"invalid {name} percentage: {pct} "
+                "(must be finite, > 0 and <= 100)",
+                file=sys.stderr,
+            )
+            return 1
+    supply = Decimal(args.planned_locked_supply)
+    per_tx = int(supply * args.per_tx_pct / 100)
+    daily = int(supply * args.daily_pct / 100)
     if per_tx <= 0 or daily <= 0 or daily < per_tx:
         print(
             f"invalid caps: per_tx={per_tx} daily={daily} "
             "(both must be > 0 and daily >= per-tx)",
+            file=sys.stderr,
+        )
+        return 1
+    if per_tx > U64_MAX or daily > U64_MAX:
+        print(
+            f"invalid caps: per_tx={per_tx} daily={daily} "
+            "(exceed the programs' u64 cap fields)",
             file=sys.stderr,
         )
         return 1

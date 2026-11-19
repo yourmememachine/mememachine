@@ -12,10 +12,22 @@ they are consensus nodes, not public endpoints). Publishing the RPC
 is therefore mostly a hosting and hardening job, not new code:
 
 1. Run `ops/check-host.sh` on the host; it must pass.
-2. Bring the livenet up per `livenet/DEPLOY.md`; publish validator
-   1's address as the RPC: `http://<V1_PUBLIC_IP>:8899`.
-3. Put a reverse proxy in front for TLS and rate limits before
-   announcing it widely. Minimal nginx example:
+2. Bring the livenet up per `livenet/DEPLOY.md`. Validator 1's raw
+   RPC (`http://<V1_PUBLIC_IP>:8899`) is now reachable, but do NOT
+   publish or announce it in this state: it is unauthenticated,
+   unrate-limited, plaintext HTTP served by the consensus node
+   itself, and RPC abuse against it is a liveness attack on 1 of 3
+   validators. It becomes the public RPC only after step 3.
+3. Put a reverse proxy in front for TLS and rate limits, rebind
+   validator 1 to localhost (end of this step), and only then
+   announce the endpoint. Minimal nginx example — first, the rate-
+   limit zone, which must be defined in the `http` context
+   (e.g. `/etc/nginx/nginx.conf`), not inside the server block:
+
+   ```nginx
+   # http context:
+   limit_req_zone $binary_remote_addr zone=rpc:10m rate=10r/s;
+   ```
 
    ```nginx
    server {

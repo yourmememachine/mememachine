@@ -65,6 +65,7 @@ done
 
 [ -x "$AGAVE_BIN/solana-genesis" ] || { echo "ERROR: $AGAVE_BIN/solana-genesis not found. Run ./install.sh from the repo root first." >&2; exit 1; }
 [ -x "$AGAVE_BIN/solana-keygen" ] || { echo "ERROR: $AGAVE_BIN/solana-keygen not found." >&2; exit 1; }
+[ -x "$AGAVE_BIN/agave-ledger-tool" ] || { echo "ERROR: $AGAVE_BIN/agave-ledger-tool not found. It reads back the genesis hash and shred version below; without it this script would write an empty network identity." >&2; exit 1; }
 
 if [ ! -d "$KEYS_DIR" ] || [ -z "$(ls -A "$KEYS_DIR" 2>/dev/null)" ]; then
     echo "No keypairs found — generating fresh ones..."
@@ -84,6 +85,10 @@ if [ -d "$LEDGER_DIR" ]; then
     fi
     echo "WARNING: --force given. Deleting existing genesis in $LEDGER_DIR ..."
     rm -rf "$LEDGER_DIR"
+    # The old genesis-info.env describes the genesis just deleted;
+    # remove it so no later step can read a stale network identity
+    # if this run fails before writing the new one.
+    rm -f "$INFO_FILE"
 fi
 
 pubkey() { "$AGAVE_BIN/solana-keygen" pubkey "$KEYS_DIR/$1.json"; }
@@ -157,6 +162,18 @@ echo "Building 3-validator genesis..."
 
 GENESIS_HASH=$("$AGAVE_BIN/agave-ledger-tool" --ledger "$LEDGER_DIR" genesis-hash 2>/dev/null | tail -1)
 SHRED_VERSION=$("$AGAVE_BIN/agave-ledger-tool" --ledger "$LEDGER_DIR" genesis 2>/dev/null | awk '/Shred version:/ {print $3}')
+
+# These two values ARE the network identity: start-validator.sh feeds
+# them to --expected-genesis-hash / --expected-shred-version and the
+# info file is shared with anyone joining. A failed ledger-tool read
+# must never be written down as an empty identity with a success
+# message — the pipelines above hide the failure (their exit status
+# is tail's / awk's), so check the values themselves.
+if [ -z "$GENESIS_HASH" ] || [ -z "$SHRED_VERSION" ]; then
+    echo "ERROR: could not read the genesis hash / shred version back from $LEDGER_DIR (got hash='$GENESIS_HASH' shred='$SHRED_VERSION')." >&2
+    echo "The genesis was built but its identity is unknown; refusing to write $INFO_FILE. Investigate agave-ledger-tool before re-running." >&2
+    exit 1
+fi
 
 cat > "$INFO_FILE" <<EOF
 # Machine livenet genesis info — written by generate-genesis.sh.

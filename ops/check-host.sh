@@ -21,8 +21,13 @@ say() { printf '%-58s %s\n' "$1" "$2"; }
 echo "Machine host readiness check"
 echo
 
-# 1. UDP send.
-if python3 - <<'EOF' 2>/dev/null
+# 1. UDP send. (Needs python3; a missing interpreter must not be
+# reported as a UDP failure — that misdiagnosis sends the operator
+# hunting for a network problem that does not exist.)
+if ! command -v python3 >/dev/null 2>&1; then
+    say "UDP send works" "FAIL — python3 is not installed, so UDP send cannot be tested. Install python3 and re-run."
+    fail=1
+elif python3 - <<'EOF' 2>/dev/null
 import socket, sys
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 try:
@@ -67,11 +72,14 @@ else
     say "RAM (${RAM_MB} MB, want 4096+)" "FAIL"
     fail=1
 fi
-DISK_GB=$(df -Pk . | awk 'NR==2 {print int($4/1024/1024)}')
+# Measure the filesystem the ledger will actually live on (the repo
+# this script belongs to), not wherever the operator happens to stand.
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+DISK_GB=$(df -Pk "$REPO_DIR" | awk 'NR==2 {print int($4/1024/1024)}')
 if [ "$DISK_GB" -ge 50 ]; then
-    say "free disk (${DISK_GB} GB, want 50+)" "OK"
+    say "free disk on repo filesystem (${DISK_GB} GB, want 50+)" "OK"
 else
-    say "free disk (${DISK_GB} GB, want 50+)" "FAIL"
+    say "free disk on repo filesystem (${DISK_GB} GB, want 50+)" "FAIL"
     fail=1
 fi
 

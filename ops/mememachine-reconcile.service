@@ -11,3 +11,9 @@ ExecStart=/usr/bin/python3 /opt/mememachine/ops/reconcile.py --solana-rpc https:
 # A non-zero exit (mismatch or RPC failure) marks the unit failed;
 # alert on that (journal / your monitoring of choice). Do not add
 # Restart= — a mismatch is a human decision, not a retry.
+# Sandboxing: the job only reads two RPC endpoints and prints; it
+# needs no write access anywhere on the host.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

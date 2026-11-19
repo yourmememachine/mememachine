@@ -10,6 +10,9 @@
 #   - Refuses to run in a checkout that already has livenet keys
 #     (testnet and livenet never share a checkout or a host dir).
 #   - Stops at the first failing step (set -e) and says which step.
+#     The validators are only boot-enabled AFTER the proof step
+#     passes, so a failed bring-up never leaves a broken chain
+#     configured to start at every boot.
 #
 # Usage (on the testnet VPS, from the repo root of the testnet checkout):
 #   TESTNET=1 ./testnet/up.sh
@@ -33,31 +36,36 @@ fi
 
 step() { echo; echo "=== up.sh: $1 ==="; }
 
-step "1/6 host gate (fd limits, UDP, disk, RAM)"
+step "1/7 host gate (fd limits, UDP, disk, RAM)"
 ./ops/check-host.sh
 
-step "2/6 Agave 2.3.13 toolchain (bin/)"
+step "2/7 Agave 2.3.13 toolchain (bin/)"
 if [ ! -x bin/agave-validator ]; then
   TAR_OPTIONS=--no-same-owner ./install.sh
 fi
 
-step "3/6 test keys (generated here, never leave this host)"
+step "3/7 test keys (generated here, never leave this host)"
 ./livenet/generate-keys.sh
 
-step "4/6 test genesis"
+step "4/7 test genesis"
 ./livenet/generate-genesis.sh
 
-step "5/6 validators (systemd units from livenet/)"
+step "5/7 validators (systemd units from livenet/) — started, not yet enabled"
 for unit in livenet/mememachine-validator-*.service; do
   sudo cp "$unit" /etc/systemd/system/
 done
 sudo systemctl daemon-reload
 for n in 1 2 3; do
-  sudo systemctl enable --now "mememachine-validator-$n"
+  sudo systemctl start "mememachine-validator-$n"
 done
 
-step "6/6 proof: consensus + signed transfer"
+step "6/7 proof: consensus + signed transfer"
 ./livenet/check-cluster.sh --with-transfer
+
+step "7/7 proof passed — enable the validators at boot"
+for n in 1 2 3; do
+  sudo systemctl enable "mememachine-validator-$n"
+done
 
 echo
 echo "Testnet chain is up. Next, per testnet/TESTNET.md:"

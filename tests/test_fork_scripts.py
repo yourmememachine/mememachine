@@ -33,6 +33,8 @@ SHELL_SCRIPTS = [
     "start-validator.sh",
     "install.sh",
     "run-in-ns.sh",
+    "build-from-source.sh",
+    "testnet/up.sh",
     "livenet/start-validator.sh",
     "livenet/generate-genesis.sh",
     "livenet/generate-keys.sh",
