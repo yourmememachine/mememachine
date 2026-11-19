@@ -16,8 +16,8 @@ the current state and supersedes their numbers.
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
-  `programs/PQ-VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-19: **316 passed, 0 failed**.
+  `programs/PQ-VERIFY.md`); fork suite 49 OK.
+  Full `make verify` 2026-11-19: **342 passed, 0 failed**.
 - **PQ Vault (2026-11-19, commit `8ca345c`):** new native
   program in the `programs/` workspace (not a bridge component):
   a cold-storage vault authorized by WOTS+ one-time signatures

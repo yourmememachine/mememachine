@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `17aae0f` (2026-11-19; `make verify` green —
+Last verified commit: `f8b1663` (2026-11-19; `make verify` green —
 bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
+passed, registry export 11 passed, fork suite 49 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -320,6 +320,36 @@ chain configuration gates any public chain launch. Both scopes:
 > `programs/LAUNCH-GUARD.md`. SBF rebuilt: launch_guard.so
 > `8153dd4f…` (139,352 B, deterministic). **Program scope
 > changed — auditors must quote against the new HEAD.**
+>
+> **Scope update (2026-11-19, debate round 5 — deployment
+> tooling, NO program change, no SBF rebuild):** two
+> independent reviews of `ops/` + `bridge/deploy/` + the
+> repo's scripts, debated finding-by-finding; every
+> surviving defect was reproduced before its fix (26 new
+> behaviour tests in `tests/test_ops_scripts.py`, 16 of them
+> failing pre-fix). The in-scope deployment surface changed:
+> `install.sh` now verifies the pinned Agave release sha256
+> before extracting the binaries that generate production
+> keys; the livenet gate script (`check-cluster.sh`) can no
+> longer report a failed transfer as confirmed or count a
+> delinquent validator as voting; `generate-genesis.sh`
+> refuses to write an empty network identity and
+> `generate-keys.sh --force` refuses once a genesis binds
+> the keys; `start-validator.sh` verifies the identity
+> keypair against the genesis; the DEPLOY-BRIDGE.md key
+> ceremony is per-operator with silent key generation (no
+> single-host birth of both quorums, no seed phrases to
+> stdout); `caps.py` arithmetic is exact and bounded;
+> `reconcile.py` binds the vault account and decimals
+> before comparing; `build-sbf.sh` implements the recorded
+> scratch-tree method with the pinned `sbf-Cargo.lock`.
+> One debated finding was killed by experiment
+> (keypair files are created mode 600 by solana-keygen
+> itself, regardless of umask) and one was killed on
+> threat-model grounds (sourcing the locally generated
+> genesis-info.env crosses no privilege boundary). No
+> program scope change; auditors should still quote
+> against the current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
@@ -332,7 +362,7 @@ chain configuration gates any public chain launch. Both scopes:
 ## How to build and test (auditor quick start)
 
 ```bash
-./tests/run.sh                    # fork-script suite: 23 tests
+./tests/run.sh                    # fork-script suite: 49 tests
 cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (197)
 cd programs && cargo test --release # LaunchGuard 68 tests (16 integration + 18 adversarial + 1 demo launch + 28 dust floor + 5 unit) + PQ vault 17 + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM

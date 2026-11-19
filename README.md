@@ -5,9 +5,9 @@
 # Machine
 Website: https://machinechain.netlify.app/
 
-**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 316 tests, localnet, built in public.**
+**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 342 tests, localnet, built in public.**
 
-![Tests: 316 passing](https://img.shields.io/badge/tests-316%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
+![Tests: 342 passing](https://img.shields.io/badge/tests-342%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
 
 A Solana-derived L1 with its own token, its own culture, and apps
 running on it — built to be one of the best Solana forks, not just a
@@ -192,10 +192,11 @@ Machine is entered in the Dev3pack Global Hackathon
 split honestly:
 
 **What existed before the hackathon** — everything in this
-repository up to commit `17aae0f` (2026-11-19): the chain, the
+repository up to commit `f8b1663` (2026-11-19): the chain, the
 bridge, LaunchGuard (including the dust floor and the status
 page, both built on 2026-11-19 — pre-existing work, not
-weekend work), the PQ vault, and Solana OS.
+weekend work), the PQ vault, Solana OS, and the ops/deploy
+hardening from code-review debate round 5 (2026-11-19).
 
 **What was built 27–29 Nov 2026** — recorded here during the
 weekend, as it lands.

@@ -7,6 +7,26 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-19 — `f8b1663`** Code-review debate round 5
+  (ops/ + bridge/deploy/ + scripts; two independent reviewers,
+  debate, reconcile; 26 new behaviour tests, 16 reproduced
+  failing pre-fix). Security-relevant fixes: `install.sh`
+  verifies the pinned Agave 2.3.13 release sha256 before
+  extracting the binaries that generate production keys;
+  `check-cluster.sh` can no longer certify a failed transfer
+  or a delinquent validator as healthy; `generate-genesis.sh`
+  refuses an empty network identity; `generate-keys.sh
+  --force` refuses once a genesis binds the keys;
+  `livenet/start-validator.sh` verifies the identity keypair
+  against the genesis and validates the advertised gossip IP;
+  the DEPLOY-BRIDGE.md key ceremony is per-operator with
+  silent generation (previously: all bridge keys born on one
+  host, all seed phrases printed to stdout); `caps.py` caps
+  are exact and bounded to (0, 100]; `reconcile.py` binds the
+  vault account and decimals before comparing; `build-sbf.sh`
+  builds via the pinned `sbf-Cargo.lock` scratch-tree method.
+  No program change; SBF unchanged. Fork/ops suite 23 → 49;
+  repo total 316 → 342. Localnet only; not deployed.
 - **2026-11-19 — `17aae0f`** LaunchGuard dust-floor war-room
   follow-up (`programs/crates/launch-guard/tests/dust_floor.rs`).
   The reconciled six-seat war room of 2026-11-19 is the review
