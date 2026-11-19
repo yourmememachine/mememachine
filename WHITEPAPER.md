@@ -1,6 +1,6 @@
 # Machine — Whitepaper
 
-**Chain:** Machine · **Token:** $MACHINE · **Version:** 2.0 — 2026-11-16
+**Chain:** Machine · **Token:** $MACHINE · **Version:** 2.1 — 2026-11-19
 **Status:** Pre-launch. Localnet proven; unaudited; no real assets.
 
 > Machine was previously named MemeMachine. The project was renamed on
@@ -37,11 +37,17 @@ Machine's answer is to move the protections into the chain itself:
    every path, a pause and kill switch that never traps user funds, a
    permanent receipt for every crossing, and relayers that verify the
    source transfer on-chain before they sign anything.
+3. **A post-quantum cold-storage vault** (Section 7): an opt-in program
+   whose withdrawals are authorized by hash-based one-time signatures
+   (WOTS+), so its security rests on SHA-256 alone and not on Ed25519.
+   It is future-proofing, not an emergency fix — no quantum computer
+   threatens Ed25519 today.
 
 Everything claimed in this paper is implemented and tested in the public
 repository, or is explicitly labelled as not yet done. Machine today is
-a single-node localnet with 214 automated tests passing across its
-bridge, launch standard, registry export, proof bundle, and fork checks. It is not audited, it is not
+a single-node localnet with 283 automated tests passing across its
+bridge, launch standard, post-quantum vault, registry export, proof
+bundle, receipt indexer, and fork checks. It is not audited, it is not
 deployed, and no real asset has crossed its bridge. The launch is
 staged and gated on an independent audit funded through public grants —
 because a chain that asks for trust should first earn it in the open.
@@ -89,6 +95,12 @@ Cross-chain bridges have lost billions, and the post-mortems rhyme:
 - **Contained by caps.** In June 2026 the Taiko bridge lost ~$1.75M
   through a compromised prover — but per-asset limits and an emergency
   pause are what kept the loss at that figure.
+- **Proof from somewhere else.** In October 2026 zkLink Nova lost
+  ~$783K because a check read ambient transient storage: it proved
+  *something* had happened somewhere in the transaction, and was
+  treated as proof it had happened in *this* call. A verification
+  that is not bound to the exact message, instruction, and amount
+  under review is not a verification.
 
 None of these required new mathematics to prevent. They required
 design discipline: verify on-chain, never trust a record; bound the
@@ -155,9 +167,15 @@ the launch standard built on top of a proven base.
 
 Consensus is Solana's proof-of-stake: validators vote on slots, and a
 slot is final once a supermajority of stake has voted for it — finality
-is vote-based, not time-based. The localnet boots, votes, confirms, and
-finalizes continuously (verified; see `STATUS.md` for the commands that
-reproduce every claim).
+is vote-based, not time-based. The localnet booted, voted, confirmed,
+and finalized on 2026-11-14 (verified; see `STATUS.md` for the commands
+that reproduce every claim). Stated plainly, because this paper does
+not hide it: **the local validator has been stalled at slot 29,100
+since ~22:11 PST 2026-11-14** — `getHealth` still returns `ok`, but the
+slot does not advance and plain restarts from the existing ledger
+re-stall at the same slot. A fresh restart from the shipped genesis
+(same genesis hash) versus a diagnosis of the stall is an open
+decision, recorded in `STATUS.md` (P3).
 
 One implementation detail is documented because it decides whether the
 chain votes at all: `solana-genesis` sets a vote account's authorized
@@ -170,7 +188,9 @@ that abort on mismatch.
 ### 3.3 What is proven, and what is not
 
 Proven on the localnet: boot from custom genesis, slot production,
-voting, confirmation, finalization, snapshots, correct balances.
+voting, confirmation, finalization, snapshots, correct balances —
+with the stall caveat of Section 3.2: that evidence is from
+2026-11-14 and the node does not advance today.
 Not yet proven — because the development environment blocks UDP send
 and caps open files, both of which a validator network needs: signed
 transfers between fresh keypairs, multi-validator consensus, and a
@@ -287,10 +307,22 @@ After registration:
 
 - **Locks extend, never shorten.** The only lock mutation is
   `ExtendLock` to a later unlock slot. There is no instruction that
-  releases early, and no admin key that could.
+  releases early, and no admin key that could. Extension is capped
+  from the *registration* slot (`registered_slot + MAX_LOCK_SLOTS`),
+  not from the current slot — repeated extensions cannot push a
+  lock's total duration past the 5-year maximum (a sliding-window
+  cap that allowed exactly that was found in review and fixed in
+  2026-11, with a regression test).
 - **Release is creator-only and time-gated.** After the unlock slot,
   the recorded creator — and only the recorded creator — can release,
   and the tokens return only to the creator.
+- **Residual recovery after release.** The vault is a normal SPL
+  token account, so anyone can send extra tokens into it, and
+  `Release` moves exactly the locked amount. `CloseVault` (creator
+  only, gated on the record's Released state) sweeps that residual
+  back to the creator and closes the vault; while a launch is locked
+  or expired-but-unreleased it always fails, so it has no path to
+  any part of the lock.
 - **There is no admin.** No pause, no override, no upgrade authority
   held back by the team. The standard's credibility comes from the
   absence of an escape hatch.
@@ -306,11 +338,12 @@ creator's history is a queryable on-chain fact, not a social claim.
 
 ### 5.3 Evidence, not assertions
 
-LaunchGuard is covered by 29 automated tests, including a named
+LaunchGuard is covered by 35 automated tests, including a named
 adversarial suite that attacks it the way a rugger would: minting
 after revocation, releasing early, shortening a lock, releasing as a
 stranger, draining the vault directly, forging a reputation account,
-double-registering a mint. Every attack fails.
+double-registering a mint, closing the vault before release, and
+extending a maximum-length lock past its cap. Every attack fails.
 
 On 2026-11-16 the standard was exercised end to end in a public demo
 launch (localnet): a 1,000,000,000-supply demo token
@@ -327,8 +360,12 @@ and a video of the run is linked from the repository README.
 Because LaunchGuard is the chain's own program, its registry is the
 single canonical answer to "is this launch protected?" — one set of
 PDAs, one reputation history per creator, no competing badges. Wallets
-and tools can consume the registry mechanically; a machine-readable
-export of it is on the project's public backlog.
+and tools can consume the registry mechanically: a machine-readable
+export shipped in 2026-11 (`programs/crates/registry-export/`, binary
+`launchguard-registry`) reads every LaunchRecord and reputation
+account and emits a public JSON registry, and its `--verify` mode
+re-checks each vault balance and both revoked authorities instead of
+trusting the record.
 
 ---
 
@@ -341,7 +378,7 @@ bridge is implemented as two native Rust programs (no Anchor) plus an
 off-chain relayer set, and it is **not deployed**: it runs and is
 tested on localnet only, against Solana devnet in the Phase 1 plan,
 and it does not touch real assets until the deployment gate in
-Section 8 is satisfied.
+Section 9 is satisfied.
 
 ### 6.1 Attestation: quorum, verified on-chain
 
@@ -362,7 +399,14 @@ bounds-checked parser, after fuzzing showed the upstream parsing
 helpers could panic on malformed sysvar data — and confirms that at
 least three distinct configured relayers signed this exact message.
 A signature over anything else is worthless; a record from any other
-source does not exist as far as the program is concerned.
+source does not exist as far as the program is concerned. The message
+is also bound to the asset: both release paths check the message's
+source mint against the destination program's registered source mint,
+so a quorum attestation for a different asset that happens to share
+the relayer set releases nothing here (the Machine-side binding was
+a review leftover, closed in 2026-11). Attestation lifetime is
+bounded on the source basis, and a quorum or threshold of zero is
+rejected by the shared verifiers.
 
 ### 6.2 Replay protection
 
@@ -412,7 +456,19 @@ no hot key anywhere in the system can move funds or change state.
 Relayer rotation exists (`SetRelayers` in both programs, gated by the
 2-of-3 admin multisig, rejecting default and duplicate keys). The
 admin set itself is fixed at initialization; rotating it means
-re-initializing, by design.
+re-initializing, by design. Initialization itself is bound to the
+program's upgrade authority in both bridge programs — the first
+caller no longer sets the relayers, admins, and caps (a self-audit
+finding, fixed in 2026-11).
+
+Each relayer also keeps a **tamper-evident audit log**
+(`bridge/RELAYER-LOG.md`): a hash-chained, append-only record of what
+it signed, collected, failed to collect, and submitted, in order. The
+relayer fails closed if its existing log does not verify. The honest
+limit is pinned by tests: a hash chain proves internal consistency
+only, so truncation and wholesale rewrites are caught against a
+published checkpoint (sequence + head hash held outside the log),
+not by the chain alone.
 
 ### 6.6 Receipts: every crossing leaves evidence
 
@@ -426,6 +482,20 @@ the destination transaction ID; indexers bind the two by resolving the
 receipt account's creating transaction. This is documented in
 `BRIDGE.md` §4.5 rather than papered over.)
 
+That binding is now shipped, not just documented: the **receipt
+indexer** (`bridge/crates/receipt-indexer/`, doc
+`bridge/RECEIPT-INDEXER.md`) derives the receipt PDA itself, parses
+the receipt strictly, resolves its creation as the oldest
+*successful* signature for the PDA — a failed replay attempt never
+shadows the real crossing — and verifies the creating transaction
+ran in exactly the slot the receipt records. A **crossing proof
+bundle** (`bridge/crates/proof-bundle/`, doc
+`bridge/PROOF-BUNDLE.md`) goes one step further: one self-contained
+file per crossing (receipt + canonical message + attestation set)
+that anyone can verify fully offline, with the claimed quorum pinned
+to the protocol constant and the relayer set required to be exactly
+the registered members.
+
 ### 6.7 Drills
 
 The bridge has been exercised in a full local end-to-end drill —
@@ -436,20 +506,61 @@ The drill reports live in the repository (`bridge/drills/`).
 
 ---
 
-## 7. Security posture
+## 7. PQ Vault: post-quantum cold storage
 
-### 7.1 Testing
+Machine's third native program (`programs/crates/pq-vault/`, design
+note `programs/PQ-VAULT.md`) is an opt-in cold-storage vault whose
+withdrawals are authorized by **WOTS+ one-time signatures** (RFC
+8391; SHA-256, w=16, len=67) instead of Ed25519. Its security rests
+only on SHA-256, so it holds even if Ed25519 falls to a quantum
+computer. The threat model is stated honestly in the design note: no
+quantum computer threatens Ed25519 today; this is future-proofing
+against a policy clock (NIST IR 8547 deprecates Ed25519 after 2030),
+not an emergency fix. A chain-wide signature swap cannot be done
+from a program — the post-quantum candidates' signatures exceed the
+transaction size limit — and belongs upstream; a vault program is
+what a chain can ship now.
+
+The discipline is enforced by the program, not by the user's care:
+
+- Only 32-byte commitments sit on-chain (up to 16 per vault); the
+  2,144-byte signature arrives in chunks through a buffer account
+  bound to the exact withdrawal digest.
+- Keys are consumed **strictly in order**, and the key index
+  increments *before* funds move — a key can never sign twice,
+  because the program will never accept it twice.
+- Rotation installs a fresh commitment set only on a one-time
+  signature from the next unconsumed key. There is no Ed25519 path
+  to the funds, and no admin path either.
+- Exhaustion without a chained rotation freezes the remainder —
+  fail-closed, by design.
+
+Measured, not estimated: WOTS+ verification costs 337K–395K compute
+units against the SBF build — over the 200,000 default budget, so
+verifying transactions must request a raised compute budget (the
+worst case stays inside the 1.4M maximum). The design note's early
+50K–120K estimate was wrong and is corrected in the note itself;
+the full record is in `programs/PQ-VERIFY.md`. 17 tests cover the
+design's full list: create, deposit, valid withdrawal, replay,
+forgery, key reuse, digest binding, wrong index, rotation,
+exhaustion, and buffer discipline. The vault is a prototype:
+localnet only, undeployed, and in the audit scope for its own use
+(`AUDIT.md`).
+
+## 8. Security posture
+
+### 8.1 Testing
 
 All figures from the latest full verification (`make verify`, run
-2026-11-17 against commit `0efccbc`; re-runnable by anyone):
+2026-11-19; totals pinned against commit `8ca345c` in `STATUS.md`
+and re-run green the same day; re-runnable by anyone):
 
 | Suite | Tests | Covers |
 |---|---|---|
-| Bridge workspace | 167 passing | bridge-common (37), machine-bridge (31), solana-lock (25), precompile-cost (1), relayer (54), proof-bundle (19) |
-| LaunchGuard | 34 passing | 16 integration, 17 adversarial, 1 full demo launch |
-| Registry export | 11 passing | 9 unit, 2 program-test integration |
+| Bridge workspace | 197 passing | bridge-common (41), machine-bridge (32), solana-lock (25), precompile-cost (1), relayer (60), proof bundle (23), receipt indexer (15) |
+| Programs workspace | 63 passing | LaunchGuard (35), PQ vault (17), registry export (11) |
 | Fork suite | 23 checks OK | genesis, patches, chain bring-up |
-| **Total** | **235** | |
+| **Total** | **283** | |
 
 Beyond unit and integration tests: cargo-fuzz harnesses run against
 the message and sysvar parsers and the crossing-receipt
@@ -459,7 +570,7 @@ and bounds-checked); `cargo audit` findings (10 advisories, all in
 transitive dependencies) are recorded with dispositions in
 `AUDIT.md`; clippy is clean of errors on both workspaces.
 
-### 7.2 Published security documents
+### 8.2 Published security documents
 
 `THREAT-MODEL.md` (attack surface and mitigations), `LIMITATIONS.md`
 (everything known to be unproven), `SECURITY.md` (disclosure policy
@@ -467,28 +578,34 @@ and a scoped, currently unfunded bug bounty), `SECURITY-CHANGELOG.md`,
 and `AUDIT.md` (scope, self-review results, and the audit programme
 below) are all in the repository.
 
-### 7.3 The audit programme
+### 8.3 The audit programme
 
 Machine's bridge and LaunchGuard have **not** been independently
 audited, and this paper does not soften that. The path to audit is
 funded publicly and is already in motion:
 
-- Audit inquiries sent to Accretion and Sec3; a scoped quote
-  requested from Oak Security (both scope options, with and without
-  the relayer) — replies pending.
-- **Areta Audit Subsidy** application submitted (December 2026
-  cohort) toward the audit cost.
-- **Solana Foundation grant** application submitted: $30,000,
-  milestone-based — $5,000 for the published security self-review and
-  public testnet, $25,000 for the completed independent audit with
-  the report published in the repository.
+- **Oak Security quote received** (2026-11-17): a 1.22-week audit;
+  the recommended Seed tier is $26,840 (at least two senior
+  researchers, blinded parallel review). The quote is unsigned and
+  no deposit will be committed before grant funding lands.
+- Audit inquiries sent to Accretion and Sec3 — no reply as of
+  mid-November 2026.
+- **Areta Audit Subsidy: declined** (2026-11-19). The committee
+  could not offer subsidy support at this time and invited a
+  re-check once the project gains more traction, so no subsidy
+  discount is counted anywhere in the funding plan.
+- **Solana Foundation grant** application submitted (2026-11-15):
+  $30,000 — $22,000 for the independent audit and remediation,
+  $2,000 for the public testnet beta, $3,600 for six months of
+  maintenance, and $2,400 tied to three public adoption metrics.
+  No outcome has been received.
 
 Auditors quote against the current `main`; every change that alters
 the program scope since the inquiries is flagged in `AUDIT.md`.
 
 ---
 
-## 8. Staged launch and the deployment gate
+## 9. Staged launch and the deployment gate
 
 Machine launches in stages (`STAGED-LAUNCH.md`), and the bridge has a
 hard deployment gate (`BRIDGE.md` §5) that binds at every stage.
@@ -512,7 +629,7 @@ Before any real asset crosses, **all** of the following must hold:
 | 3 — Audited bridge deployment | Real assets cross, under the §5 gate | Gated on the audit + grant funding |
 | 4 — Funded bug bounty | The scoped bounty in `SECURITY.md` goes live with rewards | Gated on funding |
 
-## 9. Governance
+## 10. Governance
 
 Machine has no on-chain governance program today, and this paper does
 not pretend otherwise. The genesis, fee schedule, and distributions
@@ -524,13 +641,14 @@ token is planned. The direction — validator-set governance as the
 network becomes multi-validator, with changes proposed in the open —
 will be claimed only when a mechanism exists and has been used.
 
-## 10. Honest limits
+## 11. Honest limits
 
-- **Unaudited.** No independent audit has been completed. Quotes and
-  grant applications are in flight; nothing here should be read as
-  audited safety.
-- **One node.** Machine today is a single-node localnet. Multi-
-  validator consensus is packaged, not proven.
+- **Unaudited.** No independent audit has been completed. One quote
+  is in hand and a grant application is in flight; nothing here
+  should be read as audited safety.
+- **One node, currently stalled.** Machine today is a single-node
+  localnet, stalled at slot 29,100 since 2026-11-14 (Section 3.2).
+  Multi-validator consensus is packaged, not proven.
 - **No transfer proof yet.** Signed transfers between fresh keypairs
   await a host with working UDP and a raised file limit.
 - **The bridge has never moved value.** It is tested against
@@ -541,19 +659,20 @@ will be claimed only when a mechanism exists and has been used.
   and unexercised.
 - **Vesting is a commitment, not a lockup** (Section 4.4).
 - **Small numbers, honestly framed.** Solana runs ~1,000+ validators
-  and years of production load; Machine runs one local node and 214
+  and years of production load; Machine runs one local node and 283
   tests. Machine's claim is narrower and, we believe, more durable:
   a launch standard that exists nowhere else, a bridge designed
   against the industry's own post-mortems, and a public record that
   lets anyone check both.
 
-## 11. Conclusion
+## 12. Conclusion
 
 Most forks change a name, a logo, and a supply. Machine changed what a
 chain can promise a token launch: authorities gone, insider supply
 locked by the chain itself, a creator reputation that cannot be
-edited, and a bridge whose every crossing leaves evidence and whose
-worst day is bounded by arithmetic. The work is public, the tests are
+edited, a bridge whose every crossing leaves evidence and whose
+worst day is bounded by arithmetic, and a vault that stays safe
+even if today's signatures fall. The work is public, the tests are
 green, the limits are published, and the audit gate stands between
 this paper and anyone's money. That is the whole pitch — verifiable,
 or it doesn't ship.
@@ -571,15 +690,19 @@ or it doesn't ship.
 | Dynamic caps (unlock) | 1% per tx / 5% per 216,000 slots of live locked total; quarter strength for 216,000 slots after any unpause |
 | LaunchGuard minimums | Authorities revoked; ≥10% of supply locked ≥6,480,000 slots (30 days) |
 | Demo launch mint | `AjTP23T2HhMryZVDPpzVYrTsWHgH6jKkMt9b8cLdn7hc` (localnet, worthless) |
-| Tests | 235 passing (167 bridge workspace, 34 LaunchGuard, 11 registry export, 23 fork checks) |
+| Tests | 283 passing (197 bridge workspace, 35 LaunchGuard, 17 PQ vault, 11 registry export, 23 fork checks) |
 | Licence | Apache-2.0 |
 
 ## Appendix B — Document map
 
 - `STATUS.md` — proven vs next, with the commands behind each claim
 - `BRIDGE.md` — bridge design, §5 deployment gate
+- `bridge/PROOF-BUNDLE.md`, `bridge/RECEIPT-INDEXER.md`,
+  `bridge/RELAYER-LOG.md` — the crossing evidence tools
 - `programs/LAUNCH-GUARD.md` — the LaunchGuard specification
 - `programs/DEMO-LAUNCH.md` — the 2026-11-16 demo launch record
+- `programs/PQ-VAULT.md`, `programs/PQ-VERIFY.md` — the PQ vault
+  design note and its verification record
 - `THREAT-MODEL.md`, `LIMITATIONS.md`, `AUDIT.md`, `SECURITY.md`
 - `STAGED-LAUNCH.md` — the phase plan and its costs
 - `GENESIS.md`, `FORK.md` — genesis values and the fork patches
