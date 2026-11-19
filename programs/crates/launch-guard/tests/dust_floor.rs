@@ -586,7 +586,7 @@ async fn register_with_a_substitute_config_account_rejected() {
 // non-zero lock, the floor == share tie, floors at or above the
 // whole supply, the legacy 9-account instruction form, and
 // Initialize's own account checks. Each pins a behaviour the
-// first fourteen tests left unobserved.
+// first thirteen tests left unobserved.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -814,4 +814,186 @@ async fn release_after_floor_gated_registration() {
     let rep = read_reputation(&mut ctx, &creator.pubkey()).await;
     assert_eq!(rep.launches_registered, 1);
     assert_eq!(rep.locks_completed, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Reconciled war-room additions (2026-11-19, second room): the
+// boundaries and branches the correctness seat found correct by
+// inspection but unobserved — supply 1 at both floors, the u128
+// top of the supply range, a program-owned config carrying bad
+// bytes, and the second-Initialize error precedence.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn supply_one_registers_at_floor_one() {
+    // The smallest possible supply: the share is
+    // ceil(1 * 1000 / 10000) = 1, and a floor of 1 agrees — the
+    // only token in existence is a valid lock.
+    let (mut ctx, _authority) = start_with_floor(1).await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint_with_supply(&mut ctx, &creator, 1).await;
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, 1)],
+        &[&creator],
+    )
+    .await
+    .expect("supply 1 locks its only token at floor 1");
+    assert!(read_record(&mut ctx, &mint).await.is_some());
+}
+
+#[tokio::test]
+async fn supply_one_below_a_larger_floor_rejected() {
+    // Supply 1 passes the share (lock 1 >= share 1) but can
+    // never reach a floor of 500: the floor error must name
+    // itself, and no record is created.
+    let (mut ctx, _authority) = start_with_floor(500).await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint_with_supply(&mut ctx, &creator, 1).await;
+    let err = send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, 1)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::LockBelowDustFloor as u32);
+    assert!(read_record(&mut ctx, &mint).await.is_none());
+}
+
+#[tokio::test]
+async fn huge_supply_share_uses_the_u128_path() {
+    // Supply u64::MAX: supply * 1,000 overflows u64, so the
+    // share only exists in u128. One below the ceiling-divided
+    // share fails as LockTooSmall; exactly at it registers.
+    let (mut ctx, _authority) = start_with_floor(1_000_000).await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint_with_supply(&mut ctx, &creator, u64::MAX).await;
+    let share = ((u64::MAX as u128 * 1_000 + 9_999) / 10_000) as u64;
+    let err = send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, share - 1)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::LockTooSmall as u32);
+    send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, share)],
+        &[&creator],
+    )
+    .await
+    .expect("lock at the u128-computed share registers");
+    assert!(read_record(&mut ctx, &mint).await.is_some());
+}
+
+/// Start the harness with the config PDA pre-seeded as a
+/// program-owned account carrying caller-chosen raw bytes —
+/// the state a corrupted (or hostilely pre-written, were that
+/// possible) config would present to RegisterAndLock.
+async fn start_with_raw_config(data: Vec<u8>) -> ProgramTestContext {
+    let authority = Keypair::new();
+    let mut test = ProgramTest::new(
+        "launch_guard",
+        program_id(),
+        processor!(launch_guard::process_instruction),
+    );
+    seed_programdata(&mut test, &authority.pubkey());
+    test.add_account(
+        pda(&[SEED_CONFIG]),
+        Account {
+            lamports: 10_000_000,
+            data,
+            owner: program_id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+    test.start_with_context().await
+}
+
+fn expect_invalid_account_data(err: &BanksClientError) {
+    let BanksClientError::TransactionError(TransactionError::InstructionError(
+        _,
+        solana_program::instruction::InstructionError::InvalidAccountData,
+    )) = err
+    else {
+        panic!("expected InvalidAccountData, got {err:?}");
+    };
+}
+
+#[tokio::test]
+async fn config_with_a_bad_discriminator_fails_registration_closed() {
+    // A program-owned config whose first byte is not the config
+    // discriminator is corrupt state, not "no floor": load_config
+    // rejects it as InvalidAccountData and registration fails.
+    let mut data = borsh::to_vec(&GuardConfig {
+        discriminator: DISCRIMINATOR_CONFIG,
+        min_lock_amount: 500,
+    })
+    .unwrap();
+    data[0] = 99;
+    let mut ctx = start_with_raw_config(data).await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint_with_supply(&mut ctx, &creator, 1_000).await;
+    let err = send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, 500)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_invalid_account_data(&err);
+    assert!(read_record(&mut ctx, &mint).await.is_none());
+}
+
+#[tokio::test]
+async fn config_with_trailing_garbage_fails_registration_closed() {
+    // A well-formed GuardConfig followed by extra bytes: the
+    // strict borsh parse refuses it rather than reading the
+    // floor and ignoring the tail.
+    let mut data = borsh::to_vec(&GuardConfig {
+        discriminator: DISCRIMINATOR_CONFIG,
+        min_lock_amount: 500,
+    })
+    .unwrap();
+    data.extend_from_slice(&[0xAA; 8]);
+    let mut ctx = start_with_raw_config(data).await;
+    let creator = Keypair::new();
+    let (mint, token) = make_mint_with_supply(&mut ctx, &creator, 1_000).await;
+    let err = send(
+        &mut ctx,
+        &[register_ix(&creator.pubkey(), &mint, &token, 500)],
+        &[&creator],
+    )
+    .await
+    .unwrap_err();
+    expect_invalid_account_data(&err);
+    assert!(read_record(&mut ctx, &mint).await.is_none());
+}
+
+#[tokio::test]
+async fn second_initialize_by_stranger_reports_already_initialized() {
+    // The exactly-once check runs before the authority check:
+    // even a stranger's second Initialize is refused as
+    // ConfigAlreadyInitialized (not NotUpgradeAuthority), and
+    // the floor does not move.
+    let (mut ctx, _authority) = start_with_floor(500).await;
+    let stranger = Keypair::new();
+    let fund = system_instruction::transfer(
+        &ctx.payer.pubkey(),
+        &stranger.pubkey(),
+        1_000_000_000,
+    );
+    send(&mut ctx, &[fund], &[]).await.expect("fund stranger");
+    let err = send(
+        &mut ctx,
+        &[initialize_ix(&stranger.pubkey(), 999)],
+        &[&stranger],
+    )
+    .await
+    .unwrap_err();
+    expect_custom(&err, LaunchError::ConfigAlreadyInitialized as u32);
+    assert_eq!(read_config(&mut ctx).await.min_lock_amount, 500);
 }
