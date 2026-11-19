@@ -1,12 +1,14 @@
 # PQ Vault — a quantum-safe cold-storage vault for Machine (design note)
 
-**Status: design only. No code exists yet.** This note is step (a)
-of backlog item #12: the specification for an opt-in vault program
-whose withdrawals are authorized by hash-based one-time signatures
-instead of Ed25519. Step (b) is a prototype program built to this
-note. Nothing here is deployed, and nothing in this note should be
-read as "Machine is quantum-resistant" — see the honest limits at
-the end for exactly what this design does and does not protect.
+**Status: design (step a) and prototype (step b) both done.**
+This note is the specification for an opt-in vault program whose
+withdrawals are authorized by hash-based one-time signatures
+instead of Ed25519. The prototype built to it lives at
+`programs/crates/pq-vault/`, with the full test record in
+`programs/PQ-VERIFY.md`. It is localnet-only: not deployed, not
+audited. Nothing in this note should be read as "Machine is
+quantum-resistant" — see the honest limits at the end for
+exactly what this design does and does not protect.
 
 ## Why this exists
 
@@ -178,20 +180,50 @@ Why WOTS+ and not the alternatives:
   account layout leaves room for that change; v1 stays flat and
   auditable.
 
-### Verification cost (estimate, to be measured in step (b))
+### Verification cost (measured in step (b), 2026-11-19)
 
-Verification completes each chain: the number of SHA-256 calls is
-the sum of the remaining chain steps — **~500 on average, at most
+Verification completes each chain: the number of chain steps is
+the sum of the remaining steps — **~500 on average, at most
 1,005** — plus the final hashing of the 67 chain ends into the
-commitment. The runtime charges `sol_sha256` at an 85 CU base plus
-a per-byte cost (Agave's `compute_budget.rs`), so a 32-byte chain
-step costs on the order of 100 CU and a full verification lands
-roughly in the **50k–120k CU** range — inside the 200,000 CU
-default per-instruction budget, and far inside the 1,400,000 CU
-transaction maximum. These are arithmetic estimates from the
-syscall cost table, stated as such; step (b) replaces them with
-measured figures, the same discipline as the bridge's CU numbers
-in BRIDGE.md and bridge/VERIFY.md.
+commitment. The catch the original estimate missed: each step
+runs the hash function **three** times (derive the step key,
+derive the bitmask, hash), so a typical verification is ~1,500
+`sol_sha256` calls, not ~500.
+
+Measured against the real SBF build in program-test (full
+method and runs in `programs/PQ-VERIFY.md`):
+
+| Instruction | Measured CU |
+|---|---|
+| `ExecuteWithdrawal` (incl. WOTS+ verify + transfer) | **337,000–395,000** across repeated runs |
+| `RotateKeys` (incl. WOTS+ verify) | **380,000–393,000** |
+
+The figure moves between runs because the step count is
+Σ(15 − digit) over the signature's own digits — the work is
+data-dependent by construction. The worst case (every digit
+zero, 1,005 steps) extrapolates to roughly 700k.
+
+Two consequences, both now part of the design as built:
+
+- **Verification does not fit the 200,000 CU default budget.**
+  The pre-build estimate for this section (50k–120k CU, from
+  the syscall cost table at ~100 CU per step) priced roughly
+  one hash per step and is superseded by the measurements
+  above. A withdrawal or rotation transaction must carry a
+  compute-budget instruction requesting more — the test suite
+  requests 1,000,000 — which is ordinary client behaviour for
+  compute-heavy instructions, but it is a requirement, not an
+  option: without it the transaction fails on budget before
+  verification completes.
+- Every possible signature still fits: even the extrapolated
+  worst case is half the 1,400,000 CU transaction maximum.
+
+One optimization was measured and rejected: assembling F's
+input into a single buffer and hashing it with one call instead
+of three slices cost **more** (402,454 CU in the same test
+conditions, against a 340,266 CU run of the slice form) — the
+syscall iterates slices without copying, the buffer version
+pays for the copies. F keeps the three-slice form.
 
 ## Design
 
@@ -212,7 +244,7 @@ Created once by the owner; holds no funds itself.
 | `commitments` | 16 × 32 B | one 32-byte WOTS+ public-key commitment per key slot (unused slots zeroed) |
 | bumps | 2 B | vault + token-vault PDA bumps |
 
-Total ≈ 625 bytes. At the rent parameters inherited from Agave
+Total: 624 bytes as built. At the rent parameters inherited from Agave
 (rent-exempt minimum = (128 + data bytes) × 6,960 lamports), the
 vault account costs roughly 5.2M lamports of rent-exempt balance —
 a trivial, one-time amount of $MACHINE.
@@ -270,11 +302,11 @@ longer accepts.
 |---|---|
 | `CreateVault { commitments }` | Owner (Ed25519) creates the vault PDA and its token account, storing 1–16 WOTS+ public-key commitments generated off-chain. The private seeds never touch the chain. Fails if `commitments` is empty or > 16. |
 | *(deposit)* | **Not an instruction.** Anyone deposits by making an ordinary SPL transfer into the token vault. Receiving needs no signature scheme at all — deposits are exactly as safe in a post-quantum world as they are today. |
-| `CreateSigBuffer { key_index }` | Creates the buffer account bound to this vault, `key_index`, and the digest of the intended withdrawal. |
-| `WriteSigChunk { offset, bytes }` | Appends signature bytes at `offset` (≤ ~1,000 bytes per transaction). Chunks may arrive in any order; `written_len` tracks completion. |
-| `ExecuteWithdrawal { amount, destination }` | The only instruction that moves funds. Recomputes the digest from the actual parameters and the buffer's stored binding; requires `key_index == vault.next_key_index`, a complete buffer, and a WOTS+ signature that verifies against `commitments[key_index]`. **Increments `next_key_index` before transferring** (state first, fail-closed), then transfers `amount` from the token vault to `destination` with the authority PDA as signer, and closes the buffer. |
+| `CreateSigBuffer { key_index, digest }` | Creates the buffer account bound to this vault, `key_index`, and the digest of the intended withdrawal. The caller computes the digest off-chain; execution re-derives it from the actual parameters and compares, so a buffer created with a wrong digest can simply never execute. |
+| `WriteSigChunk { offset, bytes }` | Appends signature bytes at `offset` (≤ 1,000 bytes per transaction). As built, chunks must arrive **in order** — `offset` must equal `written_len`, and out-of-order writes are rejected. (This note originally allowed any order; sequential append is the v1 simplification, and it loses nothing in practice: one uploader assembles one signature.) |
+| `ExecuteWithdrawal { amount }` | The only instruction that moves funds. The destination is passed as an account, not a parameter. Recomputes the digest from the actual parameters and the buffer's stored binding; requires `key_index == vault.next_key_index`, a complete buffer, and a WOTS+ signature that verifies against `commitments[key_index]`. **Increments `next_key_index` before transferring** (state first, fail-closed), then transfers `amount` from the token vault to the destination with the authority PDA as signer, and closes the buffer. |
 | `RotateKeys { new_commitments }` | Installs a fresh commitment set, authorized by a WOTS+ signature (delivered through the same buffer flow) from the **next unconsumed key** over a rotation digest binding the new set's hash. Consumes that key. There is deliberately **no Ed25519-authorized rotation**: an Ed25519 path to new keys would be an Ed25519 path to the funds. |
-| `AbortSigBuffer {}` | Closes an incomplete buffer and returns its rent. Moves no funds. |
+| `AbortSigBuffer {}` | Owner (Ed25519) only. Closes a buffer — incomplete, or complete but never executed — and returns its rent. Moves no funds. Owner-only so a third party cannot grief an in-flight withdrawal by clearing its buffer: anyone may *create* a buffer, only the owner can clear one. |
 | `CloseVault {}` | Owner (Ed25519), only when the token balance is zero. Closing an empty vault moves nothing, so Ed25519 authorization is sufficient here. |
 
 **Key exhaustion is a hard stop, by design.** When
@@ -338,10 +370,10 @@ the `next_key_index` field:
 - **16 keys is a small number.** It is a deliberate v1 cap to keep
   the audited surface small (the LaunchGuard rule). The XMSS
   Merkle-root extension above is the documented path past it.
-- **It is not audited and not deployed.** It is a design note.
-  Step (b) is a localnet prototype. Nothing in this file is a
-  security claim about running code, because there is no running
-  code.
+- **It is not audited and not deployed.** The step (b)
+  prototype is localnet-only test code. Nothing in this file
+  is a security claim about a deployment, because there is no
+  deployment.
 
 ## Prototype plan — step (b)
 
@@ -350,6 +382,23 @@ repo's existing style (solana-program 2.3, program-test against the
 real SPL token program, same conventions as LaunchGuard and the
 bridge programs), plus an off-chain signer helper for tests
 (WOTS+ key generation and signing from a seed, in the test crate).
+
+**Step (b) is built (2026-11-19).** All twelve required tests
+below pass, alongside five more: four WOTS+ unit tests (digit and
+checksum known values, sign/verify round-trip, tamper and
+cross-key rejection at the primitive level, digest and key-index
+binding) and the compute-unit measurement that is required test
+12's vehicle. 17 tests total, green against both the native
+processor and the SBF build. Deviations from this note, each
+recorded where it occurs above: chunk writes are
+sequential-append only; `ExecuteWithdrawal` takes `{ amount }`
+with the destination as an account; `CreateSigBuffer` takes the
+digest as a parameter; `AbortSigBuffer` is owner-only and also
+closes complete buffers; the vault account is 624 bytes, not
+≈625. And the verification-cost estimate did not survive
+measurement — see that section for the measured figures and the
+compute-budget requirement they add. Full record:
+`programs/PQ-VERIFY.md`.
 
 Required tests — the program is not done until all of these pass:
 
@@ -383,16 +432,16 @@ Required tests — the program is not done until all of these pass:
     be executed against this withdrawal.
 12. **Measured compute units** — the verification CU figure from
     the real SBF build replaces the estimate in this note.
+    (Done — see Verification cost above.)
 
-When step (b) lands, it gets the AUDIT.md scope-update note per
-the established pattern (new in-scope program; auditors quote
-against current HEAD) — not before, because there is no code to
-audit yet.
+The AUDIT.md scope-update note landed with the code, per the
+established pattern (new in-scope program; auditors quote
+against current HEAD).
 
 ## How it fits the chain
 
 - Design (this note): `programs/PQ-VAULT.md`.
-- Prototype (step b): `programs/crates/pq-vault/` — the third
+- Prototype (step b, built 2026-11-19): `programs/crates/pq-vault/` — the third
   native program alongside LaunchGuard (`programs/LAUNCH-GUARD.md`)
   and the bridge programs (BRIDGE.md), under the same localnet-only
   discipline and the same deployment gates.
