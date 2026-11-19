@@ -205,3 +205,26 @@ pointed at the deploy directory), and the measured compute
 units for its signature-verifying instructions are recorded
 in `programs/PQ-VERIFY.md`. Not deployed; the generated
 keypair file is a throwaway build artifact, as above.
+
+## Addendum — LaunchGuard dust-floor rebuild (2026-11-19)
+
+**Rebuilt 2026-11-19** from the dust-floor change (`5b37d7b`:
+LaunchGuard gains the `Initialize` instruction and the config
+PDA; see the AUDIT.md scope update). LaunchGuard only — the
+bridge programs and the PQ vault were not touched and their
+binaries above stand. Same standalone-tree method
+(`~/workspace/sbf-lg/`, saved `programs/sbf-Cargo.lock` — the
+lock saved after the PQ-vault build; its only delta from the
+previously saved lock is the added `pq-vault` package entry,
+and every dependency pin is unchanged). The build is
+deterministic: two consecutive builds produced the identical
+hash. The artifact was re-verified during the 2026-11-19
+war room (size and hash as below; sources byte-identical to
+`5b37d7b`). `cargo-build-sbf` is not available on the current
+VM, so determinism cannot be re-proven here — it rests on the
+two-build record. The war-room follow-up commit `17aae0f`
+changed tests only; this binary stands.
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `launch_guard.so` | 139,352 | `8153dd4f755e0b0c2be088635f0b125206d4f9d49214cfd1d63d2f4ba30a2c16` |

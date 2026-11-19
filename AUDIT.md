@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `5b37d7b` (2026-11-19; `make verify` green —
-bridge workspace 197 passed, LaunchGuard 62 passed, PQ vault 17
+Last verified commit: `17aae0f` (2026-11-19; `make verify` green —
+bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
 passed, registry export 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -307,10 +307,13 @@ chain configuration gates any public chain launch. Both scopes:
 > `RegisterAndLock` now takes the config PDA as a tenth
 > account (appended last); the pre-floor 9-account form
 > fails with `NotEnoughAccountKeys`. The program is not
-> deployed and has no live clients. The change went
-> through a six-seat review (program security, floor-math
-> correctness, adversarial, tests/edge cases, honesty/docs,
-> build/integration) before shipping; the floor's honest
+> deployed and has no live clients. The change was
+> reviewed by six independent seats (program security,
+> floor-math correctness, adversarial, tests/edge cases,
+> honesty/docs, build/integration); the reconciled war-room
+> record of 2026-11-19 is the review of record — the code
+> commits landed first that day, and the room's surviving
+> findings were fixed in `17aae0f`. The floor's honest
 > limits (raw units, no decimals awareness, zero is a
 > legitimate value, an oversized value can make a mint
 > unregistrable) are documented in
@@ -331,7 +334,7 @@ chain configuration gates any public chain launch. Both scopes:
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
 cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (197)
-cd programs && cargo test --release # LaunchGuard 62 tests (16 integration + 18 adversarial + 1 demo launch + 22 dust floor + 5 unit) + PQ vault 17 + registry export 11
+cd programs && cargo test --release # LaunchGuard 68 tests (16 integration + 18 adversarial + 1 demo launch + 28 dust floor + 5 unit) + PQ vault 17 + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```
 

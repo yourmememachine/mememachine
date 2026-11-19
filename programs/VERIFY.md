@@ -316,3 +316,19 @@ SBF rebuilt: launch_guard.so
 `8153dd4f755e0b0c2be088635f0b125206d4f9d49214cfd1d63d2f4ba30a2c16`
 (139,352 B; deterministic — two builds, identical hash).
 Not deployed.
+
+## Update — 2026-11-19 (later): war-room gap tests
+
+Commit `17aae0f`. The reconciled six-seat war room of
+2026-11-19 (the review of record for the dust floor) found the
+floor's boundaries correct but three branches unobserved; six
+tests were added to `tests/dust_floor.rs` to pin them: supply
+1 at floor 1 and below a larger floor, the `u64::MAX`-supply
+share through the u128 path, a program-owned config with a bad
+discriminator or trailing garbage failing registration closed
+(`InvalidAccountData`), and the second-Initialize error
+precedence (`ConfigAlreadyInitialized` before the authority
+check). Tests only — no program change; the SBF binary above
+is unchanged. Suite now **68 passed, 0 failed** (16
+integration + 18 adversarial + 1 demo launch + 28 dust floor
++ 5 unit). Not deployed.

@@ -67,12 +67,13 @@ Machine side. No admin mint; $MACHINE itself is never bridged.
 relayer exists (`bridge/crates/relayer/`) but has never run live;
 no asset has crossed, nothing here holds real funds.
 
-**Proven.** Built and tested locally only. Re-verified 2026-11-18:
+**Proven.** Built and tested locally only. Re-verified 2026-11-19:
 `cargo test --release` in `bridge/` — **197 passed, 0 failed**
-(37 bridge-common, 31 machine-bridge, 25 solana-lock, 1
-precompile-cost, 60 relayer including the full end-to-end drill,
-19 proof bundle including an end-to-end crossing export,
-15 receipt indexer including an end-to-end receipt binding).
+(41 bridge-common, 32 machine-bridge including the
+precompile-cost test, 26 solana-lock, 60 relayer including the
+full end-to-end drill, 23 proof bundle including an end-to-end
+crossing export, 15 receipt indexer including an end-to-end
+receipt binding).
 Full output in `bridge/VERIFY.md`.
 
 **Honest limits.** SBF builds of all three programs are verified

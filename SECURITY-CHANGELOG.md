@@ -7,6 +7,22 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-19 — `17aae0f`** LaunchGuard dust-floor war-room
+  follow-up (`programs/crates/launch-guard/tests/dust_floor.rs`).
+  The reconciled six-seat war room of 2026-11-19 is the review
+  of record for the dust floor; the entry below was written
+  when the code landed, earlier the same day, and its
+  "before shipping" phrasing is corrected here — the room
+  concluded after the code commits, before any deployment or
+  submission, neither of which has happened. Six new tests
+  close the correctness seat's gaps: supply 1 at floor 1 and
+  below a larger floor, the `u64::MAX`-supply share through
+  the u128 path, a program-owned config with a bad
+  discriminator or trailing garbage failing registration
+  closed, and the second-Initialize error precedence. Tests
+  only; no program change; SBF unchanged (`8153dd4f…`,
+  139,352 B). LaunchGuard suite 62 → 68; repo total
+  310 → 316. Localnet only; not deployed.
 - **2026-11-19 — `5b37d7b`** LaunchGuard dust floor
   (`programs/crates/launch-guard/`; spec
   `programs/LAUNCH-GUARD.md`). LaunchGuard's audit surface
