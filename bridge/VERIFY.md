@@ -4,7 +4,7 @@ Real commands and their real output. Nothing here is claimed without a
 run behind it. Verified 2026-11-14 ~11:07 UTC, in the bridge workspace
 directory.
 
-## Current state (2026-11-18, latest commits — read this first)
+## Current state (2026-11-19, latest commits — read this first)
 
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
@@ -14,9 +14,20 @@ the current state and supersedes their numbers.
   + 26 solana-lock + 60 relayer + 23 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
-  LaunchGuard **35 passed** and registry export **11 passed**
-  (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-18: **266 passed, 0 failed**.
+  LaunchGuard **35 passed**, PQ vault **17 passed** and registry
+  export **11 passed** (`programs/VERIFY.md`,
+  `programs/PQ-VERIFY.md`); fork suite 23 OK.
+  Full `make verify` 2026-11-19: **283 passed, 0 failed**.
+- **PQ Vault (2026-11-19, commit `8ca345c`):** new native
+  program in the `programs/` workspace (not a bridge component):
+  a cold-storage vault authorized by WOTS+ one-time signatures
+  instead of Ed25519, with program-enforced one-time discipline
+  and chunked signature delivery through a digest-bound buffer.
+  17 tests; measured verification cost against the SBF build is
+  337k–395k CU (ExecuteWithdrawal) — verifying transactions must
+  request a raised compute budget. SBF built: pq_vault.so
+  `b6a52b93…` (148,944 B, deterministic). See
+  `programs/PQ-VAULT.md` and `programs/PQ-VERIFY.md`.
 - **Debate round 4 (2026-11-18, commit `236257b`):** bridge-common
   + proof-bundle scope. `MachineConfig` gained `source_mint`
   (LEN 334 → 366) and `MintWrapped` binds `message.source_mint`;

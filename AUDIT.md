@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `236257b` (2026-11-18; `make verify` green —
-bridge workspace 197 passed, LaunchGuard 35 passed, registry export
-11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
+Last verified commit: `8ca345c` (2026-11-19; `make verify` green —
+bridge workspace 197 passed, LaunchGuard 35 passed, PQ vault 17
+passed, registry export 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -24,6 +24,7 @@ chain configuration gates any public chain launch. Both scopes:
 | Shared logic | `bridge/crates/bridge-common/` | Message format (195-byte canonical encoding), hash, 3-of-5 attestation verification via the ed25519 precompile + instructions sysvar (switched from in-program ed25519-dalek in the 2026-11-14 code-review changes; the precompile-instruction parser in `verify_precompile_attestation` is a priority review target), nonce replay protection, absolute + dynamic percentage caps, authority checks. Scope size at those changes: 4,706 lines of Rust across the five in-scope crates (bridge-common 1,168, solana-lock 547, machine-bridge 518, relayer 2,010, LaunchGuard 463; tests excluded). |
 | Off-chain relayer | `bridge/crates/relayer/` | Finalized-only signing rule, deterministic message construction (expiry derived from source slot), quorum collection with disagreement blocking, submitter account ordering. A relayer bug that signs a non-finalized or mis-built message is in scope even though quorum + on-chain checks should contain it. |
 | LaunchGuard launch standard | `programs/crates/launch-guard/` | Added 2026-11-14. Gates LaunchGuard's own mainnet use (it custodies locked creator tokens), not the bridge. Verify: registration truly requires revoked mint+freeze authorities, the ≥10% / ≥30-day (6,480,000-slot) lock floor, no early-release or lock-shortening path, PDA authority over the vault. Spec: `programs/LAUNCH-GUARD.md`. |
+| PQ Vault | `programs/crates/pq-vault/` | Added 2026-11-19. Gates PQ Vault's own mainnet use (it custodies stored funds), not the bridge. Withdrawals and rotation are authorized only by RFC 8391 WOTS+ one-time signatures; there is no Ed25519 path to the funds. Verify: one-time discipline is program-enforced (strict in-order spend, the index increments before the transfer), rotation cannot be authorized by anything but a one-time signature, exhaustion freezes fail-closed, the chunked signature buffer is bound to the exact withdrawal digest. Spec: `programs/PQ-VAULT.md`; verification record: `programs/PQ-VERIFY.md`. |
 | Key management | `bridge/deploy/DEPLOY-BRIDGE.md` step 2 | Fresh keys on deployment hosts, role separation, multisig + 48h timelock for upgrades. Process review, not code. |
 | Deployment + drills | `bridge/deploy/`, `bridge/drills/` | Caps translation (`caps.py`), initialization parameters, test-crossing / pause / outage drill results. |
 
@@ -268,6 +269,29 @@ chain configuration gates any public chain launch. Both scopes:
 > machine_bridge.so `7d0ab41f…` (215,312 B); LaunchGuard
 > untouched. **Program scope changed — auditors must quote
 > against the new HEAD.**
+>
+> **Scope update (2026-11-19 — NEW PROGRAM, SBF BUILT):** a
+> third native program joins Scope A: PQ Vault
+> (`programs/crates/pq-vault/`), a cold-storage vault whose
+> withdrawals are authorized by WOTS+ one-time signatures
+> (RFC 8391, SHA-256, w=16, len=67) instead of Ed25519. Only
+> 32-byte commitments are stored on-chain; the 2,144-byte
+> signature is delivered in chunks through a digest-bound
+> buffer account. One-time discipline is enforced by the
+> program: strict in-order spend, the key index increments
+> before funds move, rotation only on a one-time signature,
+> exhaustion without a chained rotation freezes the vault.
+> 17 tests (4 unit + 13 integration), all twelve of the
+> design note's required tests; the suite also passes
+> against the SBF build. Measured verification cost (SBF,
+> program-test): ExecuteWithdrawal 337k–395k CU, RotateKeys
+> 380k–393k CU — above the 200,000 default budget, so
+> verifying transactions must request a raised compute
+> budget; the design note's 50k–120k estimate is superseded
+> in `programs/PQ-VAULT.md`. SBF built: pq_vault.so
+> `b6a52b93…` (148,944 B, deterministic). Programs
+> workspace 46 → 63; repo total 283. **Program scope
+> changed — auditors must quote against the new HEAD.**
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
@@ -282,7 +306,7 @@ chain configuration gates any public chain launch. Both scopes:
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
 cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (197)
-cd programs && cargo test --release # LaunchGuard 35 tests (16 integration + 18 adversarial + 1 demo launch) + registry export 11
+cd programs && cargo test --release # LaunchGuard 35 tests (16 integration + 18 adversarial + 1 demo launch) + PQ vault 17 + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```
 

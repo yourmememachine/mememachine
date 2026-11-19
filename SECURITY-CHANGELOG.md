@@ -1,12 +1,39 @@
 # Security Changelog
 
-Every security-relevant change to the bridge, LaunchGuard, and the
-chain configuration, newest first. Maintained by hand: when a
+Every security-relevant change to the bridge, LaunchGuard, PQ
+Vault, and the chain configuration, newest first. Maintained by hand: when a
 commit changes verification, caps, authorities, replay protection,
 or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-19 — `8ca345c`** PQ Vault prototype program added
+  (`programs/crates/pq-vault/`; design `programs/PQ-VAULT.md`,
+  record `programs/PQ-VERIFY.md`). A new custody program joins
+  the audit surface: a cold-storage vault whose withdrawals
+  are authorized only by RFC 8391 WOTS+ one-time signatures
+  (SHA-256, w=16, len=67) — no Ed25519 key anywhere in the
+  withdrawal or rotation path can move funds. One-time
+  discipline is enforced by the program, not by user care: up
+  to 16 commitments per vault, strict in-order spend via
+  `next_key_index`, the index increments before the token
+  transfer runs, rotation replaces the whole set only on a
+  one-time signature from the next unconsumed key, and
+  exhaustion without a chained rotation freezes the remainder
+  fail-closed. The 2,144-byte signature is delivered in chunks
+  through a buffer account bound to the exact withdrawal
+  digest (domain-separated: vault, key index, destination,
+  amount, mint), so a signature authorizes exactly one
+  withdrawal of exactly one amount to exactly one destination.
+  17 tests (4 unit + 13 integration), all twelve of the design
+  note's required tests, green natively and against the SBF
+  build. Measured verification cost: ExecuteWithdrawal
+  337k–395k CU, RotateKeys 380k–393k CU (SBF) — verifying
+  transactions must request a raised compute budget; the
+  design estimate (50k–120k) did not survive measurement and
+  is corrected in the design note. SBF built: pq_vault.so
+  `b6a52b93…` (148,944 B, deterministic). Programs workspace
+  46 → 63; repo total 266 → 283. Localnet only; not deployed.
 - **2026-11-18 — `236257b`** Code-review debate round 4
   (bridge-common + proof-bundle; two independent reviews,
   every finding debated to a conclusion, every fix reproduced

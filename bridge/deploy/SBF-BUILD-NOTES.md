@@ -182,3 +182,26 @@ code fine (109/109 bridge workspace).
   build artifacts in a scratch directory — they are **not** program
   identities and **not** production keys. Production program keypairs
   are generated on the deployment host per DEPLOY-BRIDGE.md.
+
+## Addendum — PQ Vault (2026-11-19)
+
+`pq_vault.so` was built with the same method (scratch tree
+`~/workspace/sbf-pq`: the launch-guard and pq-vault crates with
+`[dev-dependencies]` stripped, seeded from the programs
+lockfile):
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `pq_vault.so` | 148,944 | `b6a52b936b9af8c9fb7b60dcf1664a1bfde2bb18e62333ae00ad0048ea9c74d7` |
+
+Deterministic: two builds, identical hash. The scratch
+lockfile is saved back as `programs/sbf-Cargo.lock`, which now
+covers launch-guard and pq-vault; its only change from the
+previously saved lockfile is the added `pq-vault` package
+entry — every dependency pin is unchanged, so the recorded
+launch_guard.so build is unaffected. The full pq-vault suite
+also passes against this binary (17/17 with `BPF_OUT_DIR`
+pointed at the deploy directory), and the measured compute
+units for its signature-verifying instructions are recorded
+in `programs/PQ-VERIFY.md`. Not deployed; the generated
+keypair file is a throwaway build artifact, as above.
