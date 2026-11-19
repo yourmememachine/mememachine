@@ -88,10 +88,44 @@ in the browser where the chain is the filesystem, blocks are folders,
 slots are time, and every app is a native app on the chain.
 
 - **Solana OS** — the native apps layer (Wallet, Rug Shield, Pump
-  Radar, x402 Store, MCP Hub, Terminal, Chain Files). It is the
+  Radar, x402 Store, MCP Hub, Terminal, Chain Files — plus Clerk, the
+  resident agent, and Check Before You Buy). It is the
   dashboard and the app platform, not an afterthought.
 
 A real apps layer ships on day one.
+
+**Clerk** is the OS's resident agent: always on while the OS is open,
+working a 45-second cycle with its own wallet and a daily spending
+cap. Clerk watches meme-coin launches on live Solana mainnet data and
+checks each one for insider-controlled supply, bundle-like launch
+patterns, funder-linked side wallets, and the creator's launch
+history. Its verdicts are FLAGGED, CAUTION, or NO RED FLAGS FOUND —
+never "safe": a check is a snapshot of the data it can reach, not an
+approval, and a coin with no flags can still go to zero. Two labels
+are deliberate and stay on screen: Machine's own chain data is
+**localnet** (there is no public Machine RPC yet), and Clerk's funds
+are **demo** funds — it cannot trade or move real money.
+
+![Solana OS desktop, Clerk mid-cycle](assets/solana-os-clerk.png)
+
+*Clerk mid-cycle on the Solana OS desktop: checking the watchlist
+against live Solana mainnet (slot shown top-right), 44 launches seen
+this session, spend 0.000 of the 0.100 demo SOL daily cap. The
+Machine chain panel reads localnet, public RPC "not yet".*
+
+![Check Before You Buy, FLAGGED verdict](assets/solana-os-check-before-you-buy.png)
+
+*Check Before You Buy: a pasted mint goes to the top of Clerk's
+deep-check queue. This one came back FLAGGED — the creator and their
+linked wallets had already sold 100.0% of their launch position. The
+window says it plainly: a risk check, not an approval.*
+
+![Clerk's own payment blocked](assets/solana-os-blocked.png)
+
+*The guardrail applies to the agent too. When Clerk's own demo
+payment aimed at a token Rug Shield flags on live mainnet data, the
+OS stopped it full-screen — stop code AGENT_TRANSACTION_BLOCKED —
+before any funds moved, and wrote the block to Clerk's ledger.*
 
 ## What makes Machine different
 
