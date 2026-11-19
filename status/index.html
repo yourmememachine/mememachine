@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Machine — status snapshot</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 52rem;
+         padding: 0 1rem; line-height: 1.5; color: #111; }
+  .stalled { border: 2px solid #b00020; padding: 1rem; border-radius: 6px; }
+  .stalled h2 { color: #b00020; margin-top: 0; }
+  section { border: 1px solid #ccc; padding: 1rem; border-radius: 6px; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left;
+           vertical-align: top; }
+  code { font-size: 0.85em; overflow-wrap: anywhere; }
+  .small { color: #555; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<h1>Machine — status snapshot</h1>
+<p class="small">Static snapshot generated 2026-11-19 by
+<code>status/generate.py</code> from this repository's own records
+(<code>STATUS.md</code>, <code>bridge/drills/last-drill.md</code>, the
+VERIFY logs). It is not a live monitor: nothing here polls a chain,
+and every figure is exactly as current as the file it was read from.
+Regenerate with <code>python3 status/generate.py</code>.</p>
+
+<section class="stalled">
+  <h2>Chain: localnet only — validator STALLED</h2>
+  <p>Machine runs as a <strong>single local validator</strong> on one
+  machine. It is <strong>not a public chain</strong>: there is no public
+  RPC, no second validator, and nothing is deployed anywhere.</p>
+  <p>The local validator is <strong>stalled at slot 29,100</strong>
+  (processed / confirmed / finalized), unchanged since ~22:11 PST 2026-11-14.
+  Its RPC health check still answers, but the slot does not advance;
+  whether to restart fresh from the shipped genesis or diagnose the
+  stall is an open decision, recorded in <code>STATUS.md</code>. Any
+  page or post claiming this chain is live and advancing is describing
+  some other day — the last day that was true was 2026-11-14.</p>
+  <p>Genesis hash: <code>32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb</code></p>
+</section>
+
+<section>
+  <h2>Verification (local test suites)</h2>
+  <p>Full local <code>make verify</code> run on 2026-11-19 against
+  commit <code>5b37d7b</code>: <strong>310 passed, 0 failed</strong>.</p>
+  <table>
+    <tr><th>Suite</th><th>Passed</th></tr>
+    <tr><td>Bridge workspace</td><td>197</td></tr>
+    <tr><td>LaunchGuard</td><td>62</td></tr>
+    <tr><td>PQ vault</td><td>17</td></tr>
+    <tr><td>Registry export</td><td>11</td></tr>
+    <tr><td>Fork suite</td><td>23</td></tr>
+  </table>
+  <p class="small">Program-test results prove the programs behave as
+  designed locally. They prove nothing about a live deployment, which
+  does not exist.</p>
+</section>
+
+<section>
+  <h2>Last bridge drill (local, program-test)</h2>
+  <p><code>volume_drill_many_crossings_reconcile</code> — 2026-11-16 09:06 UTC<br>
+  Crossings succeeded: 45 (40 in,
+  5 back); failed unexpectedly: 0.<br>
+  Final state: vault 9550000 locked == 9550000 wrapped outstanding</p>
+  <p class="small">A local drill in the test harness — no asset has
+  ever crossed the bridge, and the bridge is not deployed.</p>
+</section>
+
+<section>
+  <h2>Program builds (SBF, local only)</h2>
+  <table>
+    <tr><th>Artifact</th><th>Size</th><th>sha256</th></tr>
+      <tr><td><code>solana_lock.so</code></td><td>211,744 B</td><td><code>a22bccd8…</code></td></tr>
+      <tr><td><code>machine_bridge.so</code></td><td>215,312 B</td><td><code>7d0ab41f…</code></td></tr>
+      <tr><td><code>launch_guard.so</code></td><td>139,352 B</td><td><code>8153dd4f755e0b0c2be088635f0b125206d4f9d49214cfd1d63d2f4ba30a2c16</code></td></tr>
+      <tr><td><code>pq_vault.so</code></td><td>148,944 B</td><td><code>b6a52b936b9af8c9fb7b60dcf1664a1bfde2bb18e62333ae00ad0048ea9c74d7</code></td></tr>
+  </table>
+  <p class="small">Deterministic local builds recorded in
+  <code>bridge/VERIFY.md</code>, <code>programs/VERIFY.md</code>, and
+  <code>programs/PQ-VERIFY.md</code>. A hash shown with an ellipsis
+  is the truncated prefix exactly as the VERIFY log records it,
+  not a full sha256. Built is not deployed: no program
+  in this repository runs on any live network.</p>
+</section>
+
+<p class="small">Source of truth: <code>STATUS.md</code> in this
+repository. If this page and STATUS.md ever disagree, STATUS.md is
+right and this page is stale — regenerate it.</p>
+</body>
+</html>

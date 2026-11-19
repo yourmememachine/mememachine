@@ -7,6 +7,28 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-19 — `5b37d7b`** LaunchGuard dust floor
+  (`programs/crates/launch-guard/`; spec
+  `programs/LAUNCH-GUARD.md`). LaunchGuard's audit surface
+  grows: a fifth instruction, `Initialize`, creates a config
+  PDA carrying a minimum lock size in raw units, enforced by
+  `RegisterAndLock` on top of the 10% share. Initialize is
+  one-time and bound to the program's upgrade authority —
+  proven against the ProgramData account by a check mirrored
+  from bridge-common's `verify_upgrade_authority` (self-audit
+  F-1 pattern); the mirror is now pinned by unit tests for
+  every structural rejection (wrong address, wrong owner,
+  truncated data, wrong variant, immutable program).
+  Registration before Initialize fails closed
+  (`ConfigNotInitialized`); no instruction changes the floor
+  afterwards. **Breaking instruction-ABI change:**
+  `RegisterAndLock` takes the config PDA as a tenth account
+  (appended last); the pre-floor 9-account form fails with
+  `NotEnoughAccountKeys`. The program is not deployed and
+  has no live clients. Six-seat review before shipping;
+  LaunchGuard suite 35 → 62; SBF rebuilt: launch_guard.so
+  `8153dd4f…` (139,352 B, deterministic). Repo total
+  283 → 310. Localnet only; not deployed.
 - **2026-11-19 — `8ca345c`** PQ Vault prototype program added
   (`programs/crates/pq-vault/`; design `programs/PQ-VAULT.md`,
   record `programs/PQ-VERIFY.md`). A new custody program joins
