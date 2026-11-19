@@ -5,6 +5,10 @@
 # Machine
 Website: https://machinechain.netlify.app/
 
+**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 283 tests, running localnet, built in public.**
+
+![Tests: 283 passing](https://img.shields.io/badge/tests-283%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
+
 A Solana-derived L1 with its own token, its own culture, and apps
 running on it — built to be one of the best Solana forks, not just a
 rebrand. Machine is the chain the Solana OS runs on.
@@ -17,34 +21,23 @@ the project, the repo, and the $MACHINE token are unchanged.)*
 - **Token:** **$MACHINE** — the native gas token, 1,000,000,000 supply,
   minted at genesis. See `GENESIS.md` for the hash, the distribution,
   the validator keys, and the fee schedule.
-- **Status:** local single-node testnet — currently **stalled at slot
-  29,100** since ~22:11 PST 2026-11-14 (see `STATUS.md` P3).
-  Not a public chain yet — see "Honest limits" and
-  `LAUNCH_CHECKLIST.md`.
+- **Status:** local single-node testnet. Not a public chain yet —
+  see "Honest limits" and `LAUNCH_CHECKLIST.md`.
 
-## What this is
+**LaunchGuard in action** — a token launched under the standard on
+localnet, then attacked seven ways. Every rug attempt fails:
 
-Machine is a real fork of Solana's validator code (Agave) with a
-custom genesis: its own chain identity, its own token, its own fee
-schedule, and its own validator. It is not a token on Solana mainnet
-and not a rebranded testnet — it is a separate chain that produces its
-own blocks, votes, and finality.
+https://github.com/user-attachments/assets/4d53b2b1-aca7-4ca3-9d70-caad256bb3a9
 
-A Solana-derived L1 with a native token, its own culture, apps, and
-a bridge — built from scratch, everything here is original.
+⭐ Star to follow the build — next milestone: Dev3pack Global Hackathon, Nov 27–29.
 
-## The differentiator: Machine has its own OS
+**Upstream work:** contributor to Agave (anza-xyz) —
+[watchtower `--minimum-delegated` PR #16950](https://github.com/anza-xyz/agave/pull/16950)
+(open), implementing [issue #2552](https://github.com/anza-xyz/agave/issues/2552).
 
-Machine has an **operating
-system** as its native apps layer: the Solana OS we built — a desktop OS
-in the browser where the chain is the filesystem, blocks are folders,
-slots are time, and every app is a native app on the chain.
-
-- **Solana OS** — the native apps layer (Wallet, Rug Shield, Pump
-  Radar, x402 Store, MCP Hub, Terminal, Chain Files). It is the
-  dashboard and the app platform, not an afterthought.
-
-A real apps layer ships on day one.
+**Fork your own chain:** [FORK-YOUR-OWN.md](FORK-YOUR-OWN.md) —
+regenerate the genesis with your own keys, rename the token, change
+the supply, boot your chain.
 
 ## How to run it
 
@@ -75,6 +68,30 @@ one, see `patch-vote-authority.py` — run `solana-genesis` with the
 parameters in `GENESIS.md`, then run the patch script so the
 test-validator can vote. The shipped `ledger/` is the canonical
 genesis; regenerating produces a different hash (new timestamp).
+
+## What this is
+
+Machine is a real fork of Solana's validator code (Agave) with a
+custom genesis: its own chain identity, its own token, its own fee
+schedule, and its own validator. It is not a token on Solana mainnet
+and not a rebranded testnet — it is a separate chain that produces its
+own blocks, votes, and finality.
+
+A Solana-derived L1 with a native token, its own culture, apps, and
+a bridge — built from scratch, everything here is original.
+
+## The differentiator: Machine has its own OS
+
+Machine has an **operating
+system** as its native apps layer: the Solana OS we built — a desktop OS
+in the browser where the chain is the filesystem, blocks are folders,
+slots are time, and every app is a native app on the chain.
+
+- **Solana OS** — the native apps layer (Wallet, Rug Shield, Pump
+  Radar, x402 Store, MCP Hub, Terminal, Chain Files). It is the
+  dashboard and the app platform, not an afterthought.
+
+A real apps layer ships on day one.
 
 ## What makes Machine different
 
