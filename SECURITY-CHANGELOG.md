@@ -7,6 +7,37 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-18 — `236257b`** Code-review debate round 4
+  (bridge-common + proof-bundle; two independent reviews,
+  every finding debated to a conclusion, every fix reproduced
+  failing first). **MintWrapped source-mint binding (High):**
+  `MachineConfig` had no source-mint field, so a quorum
+  attestation for a deposit of a different asset sharing the
+  relayer set minted this deployment's wrapped tokens unbacked
+  (the Unlock side was bound in round 1; this was its leftover
+  B2). `MachineConfig` gains `source_mint` (LEN 334 → 366),
+  `Initialize` registers it, `MintWrapped` rejects a mismatched
+  `message.source_mint`, and the relayer cross-checks the
+  on-chain value at startup. **Bounded attestation lifetime:**
+  `validate_message` now rejects `expiry_slot - source_slot >
+  1,000,000` and expiry before the source slot (leftover B8) —
+  a quorum-signed message can no longer be a permanent bearer
+  instrument. **Zero-authority guards:** the shared verifiers
+  reject quorum 0 / above the set size and admin threshold 0 /
+  above the set size (previously an empty signature list
+  verified). **ed25519 builder:** refuses more than
+  `MAX_RELAYERS` signatures instead of silently truncating the
+  count/offset fields. **Proof-bundle verifier:** a non-ASCII
+  message hash is rejected instead of panicking; zero-amount
+  bundles are rejected; export stamps the protocol quorum (a
+  stronger 5-of-5 collection no longer fails its own
+  verification); the report carries the relayer set and
+  verification can pin it (`--expected-relayers`); CLI input
+  files are capped at 1 MiB; the receipt and relayer-set
+  claims are downgraded to what offline verification
+  establishes. 9 new regression tests (bridge workspace
+  188 → 197). SBF rebuilt: solana_lock.so `a22bccd8…`
+  (211,744 B), machine_bridge.so `7d0ab41f…` (215,312 B).
 - **2026-11-18 — `10840ba`** Code-review debate round 3
   (LaunchGuard; two independent reviews, every finding debated
   to a conclusion before any fix). One code fix: `ExtendLock`

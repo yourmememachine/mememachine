@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `10840ba` (2026-11-18; `make verify` green —
-bridge workspace 188 passed, LaunchGuard 35 passed, registry export
+Last verified commit: `236257b` (2026-11-18; `make verify` green —
+bridge workspace 197 passed, LaunchGuard 35 passed, registry export
 11 passed, fork suite 23 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -236,6 +236,38 @@ chain configuration gates any public chain launch. Both scopes:
 > SBF rebuilt: launch_guard.so `9aceb092…` (135,416 B);
 > bridge programs untouched. **Program scope changed —
 > auditors must quote against the new HEAD.**
+>
+> **Scope update (2026-11-18, debate round 4 — PROGRAM CHANGE,
+> SBF REBUILT):** two independent reviews of bridge-common +
+> proof-bundle (`bridge/crates/bridge-common/`,
+> `bridge/crates/proof-bundle/`), debated finding-by-finding;
+> every surviving finding was reproduced before fixing.
+> `MachineConfig` gains a `source_mint` field (account layout
+> LEN 334 → 366; `Initialize` carries it) and `MintWrapped` now
+> binds `message.source_mint` to it, mirroring the Unlock-side
+> binding from round 1 — this closes the round-1 leftover B2.
+> `validate_message` bounds the attestation lifetime on the
+> source basis (`expiry_slot - source_slot` ≤ 1,000,000 slots;
+> expiry before the source slot rejected) — the leftover B8.
+> The shared attestation/admin verifiers reject quorum and
+> threshold values of 0 (and above the set size), and
+> `build_ed25519_instruction` refuses more than `MAX_RELAYERS`
+> signatures instead of silently truncating. Proof-bundle:
+> non-ASCII message hashes are rejected rather than panicking
+> the verifier; zero-amount bundles are rejected; export stamps
+> the protocol quorum; the verification report carries the
+> relayer set and a new `verify_bundle_against_set` /
+> `--expected-relayers` pins it; the CLI caps input files at
+> 1 MiB; and the receipt/relayer-set claims in the crate docs
+> and `bridge/PROOF-BUNDLE.md` are downgraded to what offline
+> verification actually establishes (the receipt is
+> unauthenticated stated data — its on-chain existence is a
+> separate lookup, as is the set's identity when unpinned).
+> 9 new regression tests; bridge workspace 188 → 197. SBF
+> rebuilt: solana_lock.so `a22bccd8…` (211,744 B),
+> machine_bridge.so `7d0ab41f…` (215,312 B); LaunchGuard
+> untouched. **Program scope changed — auditors must quote
+> against the new HEAD.**
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
@@ -249,7 +281,7 @@ chain configuration gates any public chain launch. Both scopes:
 
 ```bash
 ./tests/run.sh                    # fork-script suite: 23 tests
-cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (188)
+cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (197)
 cd programs && cargo test --release # LaunchGuard 35 tests (16 integration + 18 adversarial + 1 demo launch) + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```

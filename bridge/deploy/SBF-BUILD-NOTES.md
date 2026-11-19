@@ -122,6 +122,22 @@ the identical hash.
 |---|---|---|
 | `launch_guard.so` | 135,416 | `9aceb092789c5afb593945ab002d3ece779326182a39a34e2b3aa8586f86cccf` |
 
+**Rebuilt 2026-11-18** from the code-review debate round 4
+change (`236257b`: `MachineConfig` gains `source_mint` and
+`MintWrapped` binds `message.source_mint`; `validate_message`
+bounds attestation lifetime at 1,000,000 slots on the source
+basis; zero/impossible quorum and admin thresholds rejected in
+the shared verifiers; the ed25519 instruction builder refuses
+oversized sets; see the AUDIT.md scope update). Bridge programs
+only — LaunchGuard was not touched and its binary above stands.
+Same standalone-tree method (`~/workspace/sbf-build/`, saved
+`bridge/deploy/sbf-Cargo.lock`).
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 211,744 | `a22bccd8ea47e59972ca1e45f0bec6a23809b45c51c35480252556e3bc8f71fc` |
+| `machine_bridge.so` | 215,312 | `7d0ab41f4a6eb7f6ce2d58c021793c1ffc4a4438b95ffce9cabeba5c4ac8defb` |
+
 ## Why the build does not run directly against the bridge workspace
 
 `bridge/deploy/build-sbf.sh` against the workspace fails before any

@@ -9,14 +9,27 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **188 passed, 0 failed** (37
-  bridge-common unit + 31 machine-bridge + 25 solana-lock + 1
-  precompile-cost + 60 relayer + 19 proof bundle + 15 receipt
+- **Tests:** bridge workspace **197 passed, 0 failed** (41
+  bridge-common unit + 32 machine-bridge (incl. precompile-cost)
+  + 26 solana-lock + 60 relayer + 23 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **35 passed** and registry export **11 passed**
   (`programs/VERIFY.md`); fork suite 23 OK.
-  Full `make verify` 2026-11-18: **257 passed, 0 failed**.
+  Full `make verify` 2026-11-18: **266 passed, 0 failed**.
+- **Debate round 4 (2026-11-18, commit `236257b`):** bridge-common
+  + proof-bundle scope. `MachineConfig` gained `source_mint`
+  (LEN 334 → 366) and `MintWrapped` binds `message.source_mint`;
+  `validate_message` bounds attestation lifetime at 1,000,000
+  slots on the source basis; zero/impossible quorum and admin
+  thresholds are rejected by the shared verifiers; the ed25519
+  instruction builder refuses oversized sets; proof-bundle's
+  verifier rejects non-ASCII hashes without panicking and
+  zero-amount bundles, stamps the protocol quorum on export,
+  carries the verified relayer set in its report, and can pin
+  that set (`verify --expected-relayers`); the CLI caps input
+  files at 1 MiB. SBF rebuilt: solana_lock.so `a22bccd8…`
+  (211,744 B), machine_bridge.so `7d0ab41f…` (215,312 B).
 - **Receipt indexer (2026-11-18, commit `e0d0a24`):** new
   off-chain crate `crates/receipt-indexer/` (binary
   `receipt-index`) performing the binding BRIDGE.md 4.5 leaves to
