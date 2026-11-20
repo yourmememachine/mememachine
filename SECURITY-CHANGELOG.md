@@ -7,6 +7,28 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-20 — `a5795b4`** RugCall terminal handlers land;
+  the program is complete. ResolveMarket is resolver-only
+  (the authority check runs before any market state is read,
+  so a non-resolver cannot probe market state through its
+  error codes), validates the outcome / hard-trigger /
+  evidence-hash payload in field order, refuses the all-zero
+  evidence hash, and closes the LiveMarket lock in the same
+  instruction with its rent paid to the market creator.
+  Claim never writes the market account: pools, outcome and
+  resolution data are frozen at resolution, payouts are
+  computed from the stored pools only, and the frozen branch
+  precedence (cancelled → refund; zero winning pool →
+  refund; no winning stake → refuse; otherwise pro-rata)
+  keeps the vault solvent for every claim order — the
+  conservation invariant is asserted after every claim in
+  the test suite, with the exact floor-dust remainder
+  pinned. CancelMarket's permissionless path compares
+  against a checked-arithmetic grace deadline that fails
+  closed at the i64 boundary instead of wrapping open.
+  Devnet-only crate; the audit surface of the existing
+  programs is unchanged.
+
 - **2026-11-20 — `fb629f1`** RugCall core handlers land:
   InitializeConfig, CreateMarket and BuyPosition are
   implemented (ResolveMarket, Claim and CancelMarket remain

@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `fb629f1` (2026-11-20; `make verify` green —
+Last verified commit: `a5795b4` (2026-11-20; `make verify` green —
 bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 52 passed, fork suite 49 OK). The pin is refreshed after every full verification run;
+passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -55,6 +55,21 @@ chain configuration gates any public chain launch. Both scopes:
 > and CancelMarket still return `NotImplemented`. Still
 > devnet-only, still not part of Scope A, still gating
 > nothing.
+>
+> **Scope update (2026-11-20, later still — RugCall program
+> complete, commit `a5795b4`):** ResolveMarket, Claim and
+> CancelMarket are implemented; the program is complete as
+> designed (127 tests, including 101 integration tests
+> against the real SPL token program, also run against the
+> SBF build). Resolution is resolver-only and bound to a
+> non-zero evidence hash; claims pay pro-rata from the
+> stored pools or refund in full on cancelled and
+> zero-winning-pool markets; the anyone-cancel path opens
+> strictly after expiry + 24h grace. Still devnet-only,
+> still not part of Scope A, still gating nothing. The SBF
+> binary is recorded in `bridge/deploy/SBF-BUILD-NOTES.md`;
+> deployment to devnet is a separate step and has not
+> happened at this commit.
 >
 > **Scope update (2026-11-19, code-review debate round 6 —
 > consistency pass, commit `ba65722`):** a whole-repo

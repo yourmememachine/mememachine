@@ -228,3 +228,30 @@ changed tests only; this binary stands.
 | Artifact | Size (bytes) | sha256 |
 |---|---|---|
 | `launch_guard.so` | 139,352 | `8153dd4f755e0b0c2be088635f0b125206d4f9d49214cfd1d63d2f4ba30a2c16` |
+
+## Addendum — RugCall (2026-11-20)
+
+**Built 2026-11-20** from the completed program (`a5795b4`:
+all six instructions — InitializeConfig, CreateMarket,
+BuyPosition, ResolveMarket, Claim, CancelMarket). RugCall
+only — the bridge programs, LaunchGuard and the PQ vault
+were not touched and their binaries above stand. Same
+standalone-tree method (scratch tree `~/workspace/sbf-rc`:
+the rug-call crate with `[dev-dependencies]` stripped,
+seeded from the programs lockfile). The build is
+deterministic: two consecutive builds produced the
+identical hash. The full integration suite (101 tests) also
+passes against this binary with `BPF_OUT_DIR` pointed at the
+deploy directory. The scratch lockfile's only delta from
+the previously saved `programs/sbf-Cargo.lock` is the added
+`rug-call` package entry — every dependency pin is
+unchanged — and the saved lockfile has been updated with
+that entry merged in, so it now covers launch-guard,
+pq-vault and rug-call. Not deployed; the generated keypair
+file is a throwaway build artifact in the scratch tree, as
+above. Deployment is gated on devnet funding of the
+deployer key, which was still outstanding at build time.
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `rug_call.so` | 149,208 | `34af7b0b5f612d31f91233b6c9fdc9cdbfa7147ad7e5d986111e9fa62d693a68` |
