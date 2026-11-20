@@ -18,13 +18,13 @@ writing: slot 1,180, confirmed 1,179, finalized 1,149.
 | 4 | Fee schedule published | `GENESIS.md` — FeeRateGovernor: 9,500 lamports/signature, target 10,000, min 5,000, max 100,000, burn 50%, 20,000 target signatures/slot. |
 | 5 | MACHINE distribution written down | `GENESIS.md` — founder 998,999,000 / stake 1,000,000 / faucet 1,000 / system ~0.2536. Total 1,000,000,000. |
 | 6 | MACHINE is the native gas token from genesis | Founder balance decreases only by vote-transaction fees (998,999,000 → 998,998,999.99411), paid in MACHINE. No other token exists at genesis. |
-| 7 | Slots advancing | Slot 1,180 and rising (~3 slots/second). `solana slot` returns a live, advancing number. |
+| 7 | Slots advancing | Historical evidence (2026-11-14): slot 1,180 and rising (~3 slots/second). **The validator later stalled at slot 29,100 and does not advance now — see STATUS.md.** |
 | 8 | Voting and confirming | Confirmed Slot 1,179, tracking Processed Slot 1,180. Vote credits 17,184 and growing. Vote authority is the vote keypair (`GMe5eK5i…`), withdraw authority is the founder. |
 | 9 | Finalizing | Finalized Slot 1,149. Root slot 1,074+. |
 | 10 | Snapshots working | Full snapshot at slot 1,100 (validator log: `Full Snapshot Slot: 1100`). |
 | 11 | Founder / faucet / stake balances correct | Founder 998,998,999.99411, faucet 1,000, stake 1,000,000 — all via `solana balance` on the live RPC. |
 | 12 | Day-one apps shipped | Solana OS (web artifact, the native apps layer). |
-| 13 | Fast blocks | Observed ~3 slots/second on the localnet, confirming and finalizing continuously. |
+| 13 | Fast blocks | Historical evidence (2026-11-14): observed ~3 slots/second on the localnet, confirming and finalizing continuously at that time. **Stalled at slot 29,100 since 2026-11-14 — see STATUS.md.** |
 | 14 | Wallet support beyond one wallet (OS layer) | Solana OS wallet connect supports Phantom, Solflare, and Backpack (real USDC signing). |
 | 15 | Prebuilt binaries only, no source build | Agave 2.3.13 release binaries in `bin/`. `install.sh` downloads the release; nothing was compiled from source. |
 | 16 | Vote-authority fix is reproducible | `patch-vote-authority.py` in this repo, with layout checks that abort on mismatch. It is the documented reason the test-validator can vote on a `solana-genesis` chain. |
@@ -40,7 +40,7 @@ writing: slot 1,180, confirmed 1,179, finalized 1,149.
 | 21 | Bridge (Solana mainnet ↔ Machine) | Bridge programs implemented and tested locally (`bridge/`, 99/99 program tests) and the off-chain relayer implemented and tested locally (`bridge/crates/relayer/`, 60/60 tests) — security review still pending (inquiries sent to two firms 2026-11-14), SBF build verified locally (hashes in `bridge/VERIFY.md`), not deployed. Nothing is claimed as bridged until a real asset crosses. |
 | 22 | Audit | An independent audit of the validator configuration and any bridge/program code, with the report published. |
 | 23 | Bug bounty | A published bounty program with scope and rewards. |
-| 24 | Whitepaper | A written whitepaper (tokenomics, consensus, roadmap, governance). |
+| 24 | Whitepaper | **Done 2026-11-19** — `WHITEPAPER.md` v2.1 (tokenomics, consensus, roadmap, governance) ships at the repo root. |
 | 25 | Public chain | Hosted validators, stake, monitoring, incident response, and a public RPC — a separate step, not claimed now. |
 
 ## What "best" does NOT mean (yet)

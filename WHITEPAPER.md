@@ -352,7 +352,7 @@ creator's history is a queryable on-chain fact, not a social claim.
 
 ### 5.3 Evidence, not assertions
 
-LaunchGuard is covered by 35 automated tests, including a named
+LaunchGuard is covered by 68 automated tests, including a named
 adversarial suite that attacks it the way a rugger would: minting
 after revocation, releasing early, shortening a lock, releasing as a
 stranger, draining the vault directly, forging a reputation account,
@@ -649,8 +649,10 @@ Machine has no on-chain governance program today, and this paper does
 not pretend otherwise. The genesis, fee schedule, and distributions
 are fixed in the repository and published; changing them requires a
 new genesis or a network upgrade — both public events. The bridge's
-admin powers are a 2-of-3 multisig limited to pause, unpause, kill,
-and relayer rotation; LaunchGuard has no admin over launches (its
+admin powers are a 2-of-3 multisig: pause, unpause, kill, relayer
+rotation, and `set_cap` — rewriting both programs' per-transaction
+and daily caps, effective immediately (no timelock exists in the
+programs); LaunchGuard has no admin over launches (its
 only privileged call is the one-time, upgrade-authority-bound
 setup that sets the dust floor — §5.1). No governance
 token is planned. The direction — validator-set governance as the

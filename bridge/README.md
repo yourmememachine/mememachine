@@ -78,19 +78,19 @@ cargo test --release
 
 `cargo test` runs:
 
-- **bridge-common unit tests** (15): canonical encoding and hashing,
+- **bridge-common unit tests** (41): canonical encoding and hashing,
   valid 3-of-5 and 5-of-5 attestations, 2-of-5 quorum failure, duplicate
   relayer signature, unknown relayer, tampered signature, wrong direction,
   expired attestation, wrong version, daily-cap window reset, per-tx cap,
   admin threshold, pause authority, kill-switch semantics, config
   serialization round-trip.
-- **machine-bridge integration tests** (9, program-test with the real SPL
+- **machine-bridge integration tests** (32, program-test with the real SPL
   token program): valid 3-of-5 claim mints real tokens, replay of a used
   nonce fails, 2-of-5 fails, over per-tx cap fails, over daily cap fails,
   paused bridge rejects mints (and relayers cannot unpause), kill-switch
   is permanent while burns stay open, admin signatures cannot mint,
   burn records the event and rejects replay.
-- **solana-lock integration tests** (10, program-test with the real SPL
+- **solana-lock integration tests** (26, program-test with the real SPL
   token program): deposit locks tokens in the vault, same-nonce deposit
   fails, deposit over the vault ceiling fails, unlock with a valid 3-of-5
   burn attestation releases tokens, unlock replay fails, 2-of-5 fails,
@@ -146,7 +146,8 @@ When those exist, the deploy path is:
   never watched a real deposit — there is
   no deployed bridge or public Machine RPC for it to watch yet.
 - **No upgrade path in the programs.** Program upgrades go through a
-  multisig with a timelock (BRIDGE.md 4.2); the upgrade authority is a
+  multisig at deployment (BRIDGE.md 4.2 — no timelock exists in the
+  programs); the upgrade authority is a
   deployment concern, not program code.
 - **Caps: absolute plus dynamic.** Both programs enforce absolute
   per-tx/daily caps set at initialization; unlocks additionally enforce

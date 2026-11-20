@@ -1,7 +1,8 @@
 //! Watching a source chain for the next bridge event.
 //!
-//! Discovery is by nonce cursor, not by scanning accounts: nonces are
-//! strictly increasing per direction, and the event for nonce N lives
+//! Discovery is by nonce cursor, not by scanning accounts: the programs
+//! accept any unused caller-chosen nonce, this watcher probes them
+//! sequentially per direction, and the event for nonce N lives
 //! at a deterministic PDA. The watcher probes N, and only advances
 //! past N once that event has been signed (or was already processed
 //! on the destination). It never skips a nonce — a gap stalls the

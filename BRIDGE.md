@@ -31,7 +31,7 @@ One asset, two representations. The original token never leaves Solana mainnet; 
 
 - The lock vault is a program-owned account (PDA) on Solana mainnet. No individual holds the keys.
 - The vault's authority is the **lock program itself**, which only releases funds on a verified quorum attestation of a burn on Machine.
-- Program upgrades are behind a **multisig timelock** (see §4). There is no single admin key.
+- Program upgrades are **not** behind a multisig or a timelock in the code: the upgrade authority is a single loader authority (see §4.2). Assigning that authority to a multisig is a deployment step, not a program feature.
 - The wrapped token's mint authority on Machine is held by the **Machine bridge program PDA**. Minting is only possible through the program's attestation path — there is no direct mint instruction callable by any key.
 
 ### What is NOT in this design
@@ -54,8 +54,9 @@ Instructions:
 |---|---|
 | `deposit(mint, amount, destination)` | Transfers SPL tokens from the user into the vault PDA. Records the deposit in a per-nonce account. Emits `Deposit` event. |
 | `unlock(attestation)` | Verifies a quorum attestation of a burn on Machine, checks the nonce has not been processed, releases the locked tokens to the destination address, marks the nonce processed. |
-| `pause()` / `unpause()` | Multisig-only. Halts deposits and unlocks. |
-| `set_cap(...)` | Multisig-only, timelocked. Adjusts per-transaction and daily limits. |
+| `pause()` / `unpause()` | Pause: 2-of-3 admins **or** any 2 of 5 relayers. Unpause: admin-only. Halts deposits and unlocks. |
+| `set_cap(...)` | Admin-only (2-of-3), effective immediately — no timelock exists in the programs. Adjusts per-transaction and daily limits. |
+| `set_relayers(...)` | Admin-only (2-of-3), effective immediately. Replaces the registered relayer set. |
 
 State: one `ProcessedNonce` PDA per (direction, nonce). A nonce can never be processed twice.
 
@@ -67,10 +68,12 @@ Instructions:
 |---|---|
 | `mint_wrapped(attestation)` | Verifies a quorum attestation of a lock on Solana, checks the nonce, mints the wrapped SPL token to the destination address, marks the nonce processed. |
 | `burn(amount, destination)` | Burns the wrapped token from the user. Records the burn in a per-nonce account. Emits `Burn` event. |
-| `pause()` / `unpause()` | Multisig-only. Halts mints and burns. |
-| `set_cap(...)` | Multisig-only, timelocked. |
+| `pause()` / `unpause()` | Pause: 2-of-3 admins **or** any 2 of 5 relayers. Unpause: admin-only. Halts mints and burns. |
+| `set_cap(...)` | Admin-only (2-of-3), effective immediately — no timelock exists in the programs. |
+| `set_relayers(...)` | Admin-only (2-of-3), effective immediately. Replaces the registered relayer set. |
+| `kill_switch()` | Admin-only (2-of-3), one-way. Permanently disables minting; burns stay open. |
 
-The wrapped token is a standard SPL mint created by the bridge program at deployment. Its mint authority is the program PDA; its freeze authority is the program PDA (used only by the pause path, never to freeze individual users).
+The wrapped token is a standard SPL mint created by the bridge program at deployment. Its mint authority is the program PDA; its freeze authority is the program PDA or none (Initialize accepts either). The program never exercises the freeze authority — pause is a config flag, not an SPL freeze — and it is never used to freeze individual users.
 
 ### 2.3 Message format
 
@@ -81,7 +84,7 @@ BridgeMessage {
   version:        u8,          // 1
   source_chain:   u8,          // 1 = Solana mainnet, 2 = Machine
   dest_chain:     u8,
-  nonce:          u64,         // strictly increasing per direction
+  nonce:          u64,         // caller-chosen; must be unused (uniqueness only, see §2.4)
   source_mint:    Pubkey,      // original SPL mint on Solana
   sender:         Pubkey,
   recipient:      Pubkey,      // address on the destination chain
@@ -104,7 +107,7 @@ cryptography.
 
 ### 2.4 Replay protection
 
-- **Nonce registry:** each direction maintains a strictly increasing nonce counter and a set of processed nonces (PDA per nonce). `unlock` / `mint_wrapped` reject any nonce already processed.
+- **Nonce registry:** nonces are caller-chosen; neither config holds a nonce counter. The programs enforce uniqueness only — a set of processed nonces (PDA per nonce); `unlock` / `mint_wrapped` reject any nonce already processed. (The phase-1 relayer discovers events by a sequential nonce cursor, so a skipped nonce stalls that relayer's discovery — a safe stall, not a loss — and operators should use sequential nonces.)
 - **Chain binding:** `source_chain` and `dest_chain` are part of the signed hash, so an attestation for one direction cannot be replayed in the other.
 - **Expiry:** attestations carry an `expiry_slot`. Stale attestations (older than the expiry) are rejected, so a captured attestation cannot be replayed later. The lifetime itself is bounded on-chain (debate round 2026-11-18): `validate_message` rejects any message whose `expiry_slot - source_slot` exceeds 1,000,000 slots (or whose expiry precedes its source slot), so a quorum-signed message cannot become a permanent bearer instrument.
 - **Asset binding:** both destination programs bind `message.source_mint` to the mint registered in their config at initialization (lock side since 2026-11-17; Machine side since the 2026-11-18 debate round, which added `source_mint` to `MachineConfig`), so an attestation for a different asset sharing the relayer set cannot move this deployment's tokens.
@@ -152,21 +155,21 @@ Relayers are off-chain processes that watch one chain, verify finality, sign att
 | Infinite mint on Machine | Quorum of relayer keys **and** a forged lock attestation, or the mint authority. The mint authority is the program PDA — there is no key to steal. |
 | Replay an old crossing | A processed nonce, an expired attestation, or a cross-direction replay — all rejected by §2.4. |
 | Drain via fake finality | Convincing relayers that an unfinalized transaction is final. Mitigated by the finalized-only rule (§2.5) and by relayers independently querying their own RPC nodes. |
-| Upgrade the program maliciously | Control of the upgrade multisig **and** the timelock. See below. |
+| Upgrade the program maliciously | Control of the single upgrade-authority key. No multisig or timelock exists in the code today. See below. |
 
 ### 4.2 Lessons applied (general bridge-failure patterns)
 
 - **Never mint on unconfirmed transactions.** The majority of bridge losses trace to trusting a transaction that was not final. §2.5 is a hard rule, not a guideline.
 - **No infinite mint authority in any human hand.** Minting is only reachable through the program's attestation path. There is no admin mint instruction.
 - **Cap the blast radius.** Per-transaction caps and daily caps (§4.3) bound the loss from any single failure, including a quorum compromise.
-- **No upgrade without delay.** Program upgrades go through a multisig with a timelock (minimum 48 hours), so a malicious or buggy upgrade is visible before it activates, and users can exit.
+- **Upgrades have no delay today (honest limit).** No multisig or timelock exists in the code: an upgrade signed by the single loader upgrade authority takes effect immediately, with no window for users to exit. A multisig assignment plus a minimum 48-hour timelock is a deployment-gate requirement before any real asset crosses (§5), not a shipped feature.
 - **Separate the keys.** Relayer keys, multisig keys, and validator keys are distinct keypairs held by different parties. Compromising one role compromises nothing else.
 
 ### 4.3 Pause / kill-switch
 
 - **`pause()`** on either program halts all deposits, mints, burns, and unlocks. Callable by the multisig **or** by any 2 of 5 relayers (a low threshold for stopping, a high threshold for moving funds).
 - Pause is **not** reversible by relayers — only the multisig can unpause, after the cause is understood.
-- **Kill-switch (phase 2+):** a separate `freeze_mint` instruction that permanently disables new minting while leaving unlocks open, so users can always exit back to Solana. This is a one-way safety valve, used only if minting itself is compromised.
+- **Kill-switch (shipped, Machine side only):** the `KillSwitch` instruction (2-of-3 admins) permanently disables new minting (`config.killed`) while leaving burns open, so users can always exit back to Solana. This is a one-way safety valve, used only if minting itself is compromised. It is not an SPL freeze — no code path ever freezes the mint.
 
 ### 4.4 Rate limits and caps
 
@@ -174,7 +177,7 @@ Caps are enforced on-chain in the lock and bridge programs, not in the relayer �
 
 - **Absolute caps** (both programs): per-transaction and daily caps set as exact amounts at initialization (and by multisig `set_cap`). The daily window is **slot-based** (216,000 slots ≈ 24h at the 400ms target), not wall-clock — slot counts cannot be skewed the way validator timestamps can.
 - **Dynamic percentage caps** (Solana-side unlocks): each unlock may move at most **1% of the vault's locked total**, and each window's unlocks at most **5%** — the phase-3 launch values above, enforced dynamically against the live locked total rather than translated to absolutes once. The mint side uses the absolute layer only: the wrapped supply is created by the mints themselves, so a percentage-of-supply rule there has no independent reference (any first mint would be 100% of the supply it creates). The Machine program does track total wrapped supply outstanding on-chain, so either side can be reconciled against the other at any slot.
-- **Vault ceiling:** the vault refuses deposits that would push total locked value above a configured ceiling until the ceiling is raised by multisig + timelock.
+- **Vault ceiling:** the vault refuses deposits that would push total locked value above a configured ceiling. The ceiling is set only at `Initialize`; no instruction can raise it, so changing it requires a new deployment.
 - **Automatic tightening after an incident:** every unpause of the lock program starts a recovery window of one full cap window (216,000 slots) during which the dynamic caps drop to a quarter of normal — **0.25% per transaction, 1.25% per window** — and then relax on their own; the deadline is a slot number in the config, so the relaxation needs no transaction and cannot be forgotten or skipped. The reasoning: anything serious enough to pause the bridge (including a reconciliation mismatch, which the incident-response runbook answers with a pause) should not be followed by a full-speed reopening. Tightening is deliberately not triggerable by the off-chain reconciliation checker itself — the checker has no chain key; it alerts, a human/multisig pauses, and the on-chain tightening follows automatically from the unpause.
 
 ### 4.5 Crossing receipts
@@ -207,7 +210,7 @@ None of these is optional. If any item is missing, the bridge stays off.
 | **1 — Testnet bridge** | Programs deployed on a Machine testnet and Solana devnet. Worthless test assets cross in both directions. Relayer-outage and pause drills run. | 100 test crossings, 0 lost or duplicated tokens, both drills passed. |
 | **2 — Audit** | Independent security review of both programs, the relayer, and the key management. All critical and high findings fixed; mediums fixed or accepted in writing. | Audit report published. |
 | **3 — Capped mainnet** | Bridge goes live with one approved SPL asset only, per-transaction and daily caps on, vault ceiling low, allowlist of recipient addresses optional. Monitoring and the pause drill are live. | 30 days of capped operation with 0 incidents and reconciliation matching every minute. |
-| **4 — Full** | Caps raised in steps, ceiling raised, additional approved SPL assets added one at a time, relayer set expanded, validator-set attestation evaluated. | Each cap raise is a separate multisig + timelock decision, never automatic. |
+| **4 — Full** | Caps raised in steps, additional approved SPL assets added one at a time, relayer set expanded, validator-set attestation evaluated. (The vault ceiling cannot be raised — it is Initialize-only.) | Each cap raise is a separate 2-of-3 admin decision, effective immediately — no timelock exists in the programs — never automatic. |
 
 ---
 

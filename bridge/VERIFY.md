@@ -10,8 +10,8 @@ The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
 - **Tests:** bridge workspace **197 passed, 0 failed** (41
-  bridge-common unit + 32 machine-bridge (incl. precompile-cost)
-  + 26 solana-lock + 60 relayer + 23 proof bundle + 15 receipt
+  bridge-common unit + 32 machine-bridge
+  + 26 solana-lock (25 + 1 precompile-cost) + 60 relayer + 23 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry

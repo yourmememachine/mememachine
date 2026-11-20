@@ -27,6 +27,7 @@ disclosure policy, not a marketing document.
 | Livenet deployment package | Everything under `livenet/` — key generation, genesis generation, validator systemd units, cluster checks, port and firewall documentation. |
 | Machine website | The public Machine website (the deployed site and its source artifact). Findings must be about the site itself, not about the hosting provider's infrastructure. |
 | Bridge programs and relayer (code review) | Everything under `bridge/` — the solana-lock and machine-bridge programs, bridge-common, and the off-chain relayer in `bridge/crates/relayer/`. Code review only: nothing is deployed, so findings must be demonstrated against the code and its tests. |
+| LaunchGuard and PQ Vault programs (code review) | Everything under `programs/crates/launch-guard/` and `programs/crates/pq-vault/` — both custody assets (locked creator tokens; stored funds) and are in AUDIT.md Scope A. Code review only: nothing is deployed, so findings must be demonstrated against the code and its tests. |
 
 ### Out of scope
 

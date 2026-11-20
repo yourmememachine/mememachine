@@ -69,8 +69,8 @@ no asset has crossed, nothing here holds real funds.
 
 **Proven.** Built and tested locally only. Re-verified 2026-11-19:
 `cargo test --release` in `bridge/` — **197 passed, 0 failed**
-(41 bridge-common, 32 machine-bridge including the
-precompile-cost test, 26 solana-lock, 60 relayer including the
+(41 bridge-common, 32 machine-bridge, 26 solana-lock
+including the precompile-cost test, 60 relayer including the
 full end-to-end drill, 23 proof bundle including an end-to-end
 crossing export, 15 receipt indexer including an end-to-end
 receipt binding).

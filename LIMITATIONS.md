@@ -6,9 +6,11 @@ STATUS.md; the audit picture is AUDIT.md. Nothing on this page is
 hidden anywhere else in the repo either.
 
 - **Not audited.** No independent security audit has been
-  performed. Quotes are being gathered (Accretion, Sec3, Oak
-  Security) and grant applications are in (Areta Audit Subsidy,
-  Solana Foundation). Until an audit completes, **no real asset may
+  performed. An Oak Security quote was received on 2026-11-17
+  (Seed tier $26,840, unsigned); inquiries to Accretion and Sec3
+  had no reply as of 2026-11-19; the Areta Audit Subsidy was
+  declined on 2026-11-19; a Solana Foundation grant application
+  is in (2026-11-15). Until an audit completes, **no real asset may
   cross the bridge** — that gate is in BRIDGE.md §5 and binds every
   launch phase.
 - **Not deployed.** The bridge programs and LaunchGuard exist as
@@ -22,10 +24,13 @@ hidden anywhere else in the repo either.
   1,000,000; the development VM has neither (LAUNCH_CHECKLIST.md
   items 17–18). A public testnet is fully prepped
   (testnet/TESTNET.md) and waits on hosting.
-- **Compute units are program-test numbers.** The CU figures in
-  the docs (409–676 depending on the instruction) were measured
-  in native program-test execution, not on-chain SBF execution.
-  Real SBF CU gets measured on the Phase 1 testnet host.
+- **Compute units were SBF-measured once, on superseded builds.**
+  MintWrapped 92,152 CU and Unlock 86,782 CU were measured on the
+  real SBF builds on 2026-11-16 (the older 409–676 figures were
+  native program-test numbers and are superseded). Both programs
+  changed after that measurement (2026-11-17/18) and were rebuilt;
+  CU has not been re-measured on the current binaries, so the
+  published figures describe the 2026-11-16 builds, not today's.
 - **Relayer transport is file-based.** Phase-1 drills exchange
   attestations as files. Authenticated relayer-to-relayer
   transport is a written production requirement (BRIDGE.md §3.3),

@@ -25,7 +25,7 @@ the project, the repo, and the $MACHINE token are unchanged.)*
   see "Honest limits" and `LAUNCH_CHECKLIST.md`.
 
 **LaunchGuard in action** — a token launched under the standard on
-localnet, then attacked seven ways. Every rug attempt fails:
+localnet, then attacked four ways. Every rug attempt fails:
 
 https://github.com/user-attachments/assets/4d53b2b1-aca7-4ca3-9d70-caad256bb3a9
 
@@ -141,7 +141,7 @@ not a claim.
 | Day-one ecosystem | **Shipped.** Solana OS is the day-one apps layer (above). |
 | Distribution | **Shipped (distribution).** MACHINE distribution is published in `GENESIS.md`: founder 998,999,000 / stake 1,000,000 / faucet 1,000. No hidden allocation. Price history doesn't exist yet — the token is not trading. |
 | Audit and bug bounty | **NEXT.** Audit + bug bounty are dated roadmap items. |
-| Published genesis, fees, whitepaper | **Shipped.** Genesis hash, validator keys, and the full fee schedule are in `GENESIS.md`. This README is the positioning doc; a whitepaper is NEXT. |
+| Published genesis, fees, whitepaper | **Shipped.** Genesis hash, validator keys, and the full fee schedule are in `GENESIS.md`. This README is the positioning doc; the whitepaper is `WHITEPAPER.md` (v2.1, 2026-11-19). |
 | Block speed | **Shipped (historical).** Observed ~3 slots/second on the localnet, confirming and finalizing continuously — until the chain stalled at slot 29,100 on 2026-11-14 (see `STATUS.md` P3). |
 | Native token as gas from genesis | **Shipped.** MACHINE is the gas token from genesis, distribution in `GENESIS.md`. |
 | Technical deltas with measurements | **Shipped (partially).** The vote-authority patch + the localnet measurements (slot rate, confirmation, finalization, vote credits) are documented in `GENESIS.md`. More deltas are NEXT. |
@@ -158,7 +158,7 @@ not a claim.
 | Next | Public RPC endpoint + wallet network support | NEXT — needs hosting |
 | Next | Bridge (Solana mainnet ↔ Machine) for approved SPL assets | NEXT — programs + relayer built locally; needs deployment and audit (see `BRIDGE.md` §5) |
 | Next | Audit + bug bounty | NEXT |
-| Next | Whitepaper | NEXT |
+| 2026-11-19 | Whitepaper v2.1 | Done (`WHITEPAPER.md`) |
 | Later | Public chain (hosted validators, stake, monitoring) | NEXT — a separate step, not claimed now |
 
 ## Honest limits
@@ -225,7 +225,7 @@ verification by the builder.
 
 A token launched under LaunchGuard on localnet (2026-11-16) —
 authorities revoked, 10% of supply locked for 30 days — then
-attacked seven ways. Every rug attempt fails. Full record in
+attacked four ways. Every rug attempt fails. Full record in
 [programs/DEMO-LAUNCH.md](programs/DEMO-LAUNCH.md); the video
 file also lives in this repo at
 [assets/demo-launch-live.mp4](assets/demo-launch-live.mp4).
@@ -236,7 +236,7 @@ The locks are also machine-readable: the [registry export](programs/crates/regis
 
 ## Bridge
 
-Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 99 program tests passing (197 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (60 tests passing), the crossing-proof bundle tool in `bridge/crates/proof-bundle/` (23 tests passing; [bridge/PROOF-BUNDLE.md](bridge/PROOF-BUNDLE.md)), and the receipt indexer in `bridge/crates/receipt-indexer/` (15 tests passing; [bridge/RECEIPT-INDEXER.md](bridge/RECEIPT-INDEXER.md)) that resolves a crossing receipt to the transaction that created it. SBF-measured: MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
+Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 99 program tests passing (197 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (60 tests passing), the crossing-proof bundle tool in `bridge/crates/proof-bundle/` (23 tests passing; [bridge/PROOF-BUNDLE.md](bridge/PROOF-BUNDLE.md)), and the receipt indexer in `bridge/crates/receipt-indexer/` (15 tests passing; [bridge/RECEIPT-INDEXER.md](bridge/RECEIPT-INDEXER.md)) that resolves a crossing receipt to the transaction that created it. SBF-measured (2026-11-16, on the SBF builds of that date; not re-measured after the 2026-11-17/18 program changes): MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
 
 ## Support
 

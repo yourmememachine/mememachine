@@ -5,7 +5,7 @@ The off-chain relayer for the Machine bridge (BRIDGE.md sections
 3-of-5 attestations, collects a quorum, and submits `MintWrapped` /
 `Unlock` to the destination chain.
 
-**Status: built and tested locally (39 tests, see below). NOT
+**Status: built and tested locally (60 tests, see below). NOT
 deployed. NOT audited. No asset has crossed with it.** The deploy
 gate in BRIDGE.md section 5 applies to the relayer exactly as it
 does to the programs: live net, public RPC, fresh production keys,
@@ -13,8 +13,9 @@ independent audit, worthless-amount crossings, monitoring.
 
 ## What it does
 
-1. **Watch** — by nonce cursor, not account scans. Nonces are
-   strictly increasing per direction and each event lives at a
+1. **Watch** — by nonce cursor, not account scans. The programs
+   accept any unused caller-chosen nonce; this relayer probes
+   nonces sequentially per direction and each event lives at a
    deterministic PDA (`EventRecord` written by `Deposit` / `Burn`),
    so the relayer probes the next nonce, in order, and never skips
    one. A gap stalls the bridge; stalling is safe.
@@ -88,7 +89,7 @@ and hold the correct mint; the destination program enforces both.
 cargo test --release -p relayer
 ```
 
-48 unit tests (config validation, finality margin, deterministic
+54 unit tests (config validation, finality margin, deterministic
 expiry, signing against bridge-common's verifier, the audit log's
 hash chain — edited / deleted / reordered / forged entries
 detected, truncation and wholesale rewrite detected against a
@@ -101,9 +102,10 @@ account order and data round-trip, verified sender extraction from
 parsed transactions — including the Coreum-style phantom deposit
 rejected, wrong-amount and wrong-destination transfers rejected,
 and a decoy top-level transfer ignored in favour of the real CPI
-transfer into the vault — watcher cursor behaviour) plus 4
+transfer into the vault — watcher cursor behaviour) plus 6
 integration tests (deposit -> 3-of-5 quorum -> MintWrapped
-instruction; expired attestation rejected; and the full local
+instruction; expired attestation rejected; source-transfer binding
+in `tests/source_transfer_binding.rs`; and the full local
 end-to-end drill in `tests/full_drill.rs` — both directions executed
 against the real programs, with a forced pause and a forced
 relayer disagreement, plus the 45-crossing volume drill;

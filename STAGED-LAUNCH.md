@@ -19,7 +19,7 @@ gate allows.
   documented self-review checklist. (Sec3 X-Ray turned out to be
   paid-only and Soteria cannot read this codebase's toolchain —
   both recorded in AUDIT.md.)
-- Audit quotes in hand (Accretion, Sec3 — inquiries sent 2026-11-14).
+- Audit: Oak Security quote received 2026-11-17 (Seed $26,840, unsigned); Accretion and Sec3 inquiries sent 2026-11-14 — no reply as of 2026-11-19.
 - Grant applications for audit funding (Solana ecosystem programs).
 - Build in public (X updates from the repo's own status docs).
 

@@ -121,7 +121,7 @@ cd bridge && cargo build --release && cargo test --release
   until ~22:11 PST 2026-11-14 and does not advance now.
 - **Transfers unverified** (N1). The chain votes and finalizes, but no
   user-transfer signature exists.
-- **Bridge code only, not a live bridge** (N3). 197/197 bridge-workspace tests (including 60/60 relayer, 23/23 proof bundle, and 15/15 receipt indexer), 35/35 LaunchGuard tests, and 11/11 registry-export tests prove the
+- **Bridge code only, not a live bridge** (N3). 197/197 bridge-workspace tests (including 60/60 relayer, 23/23 proof bundle, and 15/15 receipt indexer), 68/68 LaunchGuard tests, and 11/11 registry-export tests prove the
   programs behave as designed in program-test; they prove nothing about
   a live deployment, which does not exist.
 - **Dev keys only.** The keypairs in `keys/` are throwaway test keys

@@ -96,8 +96,9 @@ solana program deploy target/deploy/machine_bridge.so \
     --url <machine-rpc> --keypair ~/keys/deployer.json
 ```
 
-Set the upgrade authority to the admin multisig immediately; program
-upgrades additionally go through a 48-hour timelock (BRIDGE.md 4.2).
+Set the upgrade authority to the admin multisig immediately. No
+timelock exists in the programs (BRIDGE.md 4.2): once the authority
+signs, an upgrade takes effect immediately.
 
 ## 5. Initialize, with absolute caps
 
@@ -143,4 +144,5 @@ tokens, both drills passed.
 
 One approved asset, caps as computed, ceiling low, reconciliation
 matching every minute for 30 days before any cap raise — and every
-cap raise is its own multisig + timelock decision (BRIDGE.md 6).
+cap raise is its own 2-of-3 admin decision, effective immediately
+— no timelock exists in the programs (BRIDGE.md 6).
