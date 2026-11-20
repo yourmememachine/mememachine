@@ -7,9 +7,9 @@
 # bridge/fuzz/, testnet/, livenet/) — see STATUS.md for what is and
 # is not proven.
 
-.PHONY: verify test-bridge test-programs fork-suite test-resolver clippy
+.PHONY: verify test-bridge test-programs fork-suite test-resolver test-predict clippy
 
-verify: test-bridge test-programs fork-suite test-resolver
+verify: test-bridge test-programs fork-suite test-resolver test-predict
 	@echo "All local checks passed (bridge + programs + fork suite + resolver JS suite)."
 
 test-bridge:
@@ -23,6 +23,9 @@ fork-suite:
 
 test-resolver:
 	./rugcall/resolver/run-tests.sh
+
+test-predict:
+	./rugcall/app/run-tests.sh
 
 clippy:
 	cd bridge && cargo clippy --release --all-targets

@@ -1,0 +1,390 @@
+{
+  "schema": "rugcall-app-fixtures/v1",
+  "program_id": null,
+  "config": {
+    "address": "ConfigRugCa111111111111111111111111111111111",
+    "resolver": "Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH",
+    "collateral_mint": null,
+    "min_stake": "1000000"
+  },
+  "users": {
+    "demo": "DemoUserWa11et111111111111111111111111111111",
+    "userB": "UserBWa11et111111111111111111111111111111111",
+    "userC": "UserCWa11et111111111111111111111111111111111",
+    "userD": "UserDWa11et111111111111111111111111111111111"
+  },
+  "markets": [
+    {
+      "address": "MarketH2Bund1e111111111111111111111111111111",
+      "live_market": "LiveH2Bund1e11111111111111111111111111111111",
+      "subject_mint": "MintH2Bund1e11111111111111111111111111111111",
+      "creator": "CreatorWa11et1111111111111111111111111111111",
+      "created_at": 1799913600,
+      "expiry": 1800000000,
+      "flagged_pool": "12000000",
+      "survives_pool": "28000000",
+      "state": 1,
+      "outcome": 0,
+      "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hard_trigger": 0,
+      "resolved_at": 0,
+      "bump": 254,
+      "vault_bump": 253,
+      "evidence_file": "h2-bundle.json"
+    },
+    {
+      "address": "MarketC1ean111111111111111111111111111111111",
+      "live_market": "LiveC1ean11111111111111111111111111111111111",
+      "subject_mint": "MintC1ean11111111111111111111111111111111111",
+      "creator": "CreatorWa11et1111111111111111111111111111111",
+      "created_at": 1799913600,
+      "expiry": 1800000000,
+      "flagged_pool": "250000000",
+      "survives_pool": "750000000",
+      "state": 1,
+      "outcome": 0,
+      "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hard_trigger": 0,
+      "resolved_at": 0,
+      "bump": 254,
+      "vault_bump": 253,
+      "evidence_file": "clean.json"
+    },
+    {
+      "address": "MarketSo1oF1ag111111111111111111111111111111",
+      "live_market": "LiveSo1oF1ag11111111111111111111111111111111",
+      "subject_mint": "MintSoftF1ag11111111111111111111111111111111",
+      "creator": "CreatorWa11et1111111111111111111111111111111",
+      "created_at": 1799913600,
+      "expiry": 1800000000,
+      "flagged_pool": "50000000",
+      "survives_pool": "0",
+      "state": 1,
+      "outcome": 0,
+      "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hard_trigger": 0,
+      "resolved_at": 0,
+      "bump": 254,
+      "vault_bump": 253,
+      "evidence_file": "soft-flagged.json"
+    },
+    {
+      "address": "MarketExpired1111111111111111111111111111111",
+      "live_market": "LiveExpired111111111111111111111111111111111",
+      "subject_mint": "MintLateTrig11111111111111111111111111111111",
+      "creator": "CreatorWa11et1111111111111111111111111111111",
+      "created_at": 1799740800,
+      "expiry": 1799827200,
+      "flagged_pool": "9000000",
+      "survives_pool": "11000000",
+      "state": 1,
+      "outcome": 0,
+      "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hard_trigger": 0,
+      "resolved_at": 0,
+      "bump": 254,
+      "vault_bump": 253,
+      "evidence_file": "late-trigger.json"
+    },
+    {
+      "address": "MarketF1aggedH311111111111111111111111111111",
+      "live_market": "LiveF1aggedH31111111111111111111111111111111",
+      "subject_mint": "MintH2Bund1e11111111111111111111111111111111",
+      "creator": "CreatorWa11et1111111111111111111111111111111",
+      "created_at": 1799913600,
+      "expiry": 1800000000,
+      "flagged_pool": "3000000",
+      "survives_pool": "7000000",
+      "state": 2,
+      "outcome": 1,
+      "evidence_hash": "653574f7954bc500e2256e6b26ca6f346164c070e01409c531d6146f5735c6c0",
+      "hard_trigger": 2,
+      "resolved_at": 1799917200,
+      "bump": 254,
+      "vault_bump": 253,
+      "evidence_file": "h2-bundle.json"
+    },
+    {
+      "address": "MarketReso1ved111111111111111111111111111111",
+      "live_market": "LiveReso1ved11111111111111111111111111111111",
+      "subject_mint": "MintC1ean11111111111111111111111111111111111",
+      "creator": "CreatorWa11et1111111111111111111111111111111",
+      "created_at": 1799913600,
+      "expiry": 1800000000,
+      "flagged_pool": "300000000",
+      "survives_pool": "700000000",
+      "state": 2,
+      "outcome": 2,
+      "evidence_hash": "7a6b26d8d8de7f86bc50b2336ff923db19ee77429d896b7c8b6a6c4dbf6e68a4",
+      "hard_trigger": 0,
+      "resolved_at": 1799920800,
+      "bump": 254,
+      "vault_bump": 253,
+      "evidence_file": "clean.json"
+    },
+    {
+      "address": "MarketCance11ed11111111111111111111111111111",
+      "live_market": "LiveCance11ed1111111111111111111111111111111",
+      "subject_mint": "MintC1ean11111111111111111111111111111111111",
+      "creator": "CreatorWa11et1111111111111111111111111111111",
+      "created_at": 1799913600,
+      "expiry": 1800000000,
+      "flagged_pool": "4000000",
+      "survives_pool": "6000000",
+      "state": 3,
+      "outcome": 0,
+      "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hard_trigger": 0,
+      "resolved_at": 0,
+      "bump": 254,
+      "vault_bump": 253,
+      "evidence_file": "clean.json"
+    },
+    {
+      "address": "MarketZeroWin1111111111111111111111111111111",
+      "live_market": "LiveZeroWin111111111111111111111111111111111",
+      "subject_mint": "MintZeroWin111111111111111111111111111111111",
+      "creator": "CreatorWa11et1111111111111111111111111111111",
+      "created_at": 1799913600,
+      "expiry": 1800000000,
+      "flagged_pool": "0",
+      "survives_pool": "5000000",
+      "state": 2,
+      "outcome": 1,
+      "evidence_hash": "a5632afd7afcc4d3eca9f346bf14f8b5499d27e191769d104bede00ae38bcfbc",
+      "hard_trigger": 3,
+      "resolved_at": 1799920800,
+      "bump": 254,
+      "vault_bump": 253,
+      "evidence_file": "evidence-h3-zerowin.json"
+    }
+  ],
+  "positions": [
+    {
+      "address": "PosAx111111111111111111111111111111111111111",
+      "market": "MarketH2Bund1e111111111111111111111111111111",
+      "user": "DemoUserWa11et111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "8000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosBx111111111111111111111111111111111111111",
+      "market": "MarketH2Bund1e111111111111111111111111111111",
+      "user": "UserBWa11et111111111111111111111111111111111",
+      "flagged_amount": "12000000",
+      "survives_amount": "0",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosCx111111111111111111111111111111111111111",
+      "market": "MarketH2Bund1e111111111111111111111111111111",
+      "user": "UserCWa11et111111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "20000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosDx111111111111111111111111111111111111111",
+      "market": "MarketC1ean111111111111111111111111111111111",
+      "user": "DemoUserWa11et111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "100000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosEx111111111111111111111111111111111111111",
+      "market": "MarketC1ean111111111111111111111111111111111",
+      "user": "UserBWa11et111111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "400000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosFx111111111111111111111111111111111111111",
+      "market": "MarketC1ean111111111111111111111111111111111",
+      "user": "UserDWa11et111111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "250000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosGx111111111111111111111111111111111111111",
+      "market": "MarketC1ean111111111111111111111111111111111",
+      "user": "UserCWa11et111111111111111111111111111111111",
+      "flagged_amount": "250000000",
+      "survives_amount": "0",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosHx111111111111111111111111111111111111111",
+      "market": "MarketSo1oF1ag111111111111111111111111111111",
+      "user": "DemoUserWa11et111111111111111111111111111111",
+      "flagged_amount": "20000000",
+      "survives_amount": "0",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosJx111111111111111111111111111111111111111",
+      "market": "MarketSo1oF1ag111111111111111111111111111111",
+      "user": "UserBWa11et111111111111111111111111111111111",
+      "flagged_amount": "30000000",
+      "survives_amount": "0",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosKx111111111111111111111111111111111111111",
+      "market": "MarketExpired1111111111111111111111111111111",
+      "user": "DemoUserWa11et111111111111111111111111111111",
+      "flagged_amount": "4000000",
+      "survives_amount": "5000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosLx111111111111111111111111111111111111111",
+      "market": "MarketExpired1111111111111111111111111111111",
+      "user": "UserBWa11et111111111111111111111111111111111",
+      "flagged_amount": "5000000",
+      "survives_amount": "6000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosMx111111111111111111111111111111111111111",
+      "market": "MarketF1aggedH311111111111111111111111111111",
+      "user": "DemoUserWa11et111111111111111111111111111111",
+      "flagged_amount": "1000000",
+      "survives_amount": "0",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosNx111111111111111111111111111111111111111",
+      "market": "MarketF1aggedH311111111111111111111111111111",
+      "user": "UserDWa11et111111111111111111111111111111111",
+      "flagged_amount": "2000000",
+      "survives_amount": "2000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosPx111111111111111111111111111111111111111",
+      "market": "MarketF1aggedH311111111111111111111111111111",
+      "user": "UserCWa11et111111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "5000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosQx111111111111111111111111111111111111111",
+      "market": "MarketReso1ved111111111111111111111111111111",
+      "user": "DemoUserWa11et111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "100000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosRx111111111111111111111111111111111111111",
+      "market": "MarketReso1ved111111111111111111111111111111",
+      "user": "UserBWa11et111111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "600000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosSx111111111111111111111111111111111111111",
+      "market": "MarketReso1ved111111111111111111111111111111",
+      "user": "UserCWa11et111111111111111111111111111111111",
+      "flagged_amount": "300000000",
+      "survives_amount": "0",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosTx111111111111111111111111111111111111111",
+      "market": "MarketCance11ed11111111111111111111111111111",
+      "user": "DemoUserWa11et111111111111111111111111111111",
+      "flagged_amount": "1500000",
+      "survives_amount": "2500000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosUx111111111111111111111111111111111111111",
+      "market": "MarketCance11ed11111111111111111111111111111",
+      "user": "UserBWa11et111111111111111111111111111111111",
+      "flagged_amount": "2500000",
+      "survives_amount": "3500000",
+      "claimed": true,
+      "bump": 254
+    },
+    {
+      "address": "PosVx111111111111111111111111111111111111111",
+      "market": "MarketCance11ed11111111111111111111111111111",
+      "user": "UserCWa11et111111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "0",
+      "claimed": false,
+      "bump": 254,
+      "crafted": true
+    },
+    {
+      "address": "PosWx111111111111111111111111111111111111111",
+      "market": "MarketZeroWin1111111111111111111111111111111",
+      "user": "DemoUserWa11et111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "2000000",
+      "claimed": false,
+      "bump": 254
+    },
+    {
+      "address": "PosXx111111111111111111111111111111111111111",
+      "market": "MarketZeroWin1111111111111111111111111111111",
+      "user": "UserBWa11et111111111111111111111111111111111",
+      "flagged_amount": "0",
+      "survives_amount": "3000000",
+      "claimed": false,
+      "bump": 254
+    }
+  ],
+  "token_meta": {
+    "MintH2Bund1e11111111111111111111111111111111": {
+      "symbol": "BNDL",
+      "name": "Bundle Example Token",
+      "priceUsd": 0.00042,
+      "liquidityUsd": 12500
+    },
+    "MintC1ean11111111111111111111111111111111111": {
+      "symbol": "CLEN",
+      "name": "Clean Example Token",
+      "priceUsd": 0.00125,
+      "liquidityUsd": 84000
+    },
+    "MintSoftF1ag11111111111111111111111111111111": {
+      "symbol": "SOFT",
+      "name": "Soft Flag Example Token",
+      "priceUsd": 0.00087,
+      "liquidityUsd": 23000
+    },
+    "MintLateTrig11111111111111111111111111111111": null,
+    "MintZeroWin111111111111111111111111111111111": {
+      "symbol": "ZWIN",
+      "name": "Zero Win Example Token",
+      "priceUsd": 0.00013,
+      "liquidityUsd": 4200
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "schema": "rugcall-pda-vectors/v1",
+  "program_id": "6YMEjhBqVTMaSRWcmVkLrnHZ22FWEDJEpTeonAg8GKSy",
+  "requested_fixture_mint": "MintC1ean11111111111111111111111111111111111",
+  "fixture_mint": "CountedMintA11111111111111111111111111111111",
+  "fixture_mint_note": "the requested corpus mint decodes to 33 bytes, so the corpus address CountedMintA11111111111111111111111111111111 (exactly 32 bytes) is used as the fixture mint instead",
+  "fixture_user": "CreatorWa11et1111111111111111111111111111111",
+  "token_program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "ata_program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+  "vectors": [
+    {
+      "name": "config",
+      "inputs": {},
+      "address": "2eihBGkMxvQWxJnP8CwDFS3BC1vVjjMuLj2oG4sdnprk",
+      "bump": 255
+    },
+    {
+      "name": "live-market",
+      "inputs": {
+        "subject_mint": "CountedMintA11111111111111111111111111111111"
+      },
+      "address": "4zPv8bCpHFvMq88RqT2HsX65Uc6p3Mqos295UpaPi8yH",
+      "bump": 255
+    },
+    {
+      "name": "market",
+      "inputs": {
+        "subject_mint": "CountedMintA11111111111111111111111111111111",
+        "created_at": 1799913600
+      },
+      "address": "EFDy7hrUUmYSvdzoFXPxsXVGYWbXHF35qw3mbgjHR59u",
+      "bump": 255
+    },
+    {
+      "name": "market-next-second",
+      "inputs": {
+        "subject_mint": "CountedMintA11111111111111111111111111111111",
+        "created_at": 1799913601
+      },
+      "address": "HoFBZxsSm3CFygX3yazKhZN1UQLwcuaso8izDRegy11m",
+      "bump": 255
+    },
+    {
+      "name": "vault",
+      "inputs": {
+        "market": "EFDy7hrUUmYSvdzoFXPxsXVGYWbXHF35qw3mbgjHR59u"
+      },
+      "address": "AfS7psphy8zBx3gqaG7vJfYw68SracNEK8FYbgJR9j35",
+      "bump": 253
+    },
+    {
+      "name": "position",
+      "inputs": {
+        "market": "EFDy7hrUUmYSvdzoFXPxsXVGYWbXHF35qw3mbgjHR59u",
+        "user": "CreatorWa11et1111111111111111111111111111111"
+      },
+      "address": "9u5tj7UQaMMnpD6gFHt1assMKC1faujGB8Vu5daQoZLd",
+      "bump": 255
+    },
+    {
+      "name": "ata",
+      "inputs": {
+        "user": "CreatorWa11et1111111111111111111111111111111",
+        "mint": "CountedMintA11111111111111111111111111111111",
+        "token_program": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "ata_program": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+      },
+      "address": "4mP7bg4Z4YCWhMN3WVnRqKA6H2s3v3nzT2bvWf9oGfy9",
+      "bump": 254
+    }
+  ]
+}

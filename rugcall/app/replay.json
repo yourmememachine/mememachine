@@ -1,0 +1,190 @@
+{
+  "schema": "rugcall-replay/v1",
+  "generatedFrom": {
+    "evidenceJsSha256": "2790a8ed83b27bded2e3a394d71f5ec42be8514d8c6bbe62458c9278317a58e7",
+    "resolverJsSha256": "53d69f053b587c5e922a75a1321d72477f34774a6cb90c2eb76c3d0a29bd1106",
+    "marketsSha256": "14d3e2c05ad3ab5c9afdfde29db3cf954d7ab4d04be256d1bbd0a0829201dada",
+    "evidenceFixtureSha256": "6e03f4cb16ec54150a0c5225a79793bd2825777e34d177c3eb278edf5d1da042"
+  },
+  "config": {
+    "programId": null,
+    "cluster": "devnet"
+  },
+  "market": {
+    "address": "MarketH2Bund1e111111111111111111111111111111",
+    "live_market": "LiveH2Bund1e11111111111111111111111111111111",
+    "subject_mint": "MintH2Bund1e11111111111111111111111111111111",
+    "creator": "CreatorWa11et1111111111111111111111111111111",
+    "created_at": 1799913600,
+    "expiry": 1800000000,
+    "flagged_pool": "3000000",
+    "survives_pool": "7000000",
+    "state": 1,
+    "outcome": 0,
+    "evidence_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "hard_trigger": 0,
+    "resolved_at": 0,
+    "bump": 254,
+    "vault_bump": 253,
+    "evidence_file": "h2-bundle.json"
+  },
+  "buys": [
+    {
+      "wallet": "Alice",
+      "side": 1,
+      "stake": "1000000"
+    },
+    {
+      "wallet": "Bob",
+      "side": 1,
+      "stake": "2000000"
+    },
+    {
+      "wallet": "Carol",
+      "side": 2,
+      "stake": "7000000"
+    }
+  ],
+  "record": {
+    "ts": 1799920800,
+    "action": "WOULD_RESOLVE",
+    "market": "MarketH2Bund1e111111111111111111111111111111",
+    "subject_mint": "MintH2Bund1e11111111111111111111111111111111",
+    "creator": "CreatorWa11et1111111111111111111111111111111",
+    "resolver": "Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH",
+    "program_id": null,
+    "expiry": 1800000000,
+    "decision_reason": "qualifying-hard-trigger",
+    "qualifying_triggers": [
+      2
+    ],
+    "excluded_triggers": [],
+    "signed": false,
+    "submitted": false,
+    "instruction": {
+      "name": "ResolveMarket",
+      "ordinal": 3,
+      "data_hex": "030102cbe5cc0b4ac9d403c6193df3f9bccca5ce0db1e6538d7b5d51e64947bcef5db4",
+      "data_len": 35,
+      "accounts": [
+        {
+          "pubkey": "Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH",
+          "signer": true,
+          "writable": false
+        },
+        {
+          "pubkey": "ConfigRugCa111111111111111111111111111111111",
+          "signer": false,
+          "writable": false
+        },
+        {
+          "pubkey": "MarketH2Bund1e111111111111111111111111111111",
+          "signer": false,
+          "writable": true
+        },
+        {
+          "pubkey": "LiveH2Bund1e11111111111111111111111111111111",
+          "signer": false,
+          "writable": true
+        },
+        {
+          "pubkey": "CreatorWa11et1111111111111111111111111111111",
+          "signer": false,
+          "writable": true
+        }
+      ]
+    },
+    "outcome": 1,
+    "hard_trigger": 2,
+    "evidence_hash": "cbe5cc0b4ac9d403c6193df3f9bccca5ce0db1e6538d7b5d51e64947bcef5db4",
+    "trigger_event_ts": 1799913660,
+    "bundle_path": "rugcall/evidence/MarketH2Bund1e111111111111111111111111111111.json",
+    "bundle_bytes": 2914,
+    "bundle_sha256": "cbe5cc0b4ac9d403c6193df3f9bccca5ce0db1e6538d7b5d51e64947bcef5db4"
+  },
+  "bundle": {
+    "canonical": "{\"crewSnapshot\":{\"appearances\":{},\"flagged\":{},\"order\":[],\"totalDeepChecked\":0},\"evidence\":{\"deep\":{\"_bought\":{},\"_slotBought\":{},\"_sold\":{},\"_soldEarly\":{},\"auth\":{\"freezeAuth\":false,\"mintAuth\":false},\"bundle\":{\"count\":9,\"creatorInWindow\":false,\"matching\":false,\"partial\":false,\"pct\":55,\"reachedCreate\":true,\"slotCount\":2,\"slotPct\":5,\"slotWallets\":[],\"wallets\":[],\"windowFull\":true},\"bundleError\":null,\"creationSlot\":1,\"creationTime\":1799913600,\"creator\":\"CreatorWa11et1111111111111111111111111111111\",\"creatorHoldingPct\":10,\"funderHistory\":null,\"funders\":{\"inconclusive\":[],\"linked\":[],\"linkedOutside\":[],\"links\":{},\"sharedFunderInWindow\":true,\"tracedCount\":0,\"traces\":{},\"unresolvedPct\":0,\"unresolvedWallets\":[]},\"fundersError\":null,\"history\":{\"ageDays\":45,\"ageIsFloor\":false,\"details\":[],\"determined\":2,\"fastExit\":0,\"inactive\":0,\"launches\":2,\"sampled\":2,\"sigCount\":10,\"strikes\":0,\"unknown\":false},\"historyError\":null,\"liquidity\":{\"state\":\"live\",\"usd\":12000},\"ownerMap\":{},\"pctByWallet\":{},\"sells\":{\"checked\":true,\"crossingTs\":null,\"initial\":100,\"soldPct\":5},\"slot\":1},\"fetchedAtSec\":1799917200,\"light\":{\"checkedAt\":1799913600,\"curveSuspect\":false,\"decimals\":6,\"holders\":[],\"largestPct\":8,\"slot\":1,\"top1\":8,\"top10\":30,\"top10Excl\":25,\"top10Incl\":30,\"top1Excl\":4,\"top5\":20,\"total\":\"1000000000000000\"},\"mint\":\"MintH2Bund1e11111111111111111111111111111111\"},\"expirySec\":1800000000,\"fetchedAtSec\":1799917200,\"market\":{\"address\":\"MarketH2Bund1e111111111111111111111111111111\",\"bump\":254,\"created_at\":1799913600,\"creator\":\"CreatorWa11et1111111111111111111111111111111\",\"evidence_file\":\"h2-bundle.json\",\"evidence_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"expiry\":1800000000,\"flagged_pool\":\"3000000\",\"hard_trigger\":0,\"live_market\":\"LiveH2Bund1e11111111111111111111111111111111\",\"outcome\":0,\"resolved_at\":0,\"state\":1,\"subject_mint\":\"MintH2Bund1e11111111111111111111111111111111\",\"survives_pool\":\"7000000\",\"vault_bump\":253},\"resolver\":\"Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH\",\"result\":{\"families\":{\"bundle\":30,\"history\":0,\"side\":0,\"structure\":0},\"familiesHit\":1,\"hardTriggers\":[{\"eventTimestamp\":null,\"fired\":false,\"id\":1,\"name\":\"H1\",\"values\":{\"determined\":2,\"fastExit\":0,\"launches\":2,\"strikes\":0}},{\"eventTimestamp\":1799913660,\"fired\":true,\"id\":2,\"name\":\"H2\",\"values\":{\"creatorInWindow\":false,\"matching\":false,\"pct\":55,\"sharedFunderInWindow\":true}},{\"eventTimestamp\":null,\"fired\":false,\"id\":3,\"name\":\"H3\",\"values\":{\"checked\":true,\"soldPct\":5}},{\"eventTimestamp\":null,\"fired\":false,\"id\":4,\"name\":\"H4\",\"values\":{\"state\":\"live\",\"usd\":12000}},{\"eventTimestamp\":null,\"fired\":false,\"id\":5,\"name\":\"H5\",\"values\":{\"wallets\":[]}}],\"missingCore\":[],\"partial\":false,\"primaryHardTrigger\":2,\"resolutionBlockers\":[],\"softScore\":30},\"sources\":{\"dexResponseHash\":null,\"rpcResponseHashes\":{},\"rpcUrl\":null},\"subjectMint\":\"MintH2Bund1e11111111111111111111111111111111\",\"totalDeepChecked\":1,\"version\":1}",
+    "sha256": "cbe5cc0b4ac9d403c6193df3f9bccca5ce0db1e6538d7b5d51e64947bcef5db4"
+  },
+  "verify": {
+    "hashOk": true,
+    "verdictOk": true
+  },
+  "claims": [
+    {
+      "wallet": "Alice",
+      "side": 1,
+      "stake": "1000000",
+      "payout": "3333333"
+    },
+    {
+      "wallet": "Bob",
+      "side": 1,
+      "stake": "2000000",
+      "payout": "6666666"
+    },
+    {
+      "wallet": "Carol",
+      "side": 2,
+      "stake": "7000000",
+      "payout": "0",
+      "program_error": 19,
+      "program_error_name": "NoClaimableStake"
+    }
+  ],
+  "dust": "1",
+  "summaries": {
+    "MarketC1ean111111111111111111111111111111111": {
+      "verdict": "NO RED FLAGS FOUND",
+      "hardTriggers": [],
+      "partial": false,
+      "resolutionBlockers": []
+    },
+    "MarketH2Bund1e111111111111111111111111111111": {
+      "verdict": "FLAGGED",
+      "hardTriggers": [
+        2
+      ],
+      "partial": false,
+      "resolutionBlockers": []
+    },
+    "MarketSoftF1ag111111111111111111111111111111": {
+      "verdict": "FLAGGED",
+      "hardTriggers": [],
+      "partial": false,
+      "resolutionBlockers": []
+    },
+    "MarketPartBund1e1111111111111111111111111111": {
+      "verdict": "CAUTION",
+      "hardTriggers": [],
+      "partial": true,
+      "resolutionBlockers": []
+    },
+    "MarketLateTrig111111111111111111111111111111": {
+      "verdict": "FLAGGED",
+      "hardTriggers": [
+        3
+      ],
+      "partial": false,
+      "resolutionBlockers": []
+    },
+    "MarketReso1ved111111111111111111111111111111": {
+      "verdict": "NO RED FLAGS FOUND",
+      "hardTriggers": [],
+      "partial": false,
+      "resolutionBlockers": []
+    },
+    "MarketCance11ed11111111111111111111111111111": {
+      "verdict": "NO RED FLAGS FOUND",
+      "hardTriggers": [],
+      "partial": false,
+      "resolutionBlockers": []
+    }
+  },
+  "notes": [
+    "Pools are claim state from the program's program-test vector (setup_std3); the resolver's decision path does not read pool fields.",
+    "Carol's survives stake is on the losing side of a Flagged resolution: her claim returns program error 19 (NoClaimableStake) and her payout is 0.",
+    "Floor rounding in the winning claims strands the dust amount in the vault; there is no sweep instruction in v1.",
+    "record.bundle_path names the published bundle location under rugcall/evidence/ rather than the temporary build directory, so regeneration is byte-identical."
+  ]
+}

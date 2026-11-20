@@ -1,19 +1,27 @@
 "use strict";
 
-// RugCall dry-run resolver.
+// RugCall resolver.
 //
-// Reads fixture markets and recorded evidence snapshots, evaluates
-// each open market through the shared evidence module, writes the
-// canonical evidence bundle for every market it would resolve, and
-// logs the instruction it would post. It never signs, never submits,
-// never reads a keypair file, and needs no chain RPC in fixture mode:
-// every record carries signed:false and submitted:false.
+// Dry-run mode reads fixture markets and recorded evidence snapshots,
+// evaluates each open market through the shared evidence module,
+// writes the canonical evidence bundle for every market it would
+// resolve, and logs the instruction it would post. Dry-run never
+// signs, never submits, never reads a keypair file, and needs no
+// chain RPC in fixture mode: every record carries signed:false and
+// submitted:false.
+//
+// Live mode (createLiveRunner, below) shares the exact same decision
+// code through decidePass, then signs and submits the decided
+// instructions on devnet after a preflight pass; its records and
+// ledger entries only claim signed/submitted once that has actually
+// happened for them.
 
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
 const ev = require("../app/evidence.js");
+const submitLib = require("./submit.js");
 
 const RESOLVE_ORDINAL = 0x03;
 const CANCEL_ORDINAL = 0x05;
@@ -25,6 +33,9 @@ const STATE_CANCELLED = 3;
 const GRACE_SEC = 86400;
 const RETRY_SEC = 3600;
 const MAINNET_RPC_URL = "https://api.mainnet-beta.solana.com";
+const DEVNET_RPC_URL = "https://api.devnet.solana.com";
+const BPF_LOADER_UPGRADEABLE = "BPFLoaderUpgradeab1e11111111111111111111111";
+const DEFAULT_MIN_RESOLVER_LAMPORTS = 50000000;
 // The resolver identity used by the command line when no explicit
 // --resolver flag is given. It matches the resolver recorded in the
 // fixture markets schema.
@@ -163,7 +174,7 @@ function createResolver(options) {
     );
   }
 
-  function runPass(marketsObj, nowOverride) {
+  function decidePassInternal(marketsObj, nowOverride) {
     const passNow =
       nowOverride !== undefined ? nowOverride : passNowFixed;
     if (typeof passNow !== "number" || !Number.isFinite(passNow)) {
@@ -204,7 +215,7 @@ function createResolver(options) {
       const record = baseRecord(null, "REFUSAL", "resolver-mismatch");
       record.reason = "resolver-mismatch";
       emit(record);
-      return records;
+      return { records, ledger: {}, ledgerDirty: false, skipPersist: true };
     }
 
     const ledger = loadLedger(ledgerPath);
@@ -550,24 +561,582 @@ function createResolver(options) {
       }
     }
 
-    if (ledgerPath && ledgerDirty) {
-      writeFileAtomic(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
+    return { records, ledger, ledgerDirty };
+  }
+
+  function decidePass(marketsObj, nowOverride) {
+    return decidePassInternal(marketsObj, nowOverride).records;
+  }
+
+  function runPass(marketsObj, nowOverride) {
+    const outcome = decidePassInternal(marketsObj, nowOverride);
+    if (outcome.skipPersist) {
+      return outcome.records;
+    }
+    if (ledgerPath && outcome.ledgerDirty) {
+      writeFileAtomic(
+        ledgerPath,
+        `${JSON.stringify(outcome.ledger, null, 2)}\n`
+      );
     } else if (ledgerPath && !fs.existsSync(ledgerPath)) {
       // A completed pass still leaves a ledger file behind, even if
       // nothing in it was decidable this time.
-      writeFileAtomic(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
+      writeFileAtomic(
+        ledgerPath,
+        `${JSON.stringify(outcome.ledger, null, 2)}\n`
+      );
     }
-
-    return records;
+    return outcome.records;
   }
 
   return {
     runPass,
+    decidePass,
     getCrewStore,
     get crewStore() {
       return crewStore;
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Live mode: chain seam, preflight, and the submitting runner.
+// ---------------------------------------------------------------------------
+
+function withTimeout(promise, ms, label) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms
+    );
+    if (timer.unref) timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function signatureStatusConfirmed(status) {
+  if (!status || typeof status !== "object" || status.err) return false;
+  if (status.confirmed === true) return true;
+  return (
+    status.confirmationStatus === "confirmed" ||
+    status.confirmationStatus === "finalized"
+  );
+}
+
+// Production chain seam for live mode, bound to the caller-supplied
+// (devnet) RPC URL. This is a separate construction from
+// buildLiveDeps, which serves mainnet evidence fetching and is never
+// used for chain writes.
+function buildChainDeps(rpcUrl) {
+  const url = rpcUrl || DEVNET_RPC_URL;
+  const rpc = async (method, params) => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method,
+        params: params || [],
+      }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`fetch failed with HTTP ${response.status} for ${url}`);
+    }
+    const body = await response.json();
+    if (body && body.error) {
+      throw new Error(
+        `RPC ${method} failed: ${body.error.message || JSON.stringify(body.error)}`
+      );
+    }
+    return body ? body.result : undefined;
+  };
+  return {
+    rpcUrl: url,
+    async getHealth() {
+      return rpc("getHealth", []);
+    },
+    async getAccountInfo(pubkey) {
+      const result = await rpc("getAccountInfo", [
+        pubkey,
+        { encoding: "base64" },
+      ]);
+      const value = result && result.value;
+      if (!value) return null;
+      const dataField = Array.isArray(value.data) ? value.data[0] : "";
+      return {
+        executable: !!value.executable,
+        owner: value.owner,
+        lamports: value.lamports,
+        data: Buffer.from(dataField || "", "base64"),
+      };
+    },
+    async getBalance(pubkey) {
+      const result = await rpc("getBalance", [pubkey]);
+      return result && typeof result.value === "number" ? result.value : 0;
+    },
+    async getLatestBlockhash() {
+      const result = await rpc("getLatestBlockhash", []);
+      return result && result.value ? result.value.blockhash : null;
+    },
+    async sendRawTransaction(bytes) {
+      return rpc("sendRawTransaction", [
+        Buffer.from(bytes).toString("base64"),
+        { encoding: "base64" },
+      ]);
+    },
+    async getSignatureStatus(signature) {
+      const result = await rpc("getSignatureStatuses", [[signature]]);
+      const values = result && Array.isArray(result.value) ? result.value : [];
+      return values.length > 0 ? values[0] : null;
+    },
+  };
+}
+
+function createLiveRunner(options) {
+  const opts = options || {};
+  const chain = opts.chain;
+  if (!chain) throw new Error("createLiveRunner requires a chain seam");
+  const sink =
+    opts.sink ||
+    ((record) => {
+      process.stdout.write(`${JSON.stringify(record)}\n`);
+    });
+  const rpcUrl = opts.rpcUrl || DEVNET_RPC_URL;
+  const outDir = opts.outDir || path.join(process.cwd(), "rugcall-out");
+  const ledgerPath = opts.ledgerPath || null;
+  const evidenceDir = opts.evidenceDir || null;
+  const evidenceByMarket = opts.evidenceByMarket || null;
+  const evidenceProvider = opts.evidenceProvider || null;
+  const hashFn = opts.hashFn || undefined;
+  const minResolverLamports =
+    opts.minResolverLamports !== undefined
+      ? opts.minResolverLamports
+      : DEFAULT_MIN_RESOLVER_LAMPORTS;
+  const keypairPath = opts.keypairPath || null;
+  let signer = opts.signer || null;
+  let submitter = opts.submitter || null;
+  let crewStore =
+    opts.crewStore !== undefined ? opts.crewStore : ev.emptyCrewStore();
+
+  function getCrewStore() {
+    return crewStore;
+  }
+
+  function resolveNow(nowOverride) {
+    const value =
+      nowOverride !== undefined
+        ? nowOverride
+        : typeof opts.now === "function"
+          ? opts.now()
+          : opts.now;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error("live pass requires a pass time (now, unix seconds)");
+    }
+    return value;
+  }
+
+  async function runLivePass(marketsObj, nowOverride) {
+    const passNow = resolveNow(nowOverride);
+    if (!marketsObj || typeof marketsObj !== "object") {
+      throw new Error("runLivePass requires a markets object");
+    }
+    const records = [];
+    const emit = (record) => {
+      records.push(record);
+      sink(record);
+      return record;
+    };
+    const programIdOverride = opts.programId || opts.program_id || null;
+    const marketsProgramId =
+      marketsObj.program_id !== undefined ? marketsObj.program_id : null;
+    const effectiveProgramId = programIdOverride || marketsProgramId;
+
+    const refusal = (code, detail, extra) => {
+      const record = {
+        ts: passNow,
+        action: "REFUSAL",
+        market: null,
+        subject_mint: null,
+        creator: null,
+        resolver: signer ? signer.pubkey : null,
+        program_id: effectiveProgramId || null,
+        expiry: null,
+        decision_reason: "live-preflight-failed",
+        qualifying_triggers: [],
+        excluded_triggers: [],
+        signed: false,
+        submitted: false,
+        signature: null,
+        reason: code,
+        live_preflight: {
+          check: code,
+          detail,
+          rpc_url: rpcUrl,
+          program_id: effectiveProgramId || null,
+          ...(extra || {}),
+        },
+      };
+      emit(record);
+      return { records, exitCode: 1 };
+    };
+
+    // Preflight, in order. The first failure wins, emits exactly one
+    // refusal record, and no signing is attempted on any refusal path.
+    // (1) Program id.
+    if (!programIdOverride && !marketsProgramId) {
+      return refusal(
+        "program-id-unset",
+        "no program id from --program-id or the markets file"
+      );
+    }
+    if (
+      programIdOverride &&
+      marketsProgramId &&
+      programIdOverride !== marketsProgramId
+    ) {
+      return refusal(
+        "program-id-mismatch",
+        `--program-id ${programIdOverride} does not match the markets file program_id ${marketsProgramId}`
+      );
+    }
+
+    // (2) Keypair file.
+    if (keypairPath) {
+      if (!fs.existsSync(keypairPath)) {
+        return refusal(
+          "keypair-missing",
+          `keypair file not found at ${keypairPath}`
+        );
+      }
+      try {
+        submitLib.parseKeypairBytes(
+          fs.readFileSync(keypairPath, "utf8"),
+          keypairPath
+        );
+      } catch (err) {
+        return refusal("keypair-malformed", err.message);
+      }
+      if (!signer) {
+        try {
+          signer = submitLib.loadResolverSigner(keypairPath);
+        } catch (err) {
+          return refusal("keypair-malformed", err.message);
+        }
+      }
+    } else if (!signer) {
+      return refusal("keypair-missing", "no keypair path supplied");
+    }
+
+    // (3) RPC reachability.
+    try {
+      await withTimeout(
+        Promise.resolve().then(() => chain.getHealth()),
+        10000,
+        "getHealth"
+      );
+    } catch (err) {
+      return refusal("rpc-unreachable", err.message);
+    }
+
+    // (4)-(6) Program account.
+    let programInfo;
+    try {
+      programInfo = await chain.getAccountInfo(effectiveProgramId);
+    } catch (err) {
+      return refusal("rpc-unreachable", err.message);
+    }
+    if (!programInfo) {
+      return refusal(
+        "program-missing",
+        `no account found for program ${effectiveProgramId}`
+      );
+    }
+    if (!programInfo.executable) {
+      return refusal(
+        "program-not-executable",
+        `program account ${effectiveProgramId} is not executable`
+      );
+    }
+    if (programInfo.owner !== BPF_LOADER_UPGRADEABLE) {
+      return refusal(
+        "program-wrong-owner",
+        `program account is owned by ${programInfo.owner}, not ${BPF_LOADER_UPGRADEABLE}`
+      );
+    }
+
+    // (7)-(8) Config account.
+    let configInfo;
+    try {
+      configInfo = await chain.getAccountInfo(marketsObj.config);
+    } catch (err) {
+      return refusal("rpc-unreachable", err.message);
+    }
+    if (!configInfo) {
+      return refusal(
+        "config-missing",
+        `no account found for config ${marketsObj.config}`
+      );
+    }
+    const configData = Buffer.from(configInfo.data || []);
+    if (
+      configInfo.owner !== effectiveProgramId ||
+      configData.length !== 122 ||
+      configData[0] !== 1
+    ) {
+      return refusal(
+        "config-malformed",
+        `config owner ${configInfo.owner}, data length ${configData.length}, discriminator ${configData.length > 0 ? configData[0] : "none"}; expected owner ${effectiveProgramId}, length 122, discriminator 1`
+      );
+    }
+
+    // (9) Signer must be the resolver recorded in the Config account
+    // (bytes 33..65: discriminator 1 + admin 32, then resolver 32).
+    const configResolver = submitLib.base58Encode(configData.subarray(33, 65));
+    if (configResolver !== signer.pubkey) {
+      return refusal(
+        "keypair-config-mismatch",
+        `signer ${signer.pubkey} is not the config resolver ${configResolver}`
+      );
+    }
+
+    // (10) Resolver balance.
+    let balance;
+    try {
+      balance = await chain.getBalance(signer.pubkey);
+    } catch (err) {
+      return refusal("rpc-unreachable", err.message);
+    }
+    if (typeof balance !== "number" || balance < minResolverLamports) {
+      return refusal(
+        "resolver-underfunded",
+        `resolver balance ${balance} lamports is below the required ${minResolverLamports} lamports`,
+        { actual_lamports: balance, required_lamports: minResolverLamports }
+      );
+    }
+
+    if (!submitter) {
+      submitter = submitLib.createSubmitter({ chain, signer });
+    }
+
+    const persistLiveEntry = (address, entry) => {
+      if (!ledgerPath) return;
+      const ledger = loadLedger(ledgerPath);
+      ledger[address] = entry;
+      writeFileAtomic(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
+    };
+
+    // Poll previously submitted-but-unconfirmed entries before any
+    // new decision: a confirmed entry becomes final (so the decision
+    // pass skips the market), an unconfirmed one is deferred again
+    // instead of being resubmitted.
+    if (ledgerPath && typeof chain.getSignatureStatus === "function") {
+      const ledger = loadLedger(ledgerPath);
+      let changed = false;
+      for (const [address, entry] of Object.entries(ledger)) {
+        if (
+          !entry ||
+          entry.action !== "SUBMITTED_UNCONFIRMED" ||
+          !entry.signature
+        ) {
+          continue;
+        }
+        let status = null;
+        try {
+          status = await chain.getSignatureStatus(entry.signature);
+        } catch (err) {
+          status = null;
+        }
+        if (signatureStatusConfirmed(status)) {
+          ledger[address] = {
+            action: entry.pending_action || "WOULD_RESOLVE",
+            outcome: entry.outcome !== undefined ? entry.outcome : null,
+            hard_trigger:
+              entry.hard_trigger !== undefined ? entry.hard_trigger : 0,
+            evidence_hash:
+              entry.evidence_hash !== undefined ? entry.evidence_hash : null,
+            bundle_path:
+              entry.bundle_path !== undefined ? entry.bundle_path : null,
+            submitted: true,
+            signature: entry.signature,
+            decided_at: entry.decided_at || passNow,
+          };
+          changed = true;
+          emit({
+            ts: passNow,
+            action: "SUBMIT_CONFIRMED",
+            market: address,
+            subject_mint: null,
+            creator: null,
+            resolver: signer.pubkey,
+            program_id: effectiveProgramId,
+            expiry: null,
+            decision_reason: "submitted-confirmed-on-recheck",
+            qualifying_triggers: [],
+            excluded_triggers: [],
+            signed: true,
+            submitted: true,
+            signature: entry.signature,
+          });
+        } else {
+          ledger[address] = { ...entry, next_retry_at: passNow + RETRY_SEC };
+          changed = true;
+        }
+      }
+      if (changed) {
+        writeFileAtomic(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
+      }
+    }
+
+    // Decision pass: the shared dry-run decision code, without its
+    // ledger persistence (live entries are written below, only for
+    // submissions that actually happen).
+    const resolver = createResolver({
+      resolverPubkey: signer.pubkey,
+      now: passNow,
+      outDir,
+      ledgerPath,
+      evidenceDir,
+      crewStore,
+      evidenceByMarket,
+      evidenceProvider,
+      hashFn,
+      sink: () => {},
+    });
+    const decided = resolver.decidePass(marketsObj);
+    crewStore = resolver.getCrewStore();
+    for (const record of decided) emit(record);
+
+    if (decided.some((r) => r.action === "REFUSAL")) {
+      return { records, exitCode: 1 };
+    }
+    if (
+      decided.some(
+        (r) =>
+          r.action === "BLOCKED_ZERO_HASH" ||
+          r.action === "WOULD_RESOLVE_INVALID"
+      )
+    ) {
+      return { records, exitCode: 2 };
+    }
+
+    // Deferrals from the decision pass are durable in live mode too.
+    if (ledgerPath) {
+      const ledger = loadLedger(ledgerPath);
+      let deferralChanged = false;
+      for (const record of decided) {
+        if (record.action === "DEFERRED_PARTIAL") {
+          ledger[record.market] = {
+            ...(ledger[record.market] || {}),
+            next_retry_at: record.next_retry_at,
+          };
+          deferralChanged = true;
+        }
+      }
+      if (deferralChanged) {
+        writeFileAtomic(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
+      }
+    }
+
+    let exitCode = 0;
+    for (const record of decided) {
+      if (record.action !== "WOULD_RESOLVE" && record.action !== "WOULD_CANCEL") {
+        continue;
+      }
+      let result;
+      try {
+        result = await submitter.submitInstruction({
+          programId: effectiveProgramId,
+          instruction: {
+            dataHex: record.instruction.data_hex,
+            accounts: record.instruction.accounts,
+          },
+        });
+      } catch (err) {
+        emit({
+          ts: passNow,
+          action: "SUBMIT_FAILED",
+          market: record.market,
+          subject_mint: record.subject_mint,
+          creator: record.creator,
+          resolver: signer.pubkey,
+          program_id: effectiveProgramId,
+          expiry: record.expiry,
+          decision_reason: "submit-failed",
+          qualifying_triggers: record.qualifying_triggers,
+          excluded_triggers: record.excluded_triggers,
+          signed: true,
+          submitted: false,
+          signature: null,
+          reason: err.message,
+        });
+        exitCode = 4;
+        continue;
+      }
+      const signature = result && result.signature;
+      if (result && result.confirmed) {
+        record.signed = true;
+        record.submitted = true;
+        record.signature = signature;
+        persistLiveEntry(record.market, {
+          action: record.action,
+          outcome: record.outcome !== undefined ? record.outcome : null,
+          hard_trigger:
+            record.hard_trigger !== undefined ? record.hard_trigger : 0,
+          evidence_hash:
+            record.evidence_hash !== undefined ? record.evidence_hash : null,
+          bundle_path:
+            record.bundle_path !== undefined ? record.bundle_path : null,
+          submitted: true,
+          signature,
+          decided_at: passNow,
+        });
+      } else {
+        const nextRetryAt = passNow + RETRY_SEC;
+        emit({
+          ts: passNow,
+          action: "SUBMITTED_UNCONFIRMED",
+          market: record.market,
+          subject_mint: record.subject_mint,
+          creator: record.creator,
+          resolver: signer.pubkey,
+          program_id: effectiveProgramId,
+          expiry: record.expiry,
+          decision_reason: "submitted-unconfirmed",
+          qualifying_triggers: record.qualifying_triggers,
+          excluded_triggers: record.excluded_triggers,
+          signed: true,
+          submitted: true,
+          signature: signature || null,
+          next_retry_at: nextRetryAt,
+        });
+        persistLiveEntry(record.market, {
+          action: "SUBMITTED_UNCONFIRMED",
+          pending_action: record.action,
+          outcome: record.outcome !== undefined ? record.outcome : null,
+          hard_trigger:
+            record.hard_trigger !== undefined ? record.hard_trigger : 0,
+          evidence_hash:
+            record.evidence_hash !== undefined ? record.evidence_hash : null,
+          bundle_path:
+            record.bundle_path !== undefined ? record.bundle_path : null,
+          submitted: true,
+          signature: signature || null,
+          decided_at: passNow,
+          next_retry_at: nextRetryAt,
+        });
+        exitCode = 4;
+      }
+    }
+
+    return { records, exitCode };
+  }
+
+  return { runLivePass, getCrewStore };
 }
 
 // ---------------------------------------------------------------------------
@@ -867,19 +1436,173 @@ async function runDryRun(args) {
   }
 }
 
+async function runLive(args) {
+  if (args.now !== undefined) {
+    process.stderr.write(
+      "live mode does not accept --now (it runs on the real clock)\n"
+    );
+    return 1;
+  }
+  if (!args.markets) {
+    process.stderr.write("live requires --markets <file>\n");
+    return 1;
+  }
+  if (!args.keypair) {
+    process.stderr.write("live requires --keypair <path>\n");
+    return 1;
+  }
+  const rpcUrl = args["rpc-url"] || DEVNET_RPC_URL;
+  if (rpcUrl === MAINNET_RPC_URL) {
+    process.stderr.write(
+      `live mode refuses the mainnet RPC URL ${MAINNET_RPC_URL} for chain writes\n`
+    );
+    return 1;
+  }
+  const evidenceMode = args.evidence || "fixture";
+  if (evidenceMode !== "fixture" && evidenceMode !== "live") {
+    process.stderr.write(`unknown --evidence mode ${evidenceMode}\n`);
+    return 1;
+  }
+  const minResolverLamports =
+    args["min-resolver-lamports"] !== undefined
+      ? Number(args["min-resolver-lamports"])
+      : DEFAULT_MIN_RESOLVER_LAMPORTS;
+  if (!Number.isFinite(minResolverLamports) || minResolverLamports < 0) {
+    process.stderr.write(
+      `--min-resolver-lamports must be a non-negative number, got ${args["min-resolver-lamports"]}\n`
+    );
+    return 1;
+  }
+
+  let marketsObj;
+  try {
+    marketsObj = readJsonFile(args.markets, "markets file");
+  } catch (err) {
+    process.stderr.write(`${err.message}\n`);
+    return 1;
+  }
+  const validationErrors = validateMarkets(marketsObj);
+  if (validationErrors.length > 0) {
+    for (const err of validationErrors) {
+      process.stderr.write(`invalid fixture: ${err}\n`);
+    }
+    return 1;
+  }
+
+  const outDir = args["out-dir"] || path.join(process.cwd(), "rugcall-out");
+  const evidenceDir = args["evidence-dir"] || null;
+  const ledgerPath = args.ledger || null;
+
+  let initialCrewStore = ev.emptyCrewStore();
+  if (args["crew-store"]) {
+    if (fs.existsSync(args["crew-store"])) {
+      try {
+        initialCrewStore = readJsonFile(args["crew-store"], "crew store");
+      } catch (err) {
+        process.stderr.write(`${err.message}\n`);
+        return 1;
+      }
+    }
+  }
+  const writeCrewStore = (store) => {
+    fs.mkdirSync(outDir, { recursive: true });
+    writeFileAtomic(
+      path.join(outDir, "crew-store.json"),
+      `${JSON.stringify(store, null, 2)}\n`
+    );
+  };
+
+  const doPass = async (passNow, crewStoreIn) => {
+    let evidenceByMarket = null;
+    if (evidenceMode === "live") {
+      if (typeof ev.fetchEvidence !== "function") {
+        throw new Error("evidence module does not provide fetchEvidence");
+      }
+      evidenceByMarket = {};
+      const deps = buildLiveDeps();
+      const openMarkets = (marketsObj.markets || [])
+        .filter((m) => m.state === STATE_OPEN)
+        .sort(compareAddress);
+      for (const market of openMarkets) {
+        const fetched = await ev.fetchEvidence(market.subject_mint, deps);
+        const inputPath = path.join(
+          outDir,
+          "evidence-inputs",
+          `${market.address}-${passNow}.json`
+        );
+        writeFileAtomic(inputPath, `${JSON.stringify(fetched, null, 2)}\n`);
+        evidenceByMarket[market.address] = fetched;
+      }
+    }
+    const runner = createLiveRunner({
+      chain: buildChainDeps(rpcUrl),
+      keypairPath: args.keypair,
+      programId: args["program-id"] || null,
+      now: passNow,
+      outDir,
+      ledgerPath,
+      evidenceDir,
+      crewStore: crewStoreIn,
+      evidenceByMarket,
+      minResolverLamports,
+      rpcUrl,
+    });
+    const outcome = await runner.runLivePass(marketsObj);
+    return { ...outcome, crewStore: runner.getCrewStore() };
+  };
+
+  const watch = args.watch === true;
+  if (!watch) {
+    const passNow = Math.floor(Date.now() / 1000);
+    let outcome;
+    try {
+      outcome = await doPass(passNow, initialCrewStore);
+    } catch (err) {
+      process.stderr.write(`live pass failed: ${err.message}\n`);
+      return 2;
+    }
+    try {
+      writeCrewStore(outcome.crewStore);
+    } catch (err) {
+      process.stderr.write(`cannot write crew store: ${err.message}\n`);
+      return 2;
+    }
+    return outcome.exitCode;
+  }
+
+  const intervalSecs = Number(args["interval-secs"] || 60);
+  const intervalMs =
+    Number.isFinite(intervalSecs) && intervalSecs > 0
+      ? intervalSecs * 1000
+      : 60000;
+  let currentCrewStore = initialCrewStore;
+  for (;;) {
+    const passNow = Math.floor(Date.now() / 1000);
+    try {
+      const outcome = await doPass(passNow, currentCrewStore);
+      currentCrewStore = outcome.crewStore;
+      writeCrewStore(outcome.crewStore);
+      if (outcome.exitCode === 1) return 1;
+    } catch (err) {
+      process.stderr.write(`live pass failed: ${err.message}\n`);
+      return 2;
+    }
+    await sleep(intervalMs);
+  }
+}
+
 async function main(argv) {
   const mode = argv[0];
-  if (mode === "live") {
-    process.stderr.write(
-      "live mode is not available in this build: the resolver runs dry-run only\n"
-    );
-    return 3;
-  }
-  if (mode !== "dry-run") {
+  if (mode !== "dry-run" && mode !== "live") {
     process.stderr.write(
       "usage: node resolver.js dry-run --markets <file> --evidence-dir <dir> " +
         "--crew-store <file> --out-dir <dir> --ledger <file> --now <unix-seconds> " +
-        "[--evidence=fixture|live] [--watch --interval-secs N]\n"
+        "[--evidence=fixture|live] [--watch --interval-secs N]\n" +
+        "       node resolver.js live --markets <file> --keypair <path> " +
+        "[--evidence=fixture|live] [--evidence-dir <dir>] [--out-dir <dir>] " +
+        "[--ledger <file>] [--crew-store <file>] [--rpc-url <url>] " +
+        "[--program-id <base58>] [--min-resolver-lamports <n>] " +
+        "[--watch --interval-secs N]\n"
     );
     return 1;
   }
@@ -889,6 +1612,9 @@ async function main(argv) {
   } catch (err) {
     process.stderr.write(`${err.message}\n`);
     return 1;
+  }
+  if (mode === "live") {
+    return runLive(args);
   }
   return runDryRun(args);
 }
@@ -906,6 +1632,10 @@ if (require.main === module) {
 
 module.exports = {
   createResolver,
+  createLiveRunner,
+  buildChainDeps,
   validateMarkets,
   DEFAULT_RESOLVER_PUBKEY,
+  DEVNET_RPC_URL,
+  MAINNET_RPC_URL,
 };

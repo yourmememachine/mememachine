@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- SOURCE-HASHES-META -->
+<title>RugCall - will it get flagged?</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; color: #1c2330; background: #f6f7f9; }
+  main { max-width: 960px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 28px; margin: 8px 0 4px; }
+  h2 { font-size: 20px; margin-top: 36px; border-bottom: 2px solid #d8dde6; padding-bottom: 6px; }
+  .rc-banner { padding: 10px 12px; border-radius: 8px; margin: 8px 0; }
+  .rc-banner-fixture { background: #e8edf5; }
+  .rc-banner-amber { background: #fdeec9; border: 1px solid #d9a400; }
+  .rc-banner-ok { background: #e2f4e5; }
+  .rc-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #e8edf5; font-size: 12px; }
+  .rc-chip-fixture { background: #d7e3fb; }
+  .rc-chip-flagged { background: #fbd7d7; }
+  .rc-chip-caution { background: #fdeec9; }
+  .rc-chip-clean { background: #e2f4e5; }
+  .rc-chip-partial { background: #fdeec9; border: 1px dashed #d9a400; }
+  .rc-chip-position { background: #e2f4e5; }
+  .rc-card { background: #fff; border: 1px solid #d8dde6; border-radius: 10px; padding: 12px; margin: 10px 0; }
+  .rc-odds-track { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: #e8edf5; }
+  .rc-odds-flagged { background: #d9534f; }
+  .rc-odds-survives { background: #3d9d63; }
+  .rc-odds-unsegmented { background: #c3ccd9; }
+  .rc-note, .rc-caption { color: #55606f; font-size: 13px; }
+  .rc-simulated { font-weight: 600; }
+  .rc-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid #b9c2d0; background: #fff; cursor: pointer; }
+  .rc-btn-primary { background: #2456c8; color: #fff; border-color: #2456c8; }
+  .rc-btn-active { background: #2456c8; color: #fff; }
+  pre { background: #101623; color: #d7e3fb; padding: 12px; border-radius: 8px; overflow: auto; font-size: 12px; }
+  .step { background: #fff; border: 1px solid #d8dde6; border-radius: 10px; padding: 12px; margin: 10px 0; opacity: 0.45; }
+  .step.step-on { opacity: 1; border-color: #2456c8; }
+  .program-placeholder { padding: 10px 12px; border: 1px dashed #d9a400; background: #fdeec9; border-radius: 8px; }
+  .explorer-disabled { color: #8a93a3; text-decoration: line-through; }
+  footer { margin-top: 40px; border-top: 2px solid #d8dde6; padding-top: 12px; color: #39424f; font-size: 14px; }
+  input[type="text"] { padding: 6px 8px; border-radius: 6px; border: 1px solid #b9c2d0; min-width: 260px; }
+</style>
+</head>
+<body>
+<main>
+
+<!-- S0: honesty banner + program status -->
+<section id="s0">
+  <h1>RugCall</h1>
+  <div id="fixture-banner" class="rc-banner rc-banner-fixture">Devnet demo - play money (dUSDC), evidence read live from Solana mainnet. The money is devnet. The evidence is mainnet.</div>
+  <p><span id="program-status-chip" class="rc-chip">Program not yet deployed — this page replays fixture markets through the real resolver</span></p>
+  <div id="wallet-bar">
+    <button type="button" class="rc-btn rc-btn-primary" id="connect-demo">Connect demo wallet</button>
+    <label>Wallet provider
+      <select id="provider-select"><option value="">Detecting providers...</option></select>
+    </label>
+    <button type="button" class="rc-btn" id="connect-provider">Connect provider</button>
+    <span id="wallet-status" class="rc-note">No wallet connected. The demo wallet is simulated in fixture mode.</span>
+  </div>
+  <div id="network-banner"></div>
+</section>
+
+<!-- S1: what RugCall is -->
+<section id="s1">
+  <h2>What RugCall is</h2>
+  <p>RugCall turns rug evidence into a market: bet on whether a freshly launched Solana token gets hard-flagged by the evidence engine within 24 hours, with markets that open, trade, resolve, and pay out on Solana devnet while the evidence is read live from mainnet.</p>
+  <p><strong>Resolution rule:</strong> markets resolve on hard triggers H1–H5 only. Soft scores never resolve a market. Trigger event timestamps — not detection times — decide boundary cases.</p>
+  <p><strong>Fail-closed:</strong> if evidence cannot be obtained at expiry, the market is not resolved on a guess. Resolution defers to a 24h grace window, and after the grace window anyone can cancel the market so every stake is refunded in full.</p>
+  <p>Collateral is dUSDC, a devnet play stablecoin with no real value. Evidence: Mainnet · Markets: Devnet.</p>
+</section>
+
+<!-- S2: the market list (the app itself) -->
+<section id="s2">
+  <h2>Markets</h2>
+  <div id="app-status" class="rc-note"></div>
+  <div id="rugcall-app"></div>
+</section>
+
+<!-- S3: lifecycle replay -->
+<section id="s3">
+  <h2>Lifecycle replay</h2>
+  <p>One recorded market, replayed step by step from its artifacts: creation, three buys, the resolver record, the evidence bundle, and the claims. Every number below comes from the replay record embedded in this page.</p>
+  <p>
+    <button type="button" class="rc-btn rc-btn-primary" id="replay-advance">Replay: next step</button>
+    <button type="button" class="rc-btn" id="replay-reset">Reset</button>
+    <label><input type="checkbox" id="replay-auto"> Auto-advance</label>
+    <span id="replay-progress" class="rc-note"></span>
+  </p>
+  <div id="replay-steps"></div>
+</section>
+
+<!-- S4: evidence bundle viewer -->
+<section id="s4">
+  <h2>Evidence bundle</h2>
+  <p>The canonical bundle for the replayed resolution. Its sha256 is the hash the resolver record carries.</p>
+  <pre id="bundle-canonical">Bundle not loaded yet.</pre>
+  <p>Sha256: <code id="bundle-sha">not loaded</code></p>
+  <p id="bundle-verify">Verify result: not loaded.</p>
+  <p class="rc-note">Verification ran in the test suite and can be repeated by hashing the canonical bundle and comparing the result with the recorded hash, then re-running the verdict logic over the bundle contents.</p>
+</section>
+
+<!-- S5: program and explorer -->
+<section id="s5">
+  <h2>Program and explorer</h2>
+  <div id="s5-program-body"><p class="program-placeholder">Program ID: not yet deployed (devnet funding pending)</p><p>Explorer entries stay disabled until a program id exists: <span class="explorer-disabled" aria-disabled="true">Program</span> · <span class="explorer-disabled" aria-disabled="true">Market</span> · <span class="explorer-disabled" aria-disabled="true">Resolver</span></p></div>
+</section>
+
+<!-- S6: footer -->
+<footer id="s6">
+  <h2>How resolution works, and the honest limits</h2>
+  <p><strong>How resolution works:</strong> a resolver watches open markets, evaluates each subject mint through the evidence module, and posts the outcome together with the sha256 of a published evidence bundle. Anyone can recompute the hash from the bundle and re-derive the verdict. The devnet program cannot read mainnet evidence on-chain; the on-chain artifact is the evidence hash, and verification is off-chain and reproducible.</p>
+  <p><strong>Resolver trust, stated plainly:</strong> resolution today runs through a single named resolver key, and the program trusts that key for the outcome. A compromised resolver could resolve a market the wrong way and direct the pool to the wrong side; it cannot pay out more than the pool holds, cannot alter anyone's stake, and cannot pay itself beyond holding a winning position like anyone else. A wrong resolution is detectable and provable after the fact from the published bundle and its on-chain hash, and a resolver that goes silent is bounded by the grace window: anyone can cancel and every stake is refunded. A multi-key quorum resolver is the documented roadmap, not part of this build.</p>
+  <p><strong>Honest limits:</strong> devnet only; play money only; no fees; positions are hold-to-resolution; soft scores never resolve a market; partial evidence never resolves a market. The evidence module in this repo is shared by the resolver and this page. The Solana OS does not consume this module yet — the OS verdict code and this module are kept in agreement by comparison tests, and the RugCall-enabled OS build is sequenced after the Dev3pack submission.</p>
+  <p>Demo software — not financial advice, no real funds. Verify the whole build with <code>make verify</code> in the repository.</p>
+</footer>
+
+</main>
+
+<!-- EMBEDDED-DATA -->
+
+<!-- INLINE-POINT: evidence.js -->
+<script src="evidence.js"></script>
+<!-- INLINE-POINT: predict-tx.js -->
+<script src="predict-tx.js"></script>
+<!-- INLINE-POINT: predict.js -->
+<script src="predict.js"></script>
+<!-- INLINE-POINT: predict-wallet.js -->
+<script src="predict-wallet.js"></script>
+<!-- INLINE-POINT: predict-ui.js -->
+<script src="predict-ui.js"></script>
+
+<script>
+(function () {
+  "use strict";
+  function el(id) { return document.getElementById(id); }
+  function text(node, value) { if (node) node.textContent = value == null ? "" : String(value); }
+  function shortAddr(a) {
+    if (!a || typeof a !== "string") return "";
+    return a.length <= 12 ? a : a.slice(0, 4) + "..." + a.slice(-4);
+  }
+  function field(obj, names) {
+    if (!obj) return undefined;
+    for (var i = 0; i < names.length; i++) {
+      if (typeof obj[names[i]] !== "undefined" && obj[names[i]] !== null) return obj[names[i]];
+    }
+    return undefined;
+  }
+  var EXPLORER_BASE = "https://explorer" + ".solana.com/address/";
+  function explorerLink(id, label) {
+    return '<a href="' + EXPLORER_BASE + id + '?cluster=devnet" rel="noopener">' + label + "</a>";
+  }
+
+  /* ---------- S0 chip + S5 program section (single binding) -------- */
+  function renderProgram(programId, replay) {
+    var chip = el("program-status-chip");
+    var body = el("s5-program-body");
+    if (!programId) {
+      text(chip, "Program not yet deployed — this page replays fixture markets through the real resolver");
+      if (body) {
+        body.innerHTML = '<p class="program-placeholder">Program ID: not yet deployed (devnet funding pending)</p>' +
+          '<p>Explorer entries stay disabled until a program id exists: ' +
+          '<span class="explorer-disabled" aria-disabled="true">Program</span> · ' +
+          '<span class="explorer-disabled" aria-disabled="true">Market</span> · ' +
+          '<span class="explorer-disabled" aria-disabled="true">Resolver</span></p>';
+      }
+      return;
+    }
+    text(chip, "Program " + programId + " · Devnet");
+    if (body) {
+      var market = replay && replay.market ? field(replay.market, ["address", "market", "id"]) : null;
+      if (typeof (replay && replay.market) === "string") market = replay.market;
+      var resolver = replay && replay.record ? field(replay.record, ["resolver"]) : null;
+      var items = "<li>" + explorerLink(programId, "Program " + shortAddr(programId)) + "</li>";
+      if (market) items += "<li>" + explorerLink(market, "Market " + shortAddr(market)) + "</li>";
+      if (resolver) items += "<li>" + explorerLink(resolver, "Resolver " + shortAddr(resolver)) + "</li>";
+      body.innerHTML = "<p>Program ID: <code>" + programId + "</code> (devnet)</p><ul>" + items + "</ul>";
+    }
+  }
+
+  /* ---------- S3 replay stepper ------------------------------------ */
+  var replayState = { steps: [], index: -1, timer: null };
+
+  function buyPools(buys) {
+    var flagged = 0n, survives = 0n;
+    (buys || []).forEach(function (b) {
+      var amt = 0n;
+      try { amt = BigInt(String(field(b, ["amountRaw", "amount_raw", "stake", "amount", "raw"]) || "0")); } catch (e) { amt = 0n; }
+      var side = field(b, ["side", "outcome"]);
+      if (side === "survives" || side === 2 || side === "Survives" || side === "SURVIVES") survives += amt;
+      else flagged += amt;
+    });
+    return { flagged: flagged, survives: survives, total: flagged + survives };
+  }
+
+  function buildSteps(replay) {
+    if (!replay) return [];
+    var market = replay.market || {};
+    var marketAddr = typeof market === "string" ? market : field(market, ["address", "id"]);
+    var record = replay.record || {};
+    var bundle = replay.bundle || {};
+    var verify = replay.verify || {};
+    var buys = replay.buys || [];
+    var pools = buyPools(buys);
+    var steps = [];
+
+    steps.push({
+      title: "1. Create",
+      body: "<p>Market <code>" + (marketAddr || "") + "</code> opened on subject mint <code>" +
+        (field(market, ["subjectMint", "subject_mint", "mint"]) || "") + "</code>, created by <code>" +
+        (field(market, ["creator"]) || "") + "</code>, expiring at " +
+        (field(market, ["expiry", "expirySec"]) || "") + ".</p>",
+      raw: market
+    });
+
+    var buyRows = buys.map(function (b) {
+      var who = field(b, ["user", "actor", "buyer", "wallet", "name"]) || "";
+      var side = field(b, ["side", "outcome"]);
+      var sideLabel = (side === "survives" || side === 2 || side === "Survives") ? "Survives" : "Flagged";
+      var amt = field(b, ["amountRaw", "amount_raw", "stake", "amount", "raw"]);
+      return "<li>" + who + " - " + sideLabel + " - " + amt + "</li>";
+    }).join("");
+    steps.push({
+      title: "2. Buys",
+      body: "<ul>" + buyRows + "</ul><p>Pools after the buys: Flagged " + pools.flagged.toString() +
+        " / Survives " + pools.survives.toString() + " / Total " + pools.total.toString() + " (raw dUSDC units).</p>",
+      raw: buys
+    });
+
+    var ix = field(record, ["instruction"]) || {};
+    var dataHex = field(ix, ["dataHex", "data_hex"]) || field(record, ["instruction_data_hex"]);
+    var dataLen = field(ix, ["dataLen", "data_len"]) || (dataHex ? dataHex.length / 2 : field(record, ["instruction_data_len"]));
+    steps.push({
+      title: "3. Resolve",
+      body: "<p>Resolver record: action <code>" + (field(record, ["action"]) || "") + "</code>, outcome " +
+        (field(record, ["outcome"]) || "") + ", hard trigger " + (field(record, ["hard_trigger", "hardTrigger", "trigger"]) || "") +
+        ", trigger event timestamp " + (field(record, ["trigger_event_ts", "triggerEventTs"]) || "") +
+        ".</p><p>Signed: " + String(field(record, ["signed"])) + " · Submitted: " + String(field(record, ["submitted"])) +
+        " · Instruction data: " + (dataLen != null ? dataLen : "") + " bytes. This is a recorded dry-run record; nothing was sent.</p>",
+      raw: record
+    });
+
+    var canonical = typeof bundle.canonical === "string" ? bundle.canonical : JSON.stringify(bundle.canonical || bundle, null, 2);
+    steps.push({
+      title: "4. Bundle",
+      body: "<p>Bundle sha256: <code>" + (field(bundle, ["sha256", "hash"]) || "") + "</code></p>" +
+        "<p>Verify: hashOk " + String(field(verify, ["hashOk"])) + " · verdictOk " + String(field(verify, ["verdictOk"])) +
+        ". Verification ran in the test suite and can be repeated by hashing the canonical bundle.</p>",
+      raw: bundle
+    });
+
+    var claims = replay.claims || [];
+    var claimRows = claims.map(function (c) {
+      var who = field(c, ["user", "actor", "buyer", "wallet", "name"]) || "";
+      var err = field(c, ["program_error", "error", "errorCode", "code", "rugCallError"]);
+      var amt = field(c, ["payout", "amountRaw", "amount_raw", "amount", "payoutRaw"]);
+      if (typeof err !== "undefined" && (amt == null || String(amt) === "0")) {
+        return "<li>" + who + " - no claim (error " + err + ": no winning stake)</li>";
+      }
+      return "<li>" + who + " - payout " + amt + "</li>";
+    }).join("");
+    steps.push({
+      title: "5. Claims",
+      body: "<ul>" + claimRows + "</ul><p>Dust left in the vault by integer rounding: " +
+        (typeof replay.dust !== "undefined" ? replay.dust : "") + " raw unit(s).</p>",
+      raw: claims
+    });
+
+    var summaries = replay.summaries || replay.summary || null;
+    var notes = replay.notes || null;
+    steps.push({
+      title: "6. Settled summary",
+      body: "<p>The market is settled: the winning side split the full pool pro-rata, the losing side has no claim, and the rounding dust stays in the vault.</p>" +
+        (summaries ? "<pre>" + JSON.stringify(summaries, null, 2).replace(/</g, "&lt;") + "</pre>" : "") +
+        (notes ? "<p>" + (Array.isArray(notes) ? notes.join(" ") : String(notes)).replace(/</g, "&lt;") + "</p>" : ""),
+      raw: { summaries: summaries, notes: notes }
+    });
+    return steps;
+  }
+
+  function renderSteps() {
+    var host = el("replay-steps");
+    if (!host) return;
+    host.innerHTML = replayState.steps.map(function (s, i) {
+      var on = i <= replayState.index;
+      return '<article class="step' + (on ? " step-on" : "") + '"><h3>' + s.title + "</h3>" +
+        (on ? s.body : "<p>Not reached yet.</p>") +
+        '<details><summary>Raw artifact</summary><pre>' +
+        JSON.stringify(s.raw, null, 2).replace(/</g, "&lt;") + "</pre></details></article>";
+    }).join("");
+    text(el("replay-progress"), replayState.steps.length
+      ? "Step " + Math.max(0, replayState.index + 1) + " of " + replayState.steps.length : "Replay not loaded.");
+  }
+
+  function advance() {
+    if (replayState.index < replayState.steps.length - 1) replayState.index++;
+    renderSteps();
+    if (replayState.index >= replayState.steps.length - 1) stopAuto();
+  }
+  function stopAuto() {
+    if (replayState.timer) { clearInterval(replayState.timer); replayState.timer = null; }
+    var box = el("replay-auto"); if (box) box.checked = false;
+  }
+
+  /* ---------- S4 bundle viewer -------------------------------------- */
+  function renderBundle(replay) {
+    if (!replay || !replay.bundle) return;
+    var bundle = replay.bundle;
+    var canonical = typeof bundle.canonical === "string" ? bundle.canonical : JSON.stringify(bundle.canonical || bundle, null, 2);
+    text(el("bundle-canonical"), canonical);
+    text(el("bundle-sha"), field(bundle, ["sha256", "hash"]) || "");
+    var verify = replay.verify || {};
+    text(el("bundle-verify"), "Verify result: hashOk " + String(field(verify, ["hashOk"])) +
+      " · verdictOk " + String(field(verify, ["verdictOk"])) + " (from the recorded replay artifacts).");
+  }
+
+  /* ---------- App ---------------------------------------------------- */
+  function startApp(fixtureBundle, replay) {
+    var status = el("app-status");
+    var RugCall = window.RugCall, Tx = window.RugCallTx, Wallet = window.RugCallWallet, UI = window.RugCallUI;
+    if (!RugCall || !Tx || !UI) {
+      text(status, "Market modules are not loaded in this shell yet; the market list appears once predict.js, predict-tx.js and predict-ui.js are present.");
+      return;
+    }
+    var programId = (replay && replay.config && replay.config.programId) ||
+      (fixtureBundle && fixtureBundle.program_id) || null;
+    var nowSec = Math.floor(Date.now() / 1000);
+    var source = RugCall.createDataSource({ programId: programId, fixtureBundle: fixtureBundle, nowSec: nowSec });
+    var users = (fixtureBundle && fixtureBundle.users) || {};
+    var demoUser = users.demo;
+    var demoAddress = typeof demoUser === "string" ? demoUser : field(demoUser || {}, ["address", "publicKey", "pubkey"]);
+    var demoWallet = null;
+    if (Wallet && typeof Wallet.createDemoWallet === "function") {
+      try { demoWallet = Wallet.createDemoWallet(fixtureBundle); } catch (e) { demoWallet = null; }
+    }
+    if (demoWallet && demoWallet.publicKey) demoAddress = String(demoWallet.publicKey);
+    var tokenMetaByMint = (fixtureBundle && (fixtureBundle.token_meta || fixtureBundle.tokenMeta)) || null;
+    var evidenceByMarket = (fixtureBundle && (fixtureBundle.evidence_by_market || fixtureBundle.evidenceByMarket)) || null;
+    var evidenceByMint = (fixtureBundle && (fixtureBundle.evidence_by_mint || fixtureBundle.evidenceByMint)) || null;
+    var replayEvidence = null;
+    try {
+      if (replay && replay.bundle && typeof replay.bundle.canonical === "string") {
+        var parsedBundle = JSON.parse(replay.bundle.canonical);
+        if (parsedBundle && parsedBundle.evidence) replayEvidence = parsedBundle.evidence;
+      }
+    } catch (e) { replayEvidence = null; }
+    var summaries = (replay && replay.summaries) || null;
+    var configPromise = typeof source.getConfig === "function"
+      ? source.getConfig().catch(function () { return null; })
+      : Promise.resolve(null);
+    configPromise.then(function (decodedConfig) {
+      var client = null;
+      if (typeof Tx.createPredictClient === "function") {
+        client = Tx.createPredictClient({
+          programId: programId,
+          config: decodedConfig || (fixtureBundle ? fixtureBundle.config : null),
+          wallet: demoWallet,
+          mode: source.kind === "fixture" ? "fixture" : "live",
+          now: nowSec,
+          data: source
+        });
+      } else {
+        text(status, "Read-only board: the transaction module has not landed yet, so buy, claim and create are disabled.");
+      }
+      UI.mountApp(el("rugcall-app"), {
+        dataSource: source,
+        client: client,
+        wallet: demoWallet,
+        userAddress: demoAddress,
+        config: decodedConfig,
+        tokenMetaByMint: tokenMetaByMint,
+        network: source.kind === "fixture" ? "devnet-fixture" : "unknown",
+        evidenceForMarket: function (market) {
+          if (evidenceByMarket && evidenceByMarket[market.address]) return evidenceByMarket[market.address];
+          if (evidenceByMint && evidenceByMint[market.subjectMint]) return evidenceByMint[market.subjectMint];
+          if (replayEvidence && replay && replay.market && replay.market.subject_mint === market.subjectMint) return replayEvidence;
+          return null;
+        },
+        evidenceForMint: function (mint) {
+          if (evidenceByMint && evidenceByMint[mint]) return evidenceByMint[mint];
+          if (replayEvidence && replay && replay.market && replay.market.subject_mint === mint) return replayEvidence;
+          return null;
+        },
+        summaryFor: function (market) {
+          return summaries && summaries[market.address] ? summaries[market.address] : null;
+        }
+      });
+      if (client) {
+        text(status, source.kind === "fixture"
+          ? "Fixture markets through the recorded data source. Demo wallet identity: " + (demoAddress || "none")
+          : "Live data source.");
+      }
+    });
+    var banner = el("fixture-banner");
+    if (banner && RugCall.FIXTURE_BANNER && source.kind === "fixture") {
+      banner.textContent = RugCall.FIXTURE_BANNER + " The money is devnet. The evidence is mainnet.";
+    }
+    /* Wallet bar: provider chooser from the wallet module. */
+    var select = el("provider-select");
+    if (select && Wallet && typeof Wallet.detectProviders === "function") {
+      var providers = Wallet.detectProviders() || [];
+      select.innerHTML = providers.length
+        ? providers.map(function (p, i) {
+            var name = field(p, ["name", "id", "provider"]) || ("Provider " + (i + 1));
+            return '<option value="' + i + '">' + String(name).replace(/</g, "&lt;") + "</option>";
+          }).join("")
+        : '<option value="">No wallet provider detected</option>';
+    }
+    var demoBtn = el("connect-demo");
+    if (demoBtn) demoBtn.addEventListener("click", function () {
+      text(el("wallet-status"), "Demo wallet connected (simulated in fixture mode): " + (demoAddress || "unknown"));
+    });
+    var provBtn = el("connect-provider");
+    if (provBtn) provBtn.addEventListener("click", function () {
+      text(el("wallet-status"), "Provider connection runs through the wallet adapter; in fixture mode nothing is sent.");
+      var nb = el("network-banner");
+      if (nb && UI) nb.innerHTML = UI.renderBanner({ sourceKind: source.kind, walletConnected: true, network: "unknown" });
+    });
+  }
+
+  /* ---------- Boot ---------------------------------------------------- */
+  function boot(embedded) {
+    var replay = embedded && embedded.replay ? embedded.replay : null;
+    var fixtureBundle = embedded && embedded.fixtureBundle ? embedded.fixtureBundle : null;
+    var programId = (replay && replay.config && replay.config.programId) ||
+      (fixtureBundle && fixtureBundle.program_id) || null;
+    renderProgram(programId, replay);
+    replayState.steps = buildSteps(replay);
+    replayState.index = -1;
+    renderSteps();
+    renderBundle(replay);
+    startApp(fixtureBundle, replay);
+  }
+
+  var adv = el("replay-advance");
+  if (adv) adv.addEventListener("click", advance);
+  var rst = el("replay-reset");
+  if (rst) rst.addEventListener("click", function () { stopAuto(); replayState.index = -1; renderSteps(); });
+  var auto = el("replay-auto");
+  if (auto) auto.addEventListener("change", function () {
+    if (auto.checked) { replayState.timer = setInterval(advance, 1600); advance(); }
+    else stopAuto();
+  });
+
+  if (window.RUGCALL_EMBEDDED) {
+    boot(window.RUGCALL_EMBEDDED);
+  } else {
+    // DEV-FETCH-BEGIN
+    Promise.all([
+      fetch("./replay.json").then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
+      fetch("./test/fixtures/app-markets.json").then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+    ]).then(function (parts) {
+      boot({ replay: parts[0], fixtureBundle: parts[1] });
+    });
+    // DEV-FETCH-END
+  }
+})();
+</script>
+</body>
+</html>
