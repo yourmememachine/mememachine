@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `0396fc8` (2026-11-20; `make verify` green —
+Last verified commit: `fb629f1` (2026-11-20; `make verify` green —
 bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 21 passed, fork suite 49 OK). The pin is refreshed after every full verification run;
+passed, registry export 11 passed, RugCall 52 passed, fork suite 49 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -46,6 +46,15 @@ chain configuration gates any public chain launch. Both scopes:
 > collides, and a program cannot scan for sibling accounts).
 > Bridge audit scope is unchanged; auditors should still
 > quote against the current `main` HEAD.
+>
+> **Scope update (2026-11-20, later the same day — RugCall
+> core handlers, commit `fb629f1`):** InitializeConfig,
+> CreateMarket and BuyPosition are now implemented in the
+> crate above (52 tests, including 26 integration tests
+> against the real SPL token program); ResolveMarket, Claim
+> and CancelMarket still return `NotImplemented`. Still
+> devnet-only, still not part of Scope A, still gating
+> nothing.
 >
 > **Scope update (2026-11-19, code-review debate round 6 —
 > consistency pass, commit `ba65722`):** a whole-repo

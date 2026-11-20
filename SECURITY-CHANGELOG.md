@@ -7,6 +7,26 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-20 — `fb629f1`** RugCall core handlers land:
+  InitializeConfig, CreateMarket and BuyPosition are
+  implemented (ResolveMarket, Claim and CancelMarket remain
+  `NotImplemented` stubs). The security-relevant shape, for
+  the record: InitializeConfig is bound to the program's
+  upgrade authority (ProgramData proof, the bridge F-1
+  pattern) and verifies the collateral mint — a real,
+  initialized classic SPL mint with 6 decimals — before
+  recording it, because Config has no update path afterwards;
+  CreateMarket enforces one live market per mint through the
+  LiveMarket lock and gives the market PDA sole authority
+  over its vault; BuyPosition runs all of its checked
+  arithmetic (side pool, position side, prospective total)
+  before the balance check and the transfer, so an
+  overflowing buy is refused with the program's own error,
+  and credits pool and position by exactly the transferred
+  amount — the conservation invariant Claim will rely on.
+  Devnet-only crate; the audit surface of the existing
+  programs is unchanged.
+
 - **2026-11-20 — `0396fc8`** New program crate `rug-call`
   (devnet-only prediction market; AUDIT.md scope note of the
   same date records that it is not part of Scope A and gates
