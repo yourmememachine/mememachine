@@ -1,11 +1,10 @@
 //! RugCall instruction handlers.
 //!
-//! The dispatch and the instruction set are final. Day 2 landed
-//! InitializeConfig, CreateMarket and BuyPosition; ResolveMarket,
-//! Claim and CancelMarket still return
-//! RugCallError::NotImplemented until their Day-3 implementation
-//! replaces the stubs. The state layout they operate on is in the
-//! state module and does not change as handlers land.
+//! The dispatch and the instruction set are final, and all six
+//! handlers are implemented: InitializeConfig, CreateMarket and
+//! BuyPosition (Day 2) plus ResolveMarket, Claim and CancelMarket
+//! (Day 3). The state layout they operate on is in the state
+//! module and does not change.
 
 use borsh::BorshDeserialize;
 use solana_program::{
@@ -248,6 +247,53 @@ fn save_live_market(account: &AccountInfo, live: &LiveMarket) -> ProgramResult {
     let mut data = account.try_borrow_mut_data()?;
     let bytes = borsh::to_vec(live).map_err(|_| ProgramError::AccountDataTooSmall)?;
     data[..bytes.len()].copy_from_slice(&bytes);
+    Ok(())
+}
+
+fn load_live_market(account: &AccountInfo, program_id: &Pubkey) -> Result<LiveMarket, ProgramError> {
+    // Same rule as the market loader: an account the program
+    // does not own carries attacker-chosen bytes, and the frozen
+    // error enum has no LiveMarketNotInitialized variant.
+    if account.owner != program_id {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let data = account.try_borrow_data()?;
+    if data.is_empty() || data[0] != DISCRIMINATOR_LIVE_MARKET {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    LiveMarket::try_from_slice(&data).map_err(|_| ProgramError::InvalidAccountData)
+}
+
+/// Close the LiveMarket lock, returning its rent to the market
+/// creator (the Day-1 record: the lock's lifetime is the
+/// market's Open lifetime, and its rent follows the market
+/// home). Native close, no CPI: credit the creator, drain the
+/// lock, hand it back to the system program, truncate it to
+/// zero length — the runtime reclaims a zero-lamport,
+/// system-owned, zero-length account at transaction end,
+/// freeing the address for the next market on the same mint.
+/// No system-program account is needed because nothing here
+/// invokes it.
+///
+/// Borrow discipline: the credit runs in its own scope and
+/// drops before the lock is touched, and only the creator
+/// ENTRY is ever borrowed — when the caller or resolver is
+/// also the creator, the account list holds the same key
+/// twice (signer entry + creator entry) over one underlying
+/// account; borrowing both entries at once would trip the
+/// borrow check, and crediting through both would pay the
+/// rent twice.
+fn close_live_market(live_account: &AccountInfo, creator_account: &AccountInfo) -> ProgramResult {
+    let closing_lamports = live_account.lamports();
+    {
+        let mut dest = creator_account.try_borrow_mut_lamports()?;
+        **dest = (**dest)
+            .checked_add(closing_lamports)
+            .ok_or(RugCallError::Overflow)?;
+    }
+    **live_account.try_borrow_mut_lamports()? = 0;
+    live_account.assign(&solana_program::system_program::ID);
+    live_account.resize(0)?;
     Ok(())
 }
 
@@ -715,22 +761,408 @@ fn process_buy_position(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// ResolveMarket — resolver only. Posts the outcome bound to the
+// sha256 of the published evidence bundle. Irreversible: the
+// market leaves Open forever, the pools freeze as they stand
+// (Claim computes from them and never writes the market), and
+// the LiveMarket lock closes in this same instruction, freeing
+// the subject mint for its next market. Before expiry only a
+// Flagged outcome is accepted — "no trigger yet" is not
+// evidence of survival until the window closes — and a Flagged
+// outcome must always name the trigger that fired.
+// ---------------------------------------------------------------------------
+
 fn process_resolve_market(
-    _program_id: &Pubkey,
-    _accounts: &[AccountInfo],
-    _outcome: u8,
-    _hard_trigger: u8,
-    _evidence_hash: [u8; 32],
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    outcome: u8,
+    hard_trigger: u8,
+    evidence_hash: [u8; 32],
 ) -> ProgramResult {
-    Err(RugCallError::NotImplemented.into())
+    let iter = &mut accounts.iter();
+    let resolver = next_account_info(iter)?;
+    let config_account = next_account_info(iter)?;
+    let market_account = next_account_info(iter)?;
+    let live_account = next_account_info(iter)?;
+    let creator_account = next_account_info(iter)?;
+
+    if !resolver.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let (config_pda_key, _) = config_pda(program_id);
+    if config_account.key != &config_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    let config = load_config(config_account, program_id)?;
+    // Authority first, before the market is even loaded: this
+    // instruction takes orders from exactly one key, and a
+    // stranger's call has no other fault worth naming. It also
+    // keeps a non-resolver from probing market state (13 vs 14
+    // vs 16) through this instruction's error codes.
+    if resolver.key != &config.resolver {
+        return Err(RugCallError::NotResolver.into());
+    }
+    // Payload, in field order, before any market state is read —
+    // the BuyPosition precedent (side and min-stake precede the
+    // market load and MarketNotOpen). The outcome byte comes
+    // first because the trigger rule is defined per outcome:
+    // there is no trigger validity to check until the outcome
+    // itself is known to be one of the two real values.
+    if outcome != OUTCOME_FLAGGED && outcome != OUTCOME_SURVIVES {
+        return Err(RugCallError::InvalidSide.into());
+    }
+    let trigger_ok = if outcome == OUTCOME_FLAGGED {
+        hard_trigger != HARD_TRIGGER_NONE && hard_trigger <= HARD_TRIGGER_MAX
+    } else {
+        hard_trigger == HARD_TRIGGER_NONE
+    };
+    if !trigger_ok {
+        return Err(RugCallError::InvalidHardTrigger.into());
+    }
+    // The all-zero hash is the pre-resolution sentinel:
+    // accepting it would post a resolution bound to no evidence
+    // bundle at all.
+    if evidence_hash == [0u8; 32] {
+        return Err(RugCallError::InvalidEvidenceHash.into());
+    }
+
+    let mut market = load_market(market_account, program_id)?;
+    // Binding, as in BuyPosition: re-derive the PDA from the
+    // market's own stored fields and compare.
+    let (market_pda_key, _) = market_pda(program_id, &market.subject_mint, market.created_at);
+    if market_account.key != &market_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    if market.state == STATE_RESOLVED {
+        return Err(RugCallError::AlreadyResolved.into());
+    }
+    if market.state == STATE_CANCELLED {
+        return Err(RugCallError::AlreadyCancelled.into());
+    }
+    // One clock read: the value the timing check tests is the
+    // value recorded as resolved_at. At now >= expiry both
+    // outcomes are allowed; before expiry, Survives is refused —
+    // the window has not closed, so survival is not yet a fact.
+    let now = Clock::get()?.unix_timestamp;
+    if outcome == OUTCOME_SURVIVES && now < market.expiry {
+        return Err(RugCallError::EarlySurvivesResolution.into());
+    }
+
+    let (live_pda_key, _) = live_market_pda(program_id, &market.subject_mint);
+    if live_account.key != &live_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    let live = load_live_market(live_account, program_id)?;
+    if live.market != *market_account.key {
+        return Err(RugCallError::MintMismatch.into());
+    }
+    // The lock's rent goes home to the market's creator, so the
+    // supplied destination must be the stored creator — the
+    // same stored-binding rule (and error) as a position's
+    // stored market/user in BuyPosition. The creator does not
+    // sign: receiving lamports needs no signature, so rent
+    // recovery never depends on the creator being online.
+    if creator_account.key != &market.creator {
+        return Err(RugCallError::MintMismatch.into());
+    }
+
+    market.state = STATE_RESOLVED;
+    market.outcome = outcome;
+    market.evidence_hash = evidence_hash;
+    market.hard_trigger = hard_trigger;
+    market.resolved_at = now;
+    save_market(market_account, &market)?;
+    close_live_market(live_account, creator_account)?;
+    msg!(
+        "RugCall: market {} resolved outcome {} trigger {}",
+        market_account.key,
+        outcome,
+        hard_trigger
+    );
+    Ok(())
 }
 
-fn process_claim(_program_id: &Pubkey, _accounts: &[AccountInfo]) -> ProgramResult {
-    Err(RugCallError::NotImplemented.into())
+// ---------------------------------------------------------------------------
+// Claim — collect from a terminal market. Branch precedence is
+// the Day-1 freeze, in this exact order: a Cancelled market
+// refunds the caller's total stake; on a Resolved market a
+// zero winning pool also refunds the total stake (nobody
+// backed the winning side, so there is no winner to pay and
+// the stakes are not stranded); otherwise a caller with no
+// winning-side stake has nothing to claim; otherwise the
+// caller is paid their pro-rata share of the whole pool. One
+// claim per position, ever: the single `claimed` flag covers
+// the payout and both refund paths.
+//
+// Claim changes nothing in the market account (invariant
+// M-1): pools, outcome and resolution data are frozen, payouts
+// are computed only from the stored pools — never from the
+// live vault balance, which stray transfers can inflate — and
+// every claim on a market therefore computes against the same
+// numbers regardless of claim order. Floor dust stays in the
+// vault by design; there is no sweep instruction in this
+// version.
+// ---------------------------------------------------------------------------
+
+fn process_claim(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let iter = &mut accounts.iter();
+    let user = next_account_info(iter)?;
+    let config_account = next_account_info(iter)?;
+    let market_account = next_account_info(iter)?;
+    let vault_account = next_account_info(iter)?;
+    let user_token = next_account_info(iter)?;
+    let position_account = next_account_info(iter)?;
+    let token_program = next_account_info(iter)?;
+
+    if !user.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    if token_program.key != &spl_token::id() {
+        return Err(RugCallError::UnsupportedTokenProgram.into());
+    }
+    let (config_pda_key, _) = config_pda(program_id);
+    if config_account.key != &config_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    let config = load_config(config_account, program_id)?;
+
+    let market = load_market(market_account, program_id)?;
+    // Binding, as in BuyPosition: the supplied account must be
+    // the PDA its own stored fields derive.
+    let (market_pda_key, _) = market_pda(program_id, &market.subject_mint, market.created_at);
+    if market_account.key != &market_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    if market.state == STATE_OPEN {
+        return Err(RugCallError::ClaimBeforeResolve.into());
+    }
+    // load_market has already rejected every state other than
+    // Open / Resolved / Cancelled, so the market is terminal
+    // here.
+
+    let (vault_pda_key, _) = vault_pda(program_id, market_account.key);
+    if vault_account.key != &vault_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    // Vault unpack and binding, identical to BuyPosition's.
+    let vault_data = TokenAccount::unpack(&vault_account.try_borrow_data()?)?;
+    if vault_data.mint != config.collateral_mint {
+        return Err(RugCallError::MintMismatch.into());
+    }
+    if vault_data.owner != *market_account.key {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let user_data = TokenAccount::unpack(&user_token.try_borrow_data()?)?;
+    if user_data.owner != *user.key || user_data.mint != config.collateral_mint {
+        return Err(RugCallError::MintMismatch.into());
+    }
+
+    let (position_pda_key, _) = position_pda(program_id, market_account.key, user.key);
+    if position_account.key != &position_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    // A position account the program does not own was never
+    // created: load_position fails with InvalidAccountData (the
+    // Day-2 R-3 convention — the frozen enum has no
+    // PositionNotFound, and an existing-but-empty position is a
+    // different case with a different error, below).
+    let mut position = load_position(position_account, program_id)?;
+    if position.market != *market_account.key || position.user != *user.key {
+        return Err(RugCallError::MintMismatch.into());
+    }
+    if position.claimed {
+        return Err(RugCallError::AlreadyClaimed.into());
+    }
+
+    // The frozen branch precedence. All checked math happens
+    // here, before the transfer CPI, so a refusal names this
+    // program's own error. The refund amount is the position's
+    // total stake — both sides summed with checked arithmetic.
+    let total_stake = position
+        .flagged_amount
+        .checked_add(position.survives_amount)
+        .ok_or(RugCallError::Overflow)?;
+    let amount = if market.state == STATE_CANCELLED {
+        if total_stake == 0 {
+            return Err(RugCallError::NoClaimableStake.into());
+        }
+        total_stake
+    } else {
+        // Resolved. A resolved market's outcome is Flagged or
+        // Survives by construction (ResolveMarket accepts
+        // nothing else); anything else is crafted state and
+        // fails closed rather than guessing a winning side.
+        let (winning_pool, winning_stake) = match market.outcome {
+            OUTCOME_FLAGGED => (market.flagged_pool, position.flagged_amount),
+            OUTCOME_SURVIVES => (market.survives_pool, position.survives_amount),
+            _ => return Err(ProgramError::InvalidAccountData),
+        };
+        if winning_pool == 0 {
+            // Refund precedes the winning-stake check on
+            // purpose: with no winning side backed there is no
+            // winner to pay, so even a losing-side holder is
+            // made whole — the alternative strands the entire
+            // pool behind an unpayable claim.
+            if total_stake == 0 {
+                return Err(RugCallError::NoClaimableStake.into());
+            }
+            total_stake
+        } else if winning_stake == 0 {
+            return Err(RugCallError::NoClaimableStake.into());
+        } else {
+            // total_pool is built with checked_add from the
+            // stored pools — here, inside the payout branch
+            // only, so a pool overflow (unreachable on
+            // program-written state; BuyPosition refuses the
+            // buy that would create it) can never block a
+            // refund, whose amount does not depend on the
+            // pools. A None from the helper — inconsistent
+            // inputs or a result above u64::MAX — is Overflow,
+            // per the error's own doc.
+            let total_pool = market
+                .flagged_pool
+                .checked_add(market.survives_pool)
+                .ok_or(RugCallError::Overflow)?;
+            parimutuel_payout(winning_stake, total_pool, winning_pool)
+                .ok_or(RugCallError::Overflow)?
+        }
+    };
+    // `amount` is never 0 here: the refund paths refused a zero
+    // total stake above, and in the payout branch a winning
+    // stake of at least 1 with total_pool >= winning_pool
+    // forces the floor to at least 1. No zero-amount transfer
+    // is ever issued.
+
+    // The vault's token owner is the market PDA (set at
+    // CreateMarket), so the market signs — with its stored
+    // bump — and the market account is passed as the CPI
+    // authority, exactly as BuyPosition passes its user
+    // authority.
+    let created_bytes = market.created_at.to_le_bytes();
+    let signer_seeds: &[&[u8]] = &[
+        SEED_MARKET,
+        market.subject_mint.as_ref(),
+        &created_bytes,
+        &[market.bump],
+    ];
+    invoke_signed(
+        &transfer(
+            token_program.key,
+            vault_account.key,
+            user_token.key,
+            market_account.key,
+            &[],
+            amount,
+        )?,
+        &[
+            vault_account.clone(),
+            user_token.clone(),
+            market_account.clone(),
+            token_program.clone(),
+        ],
+        &[signer_seeds],
+    )?;
+
+    // CPI-then-save, BuyPosition's precedent: the flag is
+    // written only after the token program accepted the
+    // payment. Safe either way under transaction atomicity —
+    // a failed CPI would roll back an earlier save too — and
+    // the market account is deliberately never saved here
+    // (invariant M-1).
+    position.claimed = true;
+    save_position(position_account, &position)?;
+    msg!(
+        "RugCall: {} claimed {} from market {}",
+        user.key,
+        amount,
+        market_account.key
+    );
+    Ok(())
 }
 
-fn process_cancel_market(_program_id: &Pubkey, _accounts: &[AccountInfo]) -> ProgramResult {
-    Err(RugCallError::NotImplemented.into())
+// ---------------------------------------------------------------------------
+// CancelMarket — the fail-closed exit. The resolver may
+// cancel any Open market at any time (its evidence source is
+// gone, the subject is delisted, the market was a mistake);
+// anyone may cancel once now > expiry + CANCEL_GRACE_SECS
+// with no resolution posted, so stakes are never trapped
+// behind a dead resolver. Cancelling writes nothing but the
+// state byte: the outcome stays NONE, the hash stays zero,
+// resolved_at stays 0, and Claim refunds exact stakes from
+// the untouched pools. The LiveMarket lock closes here too,
+// on the same terms as ResolveMarket.
+// ---------------------------------------------------------------------------
+
+fn process_cancel_market(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+    let iter = &mut accounts.iter();
+    let caller = next_account_info(iter)?;
+    let config_account = next_account_info(iter)?;
+    let market_account = next_account_info(iter)?;
+    let live_account = next_account_info(iter)?;
+    let creator_account = next_account_info(iter)?;
+
+    if !caller.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+    let (config_pda_key, _) = config_pda(program_id);
+    if config_account.key != &config_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    let config = load_config(config_account, program_id)?;
+    // Computed here, enforced at the gate below: unlike
+    // ResolveMarket there is a legitimate non-resolver path,
+    // so being a stranger is not yet a fault.
+    let is_resolver = caller.key == &config.resolver;
+
+    let mut market = load_market(market_account, program_id)?;
+    let (market_pda_key, _) = market_pda(program_id, &market.subject_mint, market.created_at);
+    if market_account.key != &market_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    // Terminal states are final for every caller at every
+    // time, so they are named before the grace gate: a
+    // stranger cancelling a Resolved market after the window
+    // gets 13, not a clock-dependent answer.
+    if market.state == STATE_RESOLVED {
+        return Err(RugCallError::AlreadyResolved.into());
+    }
+    if market.state == STATE_CANCELLED {
+        return Err(RugCallError::AlreadyCancelled.into());
+    }
+    if !is_resolver {
+        // The resolver path never computes this deadline: a
+        // resolver may cancel a boundary market whose deadline
+        // is unrepresentable. For anyone else the comparison
+        // is strict (now > deadline), and a checked_add that
+        // overflows means the deadline sits past every i64
+        // clock value — the honest answer is "too early",
+        // never a wrapped deadline that would open the gate
+        // immediately.
+        let now = Clock::get()?.unix_timestamp;
+        match market.expiry.checked_add(CANCEL_GRACE_SECS) {
+            Some(deadline) if now > deadline => {}
+            _ => return Err(RugCallError::CancelTooEarly.into()),
+        }
+    }
+
+    let (live_pda_key, _) = live_market_pda(program_id, &market.subject_mint);
+    if live_account.key != &live_pda_key {
+        return Err(RugCallError::InvalidPda.into());
+    }
+    let live = load_live_market(live_account, program_id)?;
+    if live.market != *market_account.key {
+        return Err(RugCallError::MintMismatch.into());
+    }
+    if creator_account.key != &market.creator {
+        return Err(RugCallError::MintMismatch.into());
+    }
+
+    market.state = STATE_CANCELLED;
+    save_market(market_account, &market)?;
+    close_live_market(live_account, creator_account)?;
+    msg!("RugCall: market {} cancelled", market_account.key);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

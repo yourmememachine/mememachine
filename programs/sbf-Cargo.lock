@@ -820,6 +820,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rug-call"
+version = "0.1.0"
+dependencies = [
+ "borsh 1.8.1",
+ "solana-program",
+ "spl-token",
+]
+
+[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

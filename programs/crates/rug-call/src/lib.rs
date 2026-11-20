@@ -13,10 +13,11 @@
 //! only and holds no real assets.
 //!
 //! Build status: the state layout, instruction set and error
-//! space are final. InitializeConfig, CreateMarket and
-//! BuyPosition are implemented; ResolveMarket, Claim and
-//! CancelMarket each return RugCallError::NotImplemented until
-//! their implementation lands.
+//! space are final, and all six instructions are implemented —
+//! InitializeConfig, CreateMarket, BuyPosition, ResolveMarket,
+//! Claim and CancelMarket. The program is complete as designed;
+//! what remains is deployment (devnet) and the off-chain
+//! resolver, neither of which changes this code.
 
 pub mod processor;
 pub mod state;
