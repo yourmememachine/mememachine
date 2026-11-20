@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `852a74d` (2026-11-20; `make verify` green —
+Last verified commit: `5c978ad` (2026-11-20; `make verify` green —
 bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 96 passed, app JS suite 139 passed). The pin is refreshed after every full verification run;
+passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 99 passed, app JS suite 139 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -107,14 +107,17 @@ chain configuration gates any public chain launch. Both scopes:
 > is wired behind the dry-run rails: one shared decision
 > path, a fixed-order preflight that refuses before any
 > signing is attempted, and processed-ledger entries written
-> only after confirmed submissions. Nothing has been
-> deployed and nothing has been submitted: the devnet
-> keypairs remain unfunded (public faucet rate limit), the
-> program id is null in every fixture and page, and the live
-> mode's tested behaviour today is refusal. The OS still
+> only after confirmed submissions. The program was
+> deployed to devnet on 2026-11-20 (program
+> `DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ`, Config
+> initialized, one smoke market holding both sides); the
+> resolver's first live pass recorded a fail-closed
+> deferral because the public mainnet RPC rate-limits the
+> evidence reads from this host, so nothing was signed or
+> submitted on-chain by the resolver yet. The OS still
 > does not consume `evidence.js`. Off-chain, devnet-only in
-> intent, not part of Scope A, gating nothing. 235 Node
-> tests across the two suites (96 resolver + 139 app);
+> intent, not part of Scope A, gating nothing. 238 Node
+> tests across the two suites (99 resolver + 139 app);
 > `make verify` runs them as `test-resolver` and
 > `test-predict`.
 >
