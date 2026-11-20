@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `8c53c16` (2026-11-20; `make verify` green —
-bridge workspace 203 passed, LaunchGuard 68 passed, PQ vault 17
+Last verified commit: `1b0f96c` (2026-11-20; `make verify` green —
+bridge workspace 205 passed, LaunchGuard 68 passed, PQ vault 17
 passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 99 passed, app JS suite 139 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -478,6 +478,29 @@ chain configuration gates any public chain launch. Both scopes:
 > machine_bridge.so `ea5e5cf9…` (215,512 B). **Program
 > scope changed — auditors must quote against the new
 > HEAD.**
+>
+> **Scope update (2026-11-20, A-F1 fix, PROGRAM CHANGE):**
+> the round-7 surviving High above is fixed. Attestation
+> expiry moved from a slot basis to a timestamp basis:
+> `BridgeMessage` is now format version 2 (canonical
+> encoding 203 bytes, domain separator
+> `MACHINE-BRIDGE-V2`) — `expiry_slot` is replaced by
+> `expiry_timestamp` and a signed `source_timestamp` is
+> added, both derived from the source transaction's block
+> time, and the destination programs compare against
+> their own Clock `unix_timestamp`. `validate_message`
+> bounds the signed lifetime to (0, 400,000] seconds and
+> rejects a message whose expiry is more than 400,000 s
+> ahead of destination time or whose source time is more
+> than 3,600 s ahead. The relayer refuses to sign a
+> source transaction that carries no block time, and its
+> expiry-window config is now in seconds
+> (`expiry_window_secs`, default 40,000, cap 400,000).
+> Proof bundles verify expiry against the receipt
+> timestamp. SBF rebuilt: solana_lock.so `42bbfadc…`
+> (212,840 B), machine_bridge.so `e8b85254…`
+> (215,832 B). **Program scope changed — auditors must
+> quote against the new HEAD.**
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |

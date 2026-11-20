@@ -9,7 +9,7 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **203 passed, 0 failed** (41
+- **Tests:** bridge workspace **205 passed, 0 failed** (43
   bridge-common unit + 35 machine-bridge
   + 29 solana-lock (28 + 1 precompile-cost) + 60 relayer + 23 proof bundle + 15 receipt
   indexer, including the
@@ -17,7 +17,7 @@ the current state and supersedes their numbers.
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
   `programs/PQ-VERIFY.md`); fork suite 49 OK.
-  Full `make verify` 2026-11-20: **713 passed, 0 failed**.
+  Full `make verify` 2026-11-20: **715 passed, 0 failed**.
 - **PQ Vault (2026-11-19, commit `8ca345c`):** new native
   program in the `programs/` workspace (not a bridge component):
   a cold-storage vault authorized by WOTS+ one-time signatures
@@ -49,6 +49,20 @@ the current state and supersedes their numbers.
   destination. 6 new regression tests, all reproduced failing
   pre-fix. SBF rebuilt: solana_lock.so `d1ab3d00…`
   (212,136 B), machine_bridge.so `ea5e5cf9…` (215,512 B).
+- **A-F1 fix (2026-11-20, commit `1b0f96c`):** the round-7
+  surviving High — attestation expiry compared the destination
+  chain's slot against a source-chain expiry. Expiry is now
+  timestamp-based: `BridgeMessage` format version 2 (203-byte
+  canonical encoding, `MACHINE-BRIDGE-V2` separator),
+  `expiry_timestamp` + signed `source_timestamp` derived from
+  the source transaction's block time, destination programs
+  validating against their own Clock `unix_timestamp`;
+  lifetime bounded to (0, 400,000] s with far-future and
+  post-dating rejection. The defect trace was reproduced
+  before the fix (honest attestation rejected at a diverged
+  destination slot) and is pinned by 2 new regression tests.
+  SBF rebuilt: solana_lock.so `42bbfadc…` (212,840 B),
+  machine_bridge.so `e8b85254…` (215,832 B).
 - **Receipt indexer (2026-11-18, commit `e0d0a24`):** new
   off-chain crate `crates/receipt-indexer/` (binary
   `receipt-index`) performing the binding BRIDGE.md 4.5 leaves to

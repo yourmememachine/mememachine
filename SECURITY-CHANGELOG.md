@@ -7,6 +7,28 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-20 — `1b0f96c`** A-F1 fixed: attestation expiry
+  moved from a slot basis to a timestamp basis (the
+  code-review debate round 7 surviving High, STATUS.md
+  P40/P41). The old check compared the destination chain's
+  slot against a source-chain expiry, so it rejected every
+  honest Machine-to-Solana attestation once slot heights
+  diverged and never fired in the other direction.
+  `BridgeMessage` is now format version 2 (203-byte
+  canonical encoding, `MACHINE-BRIDGE-V2` domain
+  separator): `expiry_timestamp` and a signed
+  `source_timestamp` are derived from the source
+  transaction's block time, and the destination programs
+  validate against their own Clock `unix_timestamp`.
+  `validate_message` bounds the signed lifetime to
+  (0, 400,000] seconds and rejects far-future expiries and
+  post-dated source times, so a quorum-signed message can
+  neither be stockpiled for later first use nor
+  pre-positioned. The relayer fails closed on a source
+  transaction with no block time; its expiry window config
+  is now in seconds. SBF rebuilt: solana_lock.so
+  `42bbfadc…` (212,840 B), machine_bridge.so `e8b85254…`
+  (215,832 B). Localnet only; not deployed.
 - **2026-11-20 — `852a74d`** RugCall's resolver gains a
   live submission path behind its dry-run rails, and the
   market front end lands under `rugcall/app/`. The live

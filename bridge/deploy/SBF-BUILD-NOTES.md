@@ -150,6 +150,19 @@ not touched and its binary above stands. Built with
 | `solana_lock.so` | 212,136 | `d1ab3d00e8f5db0577cbae018c5caecddbb72b47b5657b3015a92d301fe3e2a4` |
 | `machine_bridge.so` | 215,512 | `ea5e5cf930baab17c366e086e5a2b8f6f24bf7b2b4e894d1549f63576ffbbd38` |
 
+**Rebuilt 2026-11-20 (later)** from the A-F1 fix (`1b0f96c`:
+attestation expiry moved from a slot basis to a timestamp
+basis — `BridgeMessage` format version 2; both processors now
+read the Clock `unix_timestamp`; see the AUDIT.md scope
+update). Bridge programs only — LaunchGuard was not touched
+and its binary above stands. Built with
+`bridge/deploy/build-sbf.sh` (the scratch-tree method below).
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 212,840 | `42bbfadcb7f97972b48dc3ffc234bb83ffb746251c0e99c36cb1a368e050b2b2` |
+| `machine_bridge.so` | 215,832 | `e8b85254f11ca7f270d7bff9d0266060241331b3a7a7417ebb424300277941bf` |
+
 ## Why the build does not run directly against the bridge workspace
 
 `bridge/deploy/build-sbf.sh` against the workspace fails before any
