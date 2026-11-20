@@ -138,6 +138,18 @@ Same standalone-tree method (`~/workspace/sbf-build/`, saved
 | `solana_lock.so` | 211,744 | `a22bccd8ea47e59972ca1e45f0bec6a23809b45c51c35480252556e3bc8f71fc` |
 | `machine_bridge.so` | 215,312 | `7d0ab41f4a6eb7f6ce2d58c021793c1ffc4a4438b95ffce9cabeba5c4ac8defb` |
 
+**Rebuilt 2026-11-20** from the code-review debate round 7
+change (`8c53c16`: Initialize supply/vault-pristine checks and
+default-destination rejection in both bridge programs; see the
+AUDIT.md scope update). Bridge programs only — LaunchGuard was
+not touched and its binary above stands. Built with
+`bridge/deploy/build-sbf.sh` (the scratch-tree method below).
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 212,136 | `d1ab3d00e8f5db0577cbae018c5caecddbb72b47b5657b3015a92d301fe3e2a4` |
+| `machine_bridge.so` | 215,512 | `ea5e5cf930baab17c366e086e5a2b8f6f24bf7b2b4e894d1549f63576ffbbd38` |
+
 ## Why the build does not run directly against the bridge workspace
 
 `bridge/deploy/build-sbf.sh` against the workspace fails before any

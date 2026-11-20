@@ -82,6 +82,24 @@ they record a security finding.
   Devnet-only crate; the audit surface of the existing
   programs is unchanged.
 
+- **2026-11-20 — `8c53c16`** Code-review debate round 7
+  (scope 1, second rotation: machine-bridge + solana-lock;
+  two independent reviewers, debate, reconcile; 7 findings
+  raised, 5 fix groups fixed, 6 new regression tests all
+  reproduced failing pre-fix). Machine `Initialize` rejects
+  a pre-minted wrapped mint (existing supply was unbacked
+  yet redeemable against honest deposits) and a default
+  `source_mint`; Lock `Initialize` rejects a vault with a
+  personal close authority or a pre-loaded balance;
+  `Deposit`/`Burn` reject a default destination. One High
+  finding survived but was not patched — attestation expiry
+  compares a destination-chain slot to a source-chain
+  expiry; its remedy is a protocol design decision,
+  recorded in STATUS.md P40 and AUDIT.md. SBF rebuilt:
+  solana_lock.so `d1ab3d00…` (212,136 B),
+  machine_bridge.so `ea5e5cf9…` (215,512 B). Localnet
+  only; not deployed.
+
 - **2026-11-20 — `0396fc8`** New program crate `rug-call`
   (devnet-only prediction market; AUDIT.md scope note of the
   same date records that it is not part of Scope A and gates

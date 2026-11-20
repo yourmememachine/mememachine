@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `5c978ad` (2026-11-20; `make verify` green —
-bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
+Last verified commit: `8c53c16` (2026-11-20; `make verify` green —
+bridge workspace 203 passed, LaunchGuard 68 passed, PQ vault 17
 passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 99 passed, app JS suite 139 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -454,6 +454,30 @@ chain configuration gates any public chain launch. Both scopes:
 > genesis-info.env crosses no privilege boundary). No
 > program scope change; auditors should still quote
 > against the current `main` HEAD.
+>
+> **Scope update (2026-11-20, debate round 7 — scope 1
+> second rotation, PROGRAM CHANGE):** two independent
+> reviews of `bridge/crates/machine-bridge` +
+> `bridge/crates/solana-lock`, debated finding-by-finding;
+> every fixed defect was reproduced before its fix (6 new
+> program tests, all failing pre-fix). Machine `Initialize`
+> now rejects a wrapped mint with non-zero supply and a
+> default `source_mint`; Lock `Initialize` now rejects a
+> vault with a personal close authority (the vault-authority
+> PDA itself remains acceptable) or a non-zero balance;
+> `Deposit` and `Burn` now reject a default destination.
+> One surviving High finding was NOT patched because its
+> remedy is a protocol design choice: attestation expiry
+> compares the destination chain's slot against a
+> source-chain expiry value, so it cannot work as written
+> once the two chains' slot heights diverge — dropping the
+> destination-slot check or moving expiry to a timestamp
+> basis (a message-format change) is a decision for the
+> project owner, recorded in STATUS.md P40. SBF rebuilt:
+> solana_lock.so `d1ab3d00…` (212,136 B),
+> machine_bridge.so `ea5e5cf9…` (215,512 B). **Program
+> scope changed — auditors must quote against the new
+> HEAD.**
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |

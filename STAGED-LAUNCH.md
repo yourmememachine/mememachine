@@ -12,9 +12,9 @@ gate allows.
 
 ## Phase 0 — Public proof of work ($0) — *current*
 
-- Everything in the open: code, tests (197 bridge + 49 fork/ops +
+- Everything in the open: code, tests (203 bridge + 49 fork/ops +
   68 LaunchGuard + 11 registry export + 17 PQ vault + 127 RugCall
-  + 99 resolver JS + 139 app JS — 707 total
+  + 99 resolver JS + 139 app JS — 713 total
   as of 2026-11-20), SBF hashes, runbooks, drills, honest status docs.
 - Free security passes: `cargo audit`, clippy, cargo-fuzz, plus a
   documented self-review checklist. (Sec3 X-Ray turned out to be

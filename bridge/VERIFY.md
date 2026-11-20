@@ -4,20 +4,20 @@ Real commands and their real output. Nothing here is claimed without a
 run behind it. Verified 2026-11-14 ~11:07 UTC, in the bridge workspace
 directory.
 
-## Current state (2026-11-19, latest commits — read this first)
+## Current state (2026-11-20, latest commits — read this first)
 
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **197 passed, 0 failed** (41
-  bridge-common unit + 32 machine-bridge
-  + 26 solana-lock (25 + 1 precompile-cost) + 60 relayer + 23 proof bundle + 15 receipt
+- **Tests:** bridge workspace **203 passed, 0 failed** (41
+  bridge-common unit + 35 machine-bridge
+  + 29 solana-lock (28 + 1 precompile-cost) + 60 relayer + 23 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
   `programs/PQ-VERIFY.md`); fork suite 49 OK.
-  Full `make verify` 2026-11-19: **342 passed, 0 failed**.
+  Full `make verify` 2026-11-20: **713 passed, 0 failed**.
 - **PQ Vault (2026-11-19, commit `8ca345c`):** new native
   program in the `programs/` workspace (not a bridge component):
   a cold-storage vault authorized by WOTS+ one-time signatures
@@ -41,6 +41,14 @@ the current state and supersedes their numbers.
   that set (`verify --expected-relayers`); the CLI caps input
   files at 1 MiB. SBF rebuilt: solana_lock.so `a22bccd8…`
   (211,744 B), machine_bridge.so `7d0ab41f…` (215,312 B).
+- **Debate round 7 (2026-11-20, commit `8c53c16`):** scope 1
+  second rotation. Machine `Initialize` rejects a wrapped mint
+  with non-zero supply and a default `source_mint`; Lock
+  `Initialize` rejects a vault with a personal close authority
+  or a non-zero balance; `Deposit`/`Burn` reject a default
+  destination. 6 new regression tests, all reproduced failing
+  pre-fix. SBF rebuilt: solana_lock.so `d1ab3d00…`
+  (212,136 B), machine_bridge.so `ea5e5cf9…` (215,512 B).
 - **Receipt indexer (2026-11-18, commit `e0d0a24`):** new
   off-chain crate `crates/receipt-indexer/` (binary
   `receipt-index`) performing the binding BRIDGE.md 4.5 leaves to
