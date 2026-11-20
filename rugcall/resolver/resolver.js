@@ -684,7 +684,12 @@ function buildChainDeps(rpcUrl) {
       return result && result.value ? result.value.blockhash : null;
     },
     async sendRawTransaction(bytes) {
-      return rpc("sendRawTransaction", [
+      // The canonical RPC method name is sendTransaction; the
+      // sendRawTransaction alias is not served by current RPC
+      // builds (it answers -32601 Method not found, verified
+      // against the public devnet endpoint on 2026-11-20). The
+      // seam keeps its name; only the wire method changed.
+      return rpc("sendTransaction", [
         Buffer.from(bytes).toString("base64"),
         { encoding: "base64" },
       ]);
@@ -1251,8 +1256,16 @@ function buildLiveDeps() {
     }
     return response.json();
   };
-  const rpc = async (method, params) => {
-    const body = await fetchJson(rpcUrl, {
+  // evidence.js's documented transport contract is
+  // rpc(url, method, params) -> Promise of the FULL parsed JSON-RPC
+  // reply: its rpcPort inspects reply.error itself and its callers
+  // read reply.result. An earlier shape of this adapter took
+  // (method, params) and returned reply.result only, which made
+  // every live evidence fetch fail before the first family could
+  // load (found on the first real-network exercise, 2026-11-20;
+  // pinned by test/live-deps.test.js).
+  const rpc = async (url, method, params) => {
+    const body = await fetchJson(url || rpcUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -1262,14 +1275,9 @@ function buildLiveDeps() {
         params: params || [],
       }),
     });
-    if (body && body.error) {
-      throw new Error(
-        `RPC ${method} failed: ${body.error.message || JSON.stringify(body.error)}`
-      );
-    }
-    return body ? body.result : undefined;
+    return body;
   };
-  return { rpc, fetchJson, nowMs: Date.now(), rpcUrl };
+  return { rpc, fetchJson, nowMs: () => Date.now(), rpcUrl };
 }
 
 async function runDryRun(args) {
@@ -1634,6 +1642,7 @@ module.exports = {
   createResolver,
   createLiveRunner,
   buildChainDeps,
+  buildLiveDeps,
   validateMarkets,
   DEFAULT_RESOLVER_PUBKEY,
   DEVNET_RPC_URL,

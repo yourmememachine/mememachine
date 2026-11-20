@@ -1,6 +1,6 @@
 {
   "schema": "rugcall-app-fixtures/v1",
-  "program_id": null,
+  "program_id": "DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ",
   "config": {
     "address": "ConfigRugCa111111111111111111111111111111111",
     "resolver": "Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH",

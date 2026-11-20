@@ -31,7 +31,9 @@ function loadEvidenceFor(m) {
 
 test("schema, program id and cast sizes", () => {
   assert.equal(bundle.schema, "rugcall-app-fixtures/v1");
-  assert.equal(bundle.program_id, null);
+  // The fixture bundle carries the deployed devnet program id
+  // since the 2026-11-20 deploy (it was null while undeployed).
+  assert.equal(bundle.program_id, "DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ");
   assert.equal(bundle.config.address, "ConfigRugCa111111111111111111111111111111111");
   assert.equal(bundle.config.resolver, "Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH");
   assert.equal(bundle.config.collateral_mint, null);

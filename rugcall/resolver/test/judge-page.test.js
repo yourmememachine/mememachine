@@ -23,6 +23,9 @@ const GENERATOR = path.join(APP_DIR, "build-judge-page.js");
 const EVIDENCE_JS = path.join(APP_DIR, "evidence.js");
 const PLACEHOLDER = "Program ID: not yet deployed (devnet funding pending)";
 const STUB_PROGRAM_ID = "StubProgram1111111111111111111111111111111";
+// The program was deployed to devnet on 2026-11-20; the replay
+// binding and the generated page carry this id.
+const DEPLOYED_PROGRAM_ID = "DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ";
 
 function readJudge() {
   assert.ok(
@@ -81,17 +84,35 @@ test("judge page: embedded replay deep-equals replay.json on disk", () => {
   assert.deepEqual(embedded, loadReplay());
 });
 
-test("judge page: placeholder treatment follows program_id", () => {
+test("judge page: deployed treatment follows program_id", () => {
   const html = readJudge();
   const replay = loadReplay();
   const programId = (replay.config && replay.config.programId) || null;
-  assert.equal(programId, null, "this test run expects the undeployed replay (programId null)");
-  assert.ok(programSection(html).includes(PLACEHOLDER), "not-yet-deployed placeholder text is present in the program section");
-  assert.ok(
-    html.includes("Program not yet deployed"),
-    "program status chip carries the not-yet-deployed treatment"
+  assert.equal(
+    programId,
+    DEPLOYED_PROGRAM_ID,
+    "the replay binding carries the deployed devnet program id"
   );
-  assert.equal(explorerHrefs(html).length, 0, "zero explorer links while undeployed");
+  assert.ok(
+    !programSection(html).includes(PLACEHOLDER),
+    "not-yet-deployed placeholder text is gone from the program section"
+  );
+  assert.ok(
+    html.includes("Program " + DEPLOYED_PROGRAM_ID + " · Devnet"),
+    "program status chip carries the deployed treatment"
+  );
+  const expectedLinks = 1 +
+    (replay.market && (typeof replay.market === "string" || replay.market.address) ? 1 : 0) +
+    (replay.record && replay.record.resolver ? 1 : 0);
+  const hrefs = explorerHrefs(html);
+  assert.equal(hrefs.length, expectedLinks, "exactly the expected devnet explorer links appear");
+  for (const h of hrefs) {
+    assert.ok(h.endsWith('?cluster=devnet"'), "explorer link is pinned to devnet: " + h);
+  }
+  assert.ok(
+    hrefs.some((h) => h.includes("/address/" + DEPLOYED_PROGRAM_ID + "?cluster=devnet")),
+    "the deployed program id has its own explorer link"
+  );
 
   // Regenerate with a stub program id into a temp output: exactly
   // the program, market and resolver links appear, all devnet.
@@ -104,13 +125,13 @@ test("judge page: placeholder treatment follows program_id", () => {
   const expected = 1 +
     (replay.market && (typeof replay.market === "string" || replay.market.address) ? 1 : 0) +
     (replay.record && replay.record.resolver ? 1 : 0);
-  const hrefs = explorerHrefs(stub);
-  assert.equal(hrefs.length, expected, "exactly the expected devnet explorer links appear");
-  for (const h of hrefs) {
+  const stubHrefs = explorerHrefs(stub);
+  assert.equal(stubHrefs.length, expected, "exactly the expected devnet explorer links appear");
+  for (const h of stubHrefs) {
     assert.ok(h.endsWith('?cluster=devnet"'), "explorer link is pinned to devnet: " + h);
   }
   assert.ok(
-    hrefs.some((h) => h.includes("/address/" + STUB_PROGRAM_ID + "?cluster=devnet")),
+    stubHrefs.some((h) => h.includes("/address/" + STUB_PROGRAM_ID + "?cluster=devnet")),
     "the stub program id has its own explorer link"
   );
   assert.ok(!programSection(stub).includes(PLACEHOLDER), "placeholder text is gone from the program section once deployed");
