@@ -7,6 +7,20 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-20 — `0396fc8`** New program crate `rug-call`
+  (devnet-only prediction market; AUDIT.md scope note of the
+  same date records that it is not part of Scope A and gates
+  nothing). The audit surface of the existing programs is
+  unchanged. The new crate's security-relevant shape, for the
+  record: payouts are computed from pools stored in the market
+  account (never the live vault balance, which stray transfers
+  can inflate), pools freeze at resolution so payouts cannot
+  depend on claim order, one `claimed` flag covers the payout
+  and both refund paths, and resolution is bound to a non-zero
+  evidence hash posted by the single resolver key in Config.
+  Handlers are stubs at this commit; the invariants land with
+  their implementations and tests.
+
 - **2026-11-19 — `ba65722`** Code-review debate round 6
   (whole-repo consistency pass; two independent reviewers,
   debate, reconcile; 19 findings raised, 14 merged groups
