@@ -1,0 +1,94 @@
+{
+  "mint": "MintSoftF1ag11111111111111111111111111111111",
+  "fetchedAtSec": 1799917200,
+  "light": {
+    "total": "1000000000000000",
+    "decimals": 6,
+    "top1": 8,
+    "top5": 20,
+    "top10": 30,
+    "top10Incl": 30,
+    "top1Excl": 4,
+    "top10Excl": 25,
+    "curveSuspect": false,
+    "largestPct": 8,
+    "holders": [],
+    "checkedAt": 1799913600,
+    "slot": 1
+  },
+  "deep": {
+    "creator": "CreatorWa11et1111111111111111111111111111111",
+    "creationSlot": 1,
+    "creationTime": 1799913600,
+    "bundle": {
+      "pct": 32,
+      "slotPct": 5,
+      "count": 9,
+      "slotCount": 2,
+      "wallets": [],
+      "slotWallets": [],
+      "matching": false,
+      "creatorInWindow": false,
+      "partial": false,
+      "reachedCreate": true,
+      "windowFull": true
+    },
+    "funders": {
+      "linked": [],
+      "linkedOutside": [
+        "SideAWa11et111111111111111111111111111111111",
+        "SideBWa11et111111111111111111111111111111111",
+        "SideCWa11et111111111111111111111111111111111",
+        "SideDWa11et111111111111111111111111111111111",
+        "SideEWa11et111111111111111111111111111111111",
+        "SideFWa11et111111111111111111111111111111111"
+      ],
+      "links": {},
+      "inconclusive": [],
+      "tracedCount": 0,
+      "unresolvedPct": 0,
+      "unresolvedWallets": [],
+      "sharedFunderInWindow": false,
+      "traces": {}
+    },
+    "history": {
+      "launches": 2,
+      "inactive": 0,
+      "determined": 2,
+      "strikes": 0,
+      "fastExit": 0,
+      "sampled": 2,
+      "sigCount": 10,
+      "ageDays": 45,
+      "ageIsFloor": false,
+      "unknown": false,
+      "details": []
+    },
+    "funderHistory": null,
+    "sells": {
+      "soldPct": 5,
+      "initial": 100,
+      "checked": true,
+      "crossingTs": null
+    },
+    "liquidity": {
+      "state": "live",
+      "usd": 12000
+    },
+    "auth": {
+      "mintAuth": false,
+      "freezeAuth": false
+    },
+    "creatorHoldingPct": 10,
+    "ownerMap": {},
+    "_bought": {},
+    "_slotBought": {},
+    "_sold": {},
+    "_soldEarly": {},
+    "pctByWallet": {},
+    "slot": 1,
+    "bundleError": null,
+    "fundersError": null,
+    "historyError": null
+  }
+}
