@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `a5795b4` (2026-11-20; `make verify` green —
+Last verified commit: `54aca89` (2026-11-20; `make verify` green —
 bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK). The pin is refreshed after every full verification run;
+passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 74 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -70,6 +70,27 @@ chain configuration gates any public chain launch. Both scopes:
 > binary is recorded in `bridge/deploy/SBF-BUILD-NOTES.md`;
 > deployment to devnet is a separate step and has not
 > happened at this commit.
+>
+> **Scope update (2026-11-20, later still — RugCall off-chain
+> evidence + resolver, commit `54aca89`):** the off-chain half
+> of the entry joins the repo under `rugcall/`: the Solana OS
+> verdict kernel extracted to `rugcall/app/evidence.js` (the
+> kernel functions are verbatim from the OS export, with the
+> session state they closed over made explicit; the fetchers
+> are a port; the canonical evidence bundle and its sha256
+> binding are new code) and a dry-run resolver
+> (`rugcall/resolver/`) that logs the resolution instruction
+> it would post. The resolver signs nothing, submits nothing,
+> and runs against recorded fixtures; its live mode is a
+> refused stub. One honesty note that matters for review:
+> the OS does not consume this module yet (the live OS build
+> is frozen until after 2026-11-28), so the two verdict
+> implementations are kept in agreement by tests — a source
+> diff-check plus a boundary-grid comparison against the
+> original kernel — not by shared execution. Off-chain,
+> devnet-only in intent, not part of Scope A, gating
+> nothing. 74 Node tests; `make verify` runs them as
+> `test-resolver`.
 >
 > **Scope update (2026-11-19, code-review debate round 6 —
 > consistency pass, commit `ba65722`):** a whole-repo

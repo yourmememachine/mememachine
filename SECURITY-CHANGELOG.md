@@ -7,6 +7,21 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-20 — `54aca89`** RugCall's off-chain resolution
+  path lands in dry-run form. The Solana OS verdict kernel is
+  extracted to `rugcall/app/evidence.js` with the kernel
+  functions verbatim (a source diff-check and a boundary-grid
+  comparison against the original run in `make verify`, so a
+  silent divergence between the two implementations fails the
+  build), and the resolver (`rugcall/resolver/`) that will
+  post ResolveMarket is built to fail closed: it never
+  resolves on partial evidence, never emits the all-zero
+  evidence hash the program refuses, lets trigger event
+  timestamps — not detection times — decide boundary cases,
+  and keeps the permissionless-cancel gate strict. It signs
+  and submits nothing; live mode is a refused stub, and
+  devnet deployment has still not happened. The audit
+  surface of the existing programs is unchanged.
 - **2026-11-20 — `a5795b4`** RugCall terminal handlers land;
   the program is complete. ResolveMarket is resolver-only
   (the authority check runs before any market state is read,
