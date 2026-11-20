@@ -3438,6 +3438,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rug-call"
+version = "0.1.0"
+dependencies = [
+ "borsh 1.8.1",
+ "solana-program",
+ "solana-program-test",
+ "solana-sdk",
+ "spl-token 4.0.2",
+ "tokio",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"

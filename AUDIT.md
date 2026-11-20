@@ -28,6 +28,25 @@ chain configuration gates any public chain launch. Both scopes:
 | Key management | `bridge/deploy/DEPLOY-BRIDGE.md` step 2 | Fresh keys on deployment hosts, role separation, upgrade authority is a single loader key in code; assigning it to a multisig and adding a 48h timelock are deployment-gate process steps, not shipped code. Process review, not code. |
 | Deployment + drills | `bridge/deploy/`, `bridge/drills/` | Caps translation (`caps.py`), initialization parameters, test-crossing / pause / outage drill results. |
 
+> **Scope update (2026-11-20 — NEW PROGRAM, DEVNET ONLY,
+> NOT IN SCOPE A):** a fourth native program crate joins the
+> repo: RugCall (`programs/crates/rug-call/`), a parimutuel
+> prediction market over rug evidence, built as a hackathon
+> entry. It is devnet-only by design, custodies only devnet
+> play collateral (a project-issued demo token with no real
+> value), and gates nothing in this package — it is not part
+> of Scope A and no auditor quote should price it. State at
+> this commit: the state layout, instruction set and error
+> space are final, pinned by 21 unit tests; every instruction
+> handler is a stub returning `NotImplemented` until its
+> implementation lands. One layout addition beyond the
+> entry's design note: a per-mint `LiveMarket` lock account,
+> without which the design's one-live-market-per-mint rule
+> cannot be enforced (a timestamp-seeded market PDA never
+> collides, and a program cannot scan for sibling accounts).
+> Bridge audit scope is unchanged; auditors should still
+> quote against the current `main` HEAD.
+>
 > **Scope update (2026-11-19, code-review debate round 6 —
 > consistency pass, commit `ba65722`):** a whole-repo
 > docs-vs-code review corrected claims in this package and
