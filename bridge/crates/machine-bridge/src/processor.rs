@@ -225,6 +225,20 @@ fn process_initialize(
             return Err(BridgeError::InvalidAccountData.into());
         }
     }
+    // Debate round 2026-11-20 (B-F1): the mint must start empty.
+    // Config total_outstanding starts at 0, so any supply minted
+    // before the authority handover would be unbacked yet redeemable
+    // against honest deposits through Burn/Unlock.
+    if mint_state.supply != 0 {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    // Debate round 2026-11-20 (A-F2, partial as debated): a default
+    // source_mint can never be carried by an honest message, and
+    // Initialize is one-shot, so storing it would brick MintWrapped
+    // permanently.
+    if source_mint == Pubkey::default() {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
     // Self-audit F-3: the same member-set validation SetRelayers
     // applies — no default keys, no duplicates, for either set.
     validate_member_set(&relayers)?;
@@ -480,6 +494,12 @@ fn process_burn(
     }
     if amount == 0 {
         return Err(BridgeError::InvalidAmount.into());
+    }
+    // Debate round 2026-11-20 (B-F4): a default destination can
+    // only pay a keyless black-hole account on the Solana side;
+    // reject before any tokens burn.
+    if destination == Pubkey::default() {
+        return Err(BridgeError::InvalidAccountData.into());
     }
     // Burning more than the tracked outstanding supply would mean the
     // books no longer balance against the Solana vault — refuse.

@@ -1519,3 +1519,155 @@ async fn debate_pause_with_non_pda_config_fails() {
     let result = context.banks_client.process_transaction(tx).await;
     assert_custom_error(result, BridgeError::InvalidAccountData);
 }
+
+// ---------------------------------------------------------------------------
+// Debate round 2026-11-20 (scope 1, rotation 2): regression tests.
+// ---------------------------------------------------------------------------
+
+/// Build a vault owned first by a personal key, optionally tainted,
+/// then handed to the vault-authority PDA, and attempt Initialize.
+/// `preload` mints that many tokens into the vault before handover;
+/// `close_auth` leaves a personal close authority on the vault.
+async fn tainted_vault_init_result(
+    preload: u64,
+    close_auth: bool,
+) -> Result<(), solana_program_test::BanksClientError> {
+    let program_id = program_id();
+    let deployer = Keypair::new();
+    let mut program_test = ProgramTest::new(
+        "solana_lock",
+        program_id,
+        solana_program_test::processor!(solana_lock::processor::process),
+    );
+    program_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    seed_programdata(&mut program_test, &deployer.pubkey());
+    let mut context = program_test.start_with_context().await;
+    let recent_blockhash = context.last_blockhash;
+    let fund_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &context.payer.pubkey(),
+            &deployer.pubkey(),
+            1_000_000_000,
+        )],
+        Some(&context.payer.pubkey()),
+        &[&context.payer],
+        recent_blockhash,
+    );
+    context.banks_client.process_transaction(fund_tx).await.unwrap();
+    let mint_authority = Keypair::new();
+    let personal = Keypair::new();
+    let (vault_authority, _) = authority_pda(&program_id);
+    let payer = context.payer.insecure_clone();
+    let source_mint = create_mint(
+        &mut context.banks_client,
+        &payer,
+        &recent_blockhash,
+        &mint_authority.pubkey(),
+        None,
+        6,
+    )
+    .await;
+    let vault = create_token_account(
+        &mut context.banks_client,
+        &payer,
+        &recent_blockhash,
+        &source_mint,
+        &personal.pubkey(),
+    )
+    .await;
+    if preload > 0 {
+        mint_to(
+            &mut context.banks_client,
+            &payer,
+            &recent_blockhash,
+            &source_mint,
+            &vault,
+            &mint_authority,
+            preload,
+        )
+        .await;
+    }
+    if close_auth {
+        let blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+        let ix = spl_token::instruction::set_authority(
+            &spl_token::id(),
+            &vault,
+            Some(&personal.pubkey()),
+            spl_token::instruction::AuthorityType::CloseAccount,
+            &personal.pubkey(),
+            &[],
+        )
+        .unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer, &personal],
+            blockhash,
+        );
+        context.banks_client.process_transaction(tx).await.unwrap();
+    }
+    let blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+    let ix = spl_token::instruction::set_authority(
+        &spl_token::id(),
+        &vault,
+        Some(&vault_authority),
+        spl_token::instruction::AuthorityType::AccountOwner,
+        &personal.pubkey(),
+        &[],
+    )
+    .unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer, &personal],
+        blockhash,
+    );
+    context.banks_client.process_transaction(tx).await.unwrap();
+    let init_ix = initialize_ix(
+        &deployer.pubkey(),
+        relayer_pubkeys(&relayer_keypairs()),
+        admin_pubkeys(&admin_keypairs()),
+        source_mint,
+        vault,
+        1_000_000,
+        10_000_000,
+        1_000_000_000,
+    );
+    let blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&context.payer.pubkey()),
+        &[&context.payer, &deployer],
+        blockhash,
+    );
+    context.banks_client.process_transaction(tx).await
+}
+
+#[tokio::test]
+async fn debate_r2_initialize_rejects_vault_close_authority() {
+    // B-F2: a personal close authority survives the AccountOwner
+    // transfer (spl-token clears it only for native accounts) and
+    // would let one key close an empty vault, bricking the program.
+    let result = tainted_vault_init_result(0, true).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}
+
+#[tokio::test]
+async fn debate_r2_initialize_rejects_preloaded_vault() {
+    // B-F3: a vault that already holds tokens breaks the
+    // balance == total_locked invariant from genesis and strands
+    // the pre-load permanently.
+    let result = tainted_vault_init_result(5_000, false).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}
+
+#[tokio::test]
+async fn debate_r2_deposit_to_default_destination_fails() {
+    // B-F4: destination == Pubkey::default() mints wrapped tokens
+    // to a keyless account on the Machine side; reject at entry.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    let result = send_deposit(&mut env, 10_000, Pubkey::default(), 9).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+    assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 0);
+    assert_eq!(total_locked(&mut env).await, 0);
+}

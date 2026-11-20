@@ -228,6 +228,22 @@ fn process_initialize(
     {
         return Err(BridgeError::InvalidAccountData.into());
     }
+    // Debate round 2026-11-20 (B-F2/B-F3): the vault must start
+    // pristine. A personal close_authority survives the ownership
+    // transfer to the PDA (spl-token clears it only for native
+    // accounts) and could close an empty vault, bricking the
+    // program; a pre-loaded balance breaks the
+    // balance == total_locked invariant and strands permanently.
+    // A close authority held by the vault-authority PDA itself is
+    // acceptable, mirroring the Machine-side freeze rule.
+    if let solana_program::program_option::COption::Some(close) = vault_state.close_authority {
+        if close != vault_authority {
+            return Err(BridgeError::InvalidAccountData.into());
+        }
+    }
+    if vault_state.amount != 0 {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
     // Self-audit F-3: the same member-set validation SetRelayers
     // applies — no default keys, no duplicates, for either set.
     validate_member_set(&relayers)?;
@@ -297,6 +313,12 @@ fn process_deposit(
     config.check_active()?;
     if amount == 0 {
         return Err(BridgeError::InvalidAmount.into());
+    }
+    // Debate round 2026-11-20 (B-F4): a default destination can
+    // only mint wrapped tokens to a keyless black-hole account on
+    // the Machine side; reject before any tokens lock.
+    if destination == Pubkey::default() {
+        return Err(BridgeError::InvalidAccountData.into());
     }
     if !user.is_signer {
         return Err(ProgramError::MissingRequiredSignature);

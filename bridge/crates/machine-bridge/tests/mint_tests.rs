@@ -1665,3 +1665,152 @@ async fn debate_mint_with_wrong_source_mint_fails() {
     let result = send_mint(&mut env, msg, sigs).await;
     assert_custom_error(result, BridgeError::InvalidAccountData);
 }
+
+// ---------------------------------------------------------------------------
+// Debate round 2026-11-20 (scope 1, rotation 2): regression tests.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn debate_r2_initialize_rejects_pre_minted_supply() {
+    // B-F1: a wrapped mint pre-minted by the initializer before the
+    // mint authority is handed to the bridge PDA must be rejected;
+    // config.total_outstanding starts at 0, so any existing supply
+    // is unbacked and redeemable against honest deposits.
+    let mut fx = init_fixture().await;
+    let deployer = Keypair::try_from(fx.deployer.to_bytes().as_slice()).unwrap();
+    let (authority_pda, _) = authority_pda(&program_id());
+    let personal = Keypair::new();
+    let payer = fx.context.payer.insecure_clone();
+    let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
+    let mint = create_mint(
+        &mut fx.context.banks_client,
+        &payer,
+        &blockhash,
+        &personal.pubkey(),
+        None,
+        6,
+    )
+    .await;
+    let personal_account = create_token_account(
+        &mut fx.context.banks_client,
+        &payer,
+        &blockhash,
+        &mint,
+        &personal.pubkey(),
+    )
+    .await;
+    let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
+    let mint_ix = spl_token::instruction::mint_to(
+        &spl_token::id(),
+        &mint,
+        &personal_account,
+        &personal.pubkey(),
+        &[],
+        1_000_000,
+    )
+    .unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[mint_ix],
+        Some(&payer.pubkey()),
+        &[&payer, &personal],
+        blockhash,
+    );
+    fx.context.banks_client.process_transaction(tx).await.unwrap();
+    let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
+    let set_ix = spl_token::instruction::set_authority(
+        &spl_token::id(),
+        &mint,
+        Some(&authority_pda),
+        spl_token::instruction::AuthorityType::MintTokens,
+        &personal.pubkey(),
+        &[],
+    )
+    .unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[set_ix],
+        Some(&payer.pubkey()),
+        &[&payer, &personal],
+        blockhash,
+    );
+    fx.context.banks_client.process_transaction(tx).await.unwrap();
+    let result = send_init_as(
+        &mut fx,
+        &deployer,
+        relayer_pubkeys(&relayer_keypairs()),
+        admin_pubkeys(&admin_keypairs()),
+        mint,
+    )
+    .await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}
+
+#[tokio::test]
+async fn debate_r2_initialize_rejects_default_source_mint() {
+    // A-F2 (partial, as debated): a default source_mint can never be
+    // carried by an honest message; storing it bricks MintWrapped
+    // permanently because Initialize is one-shot.
+    let mut fx = init_fixture().await;
+    let wrapped = fx.wrapped_mint;
+    let ix = initialize_ix(
+        &fx.deployer.pubkey(),
+        relayer_pubkeys(&relayer_keypairs()),
+        admin_pubkeys(&admin_keypairs()),
+        wrapped,
+        Pubkey::default(),
+        100_000,
+        500_000,
+    );
+    let blockhash = fx.context.banks_client.get_latest_blockhash().await.unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&fx.context.payer.pubkey()),
+        &[&fx.context.payer, &fx.deployer],
+        blockhash,
+    );
+    let result = fx.context.banks_client.process_transaction(tx).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}
+
+#[tokio::test]
+async fn debate_r2_burn_to_default_destination_fails() {
+    // B-F4: destination == Pubkey::default() pays a keyless black
+    // hole on the Solana side; reject before any tokens burn.
+    let mut env = setup(100_000, 500_000).await;
+    let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_mint(&mut env, msg, sigs).await.unwrap();
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let (record_pda, _) = nonce_pda(&program_id, DIR_MACHINE_TO_SOLANA, 9);
+    let blockhash = env.context.banks_client.get_latest_blockhash().await.unwrap();
+    let burn_ix = Instruction::new_with_borsh(
+        program_id,
+        &MachineInstruction::Burn {
+            amount: 10_000,
+            destination: Pubkey::default(),
+            nonce: 9,
+        },
+        vec![
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new(env.recipient_token_account, false),
+            AccountMeta::new(env.wrapped_mint, false),
+            AccountMeta::new(record_pda, false),
+            AccountMeta::new_readonly(env.recipient.pubkey(), true),
+            AccountMeta::new(env.context.payer.pubkey(), true),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+    );
+    let tx = Transaction::new_signed_with_payer(
+        &[burn_ix],
+        Some(&env.context.payer.pubkey()),
+        &[&env.context.payer, &env.recipient],
+        blockhash,
+    );
+    let result = env.context.banks_client.process_transaction(tx).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.recipient_token_account).await,
+        50_000
+    );
+}
