@@ -192,7 +192,7 @@ Machine is entered in the Dev3pack Global Hackathon
 split honestly:
 
 **What existed before the hackathon** — everything in this
-repository up to commit `f8b1663` (2026-11-19): the chain, the
+repository up to commit `ba65722` (2026-11-19): the chain, the
 bridge, LaunchGuard (including the dust floor and the status
 page, both built on 2026-11-19 — pre-existing work, not
 weekend work), the PQ vault, Solana OS, and the ops/deploy

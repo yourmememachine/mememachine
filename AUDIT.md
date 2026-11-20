@@ -6,7 +6,7 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `f8b1663` (2026-11-19; `make verify` green —
+Last verified commit: `ba65722` (2026-11-19; `make verify` green —
 bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
 passed, registry export 11 passed, fork suite 49 OK). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
@@ -28,6 +28,17 @@ chain configuration gates any public chain launch. Both scopes:
 | Key management | `bridge/deploy/DEPLOY-BRIDGE.md` step 2 | Fresh keys on deployment hosts, role separation, upgrade authority is a single loader key in code; assigning it to a multisig and adding a 48h timelock are deployment-gate process steps, not shipped code. Process review, not code. |
 | Deployment + drills | `bridge/deploy/`, `bridge/drills/` | Caps translation (`caps.py`), initialization parameters, test-crossing / pause / outage drill results. |
 
+> **Scope update (2026-11-19, code-review debate round 6 —
+> consistency pass, commit `ba65722`):** a whole-repo
+> docs-vs-code review corrected claims in this package and
+> the design docs: no timelock exists in the code (the key
+> management row above now says so), `set_cap` is instant
+> 2-of-3 admin, the vault ceiling is Initialize-only, and
+> SECURITY.md's bounty scope now includes LaunchGuard and
+> PQ Vault. No program change, no SBF rebuild, no scope
+> change. Auditors should still quote against the current
+> `main` HEAD.
+>
 > **Scope update (2026-11-15, after the first inquiries were sent):**
 > three features were added to the in-scope programs — crossing
 > receipts (a receipt PDA written by MintWrapped and Unlock),

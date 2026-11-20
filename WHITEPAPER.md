@@ -566,7 +566,7 @@ localnet only, undeployed, and in the audit scope for its own use
 ### 8.1 Testing
 
 All figures from the latest full verification (`make verify`, run
-2026-11-19; totals pinned against commit `f8b1663` in `STATUS.md`
+2026-11-19; totals pinned against commit `ba65722` in `STATUS.md`
 and re-run green the same day; re-runnable by anyone):
 
 | Suite | Tests | Covers |

@@ -7,6 +7,29 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-19 — `ba65722`** Code-review debate round 6
+  (whole-repo consistency pass; two independent reviewers,
+  debate, reconcile; 19 findings raised, 14 merged groups
+  survived, none killed). Documentation was the defect — no
+  program behaviour changed and no SBF was rebuilt. The
+  security-relevant corrections: the docs claimed a multisig
+  + 48h timelock on program upgrades and cap changes; no
+  timelock exists in the code, `set_cap` is 2-of-3-admin and
+  effective immediately, the upgrade authority is a single
+  loader key, and the vault ceiling is Initialize-only with
+  no raise path — BRIDGE.md, AUDIT.md, DEPLOY-BRIDGE.md, and
+  bridge/README.md now state this, with a multisig + timelock
+  recorded as a deployment-gate requirement. BRIDGE.md's
+  pause tables, kill-switch, and freeze-authority claims and
+  WHITEPAPER.md's governance list (which omitted `set_cap`)
+  were corrected to the code; SECURITY.md's bounty scope now
+  covers LaunchGuard and PQ Vault (AUDIT.md Scope A). Stale
+  test counts and the LIMITATIONS.md compute-unit and
+  audit-status claims were corrected to the measured state
+  (repo total unchanged at 342). One comment-only code touch
+  (relayer watcher header, nonce wording). Localnet only;
+  not deployed.
+
 - **2026-11-19 — `f8b1663`** Code-review debate round 5
   (ops/ + bridge/deploy/ + scripts; two independent reviewers,
   debate, reconcile; 26 new behaviour tests, 16 reproduced
