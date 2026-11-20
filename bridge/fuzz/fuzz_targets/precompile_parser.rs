@@ -34,7 +34,8 @@ fuzz_target!(|data: &[u8]| {
         amount: 1_000,
         source_tx: [9u8; 64],
         source_slot: 100,
-        expiry_slot: 1_000_000,
+        expiry_timestamp: 1_700_040_000,
+        source_timestamp: 1_700_000_000,
     };
 
     let key = ix_sysvar::ID;

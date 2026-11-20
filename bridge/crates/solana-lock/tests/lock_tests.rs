@@ -16,6 +16,34 @@ use solana_program::program_pack::Pack;
 
 const PROGRAM_ID_SEED: u8 = 43;
 
+/// Fixed source-event timestamp for attestation fixtures (A-F1 fix,
+/// 2026-11-20: expiry is timestamp-based). Tests pin the Clock
+/// sysvar's unix_timestamp with `set_clock_ts`; `warp_to_slot` is
+/// still used for the slot-based cap windows and does not move the
+/// timestamp reliably.
+const TEST_SOURCE_TS: i64 = 1_700_000_000;
+/// The destination "now" the suites pin before attestation-bearing
+/// sends: one minute after the fixture source event, far inside the
+/// fixtures' 40,000-second expiry window.
+const TEST_NOW: i64 = TEST_SOURCE_TS + 60;
+
+/// Set the Clock sysvar's unix_timestamp (slot untouched) and prove
+/// it landed by reading the sysvar back. If this assert ever fires,
+/// `set_sysvar` is not taking effect in this program-test version —
+/// stop and escalate; do not fall back to warp_to_slot silently.
+async fn set_clock_ts(env: &mut Env, ts: i64) {
+    let mut clock: solana_program::clock::Clock =
+        env.context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = ts;
+    env.context.set_sysvar(&clock);
+    let readback: solana_program::clock::Clock =
+        env.context.banks_client.get_sysvar().await.unwrap();
+    assert_eq!(
+        readback.unix_timestamp, ts,
+        "harness clock probe: set_sysvar did not take effect"
+    );
+}
+
 fn program_id() -> Pubkey {
     Pubkey::new_from_array([PROGRAM_ID_SEED; 32])
 }
@@ -79,7 +107,8 @@ fn burn_message(nonce: u64, amount: u64, recipient: Pubkey, source_mint: Pubkey)
         amount,
         source_tx: [11u8; 64],
         source_slot: 200,
-        expiry_slot: 1_000_000,
+        expiry_timestamp: TEST_SOURCE_TS + 40_000,
+        source_timestamp: TEST_SOURCE_TS,
     }
 }
 
@@ -281,7 +310,7 @@ async fn setup(per_tx_cap: u64, daily_cap: u64, vault_ceiling: u64) -> Env {
     );
     context.banks_client.process_transaction(tx).await.unwrap();
 
-    Env {
+    let mut env = Env {
         context,
         relayers,
         admins,
@@ -289,7 +318,12 @@ async fn setup(per_tx_cap: u64, daily_cap: u64, vault_ceiling: u64) -> Env {
         user,
         user_token_account,
         vault,
-    }
+    };
+    // Pin the destination clock for every attestation-bearing test
+    // (see TEST_NOW). The harness clock starts at wall-clock time,
+    // which is years past the fixtures' expiry window.
+    set_clock_ts(&mut env, TEST_NOW).await;
+    env
 }
 
 async fn create_mint(
@@ -1671,3 +1705,4 @@ async fn debate_r2_deposit_to_default_destination_fails() {
     assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 0);
     assert_eq!(total_locked(&mut env).await, 0);
 }
+

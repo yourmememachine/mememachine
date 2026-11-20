@@ -65,6 +65,20 @@ impl SourceChain for RpcSource {
             )));
         }
         let tx = self.client.transaction_parsed(&source_tx)?;
+        // The message's expiry is derived from this transaction's
+        // block time (A-F1 fix, 2026-11-20). It is chain data every
+        // relayer reads identically; if the chain does not report
+        // one, fail closed — never substitute a local clock or zero,
+        // which would either split the quorum or forge an expiry.
+        let source_block_time = tx
+            .get("blockTime")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| {
+                RelayerError::Rpc(
+                    "getTransaction: no blockTime for the source transaction; refusing to sign"
+                        .into(),
+                )
+            })?;
         // The sender is proven, not asserted: the source transaction
         // must contain the transfer behind this record — into the
         // vault for a deposit, burning the wrapped mint for a burn —
@@ -99,6 +113,7 @@ impl SourceChain for RpcSource {
             record: record.clone(),
             sender,
             source_tx,
+            source_block_time,
         })
     }
 }
@@ -229,7 +244,7 @@ fn sign_once(
         direction,
         nonce,
         cfg.source_mint(),
-        cfg.expiry_window_slots,
+        cfg.expiry_window_secs,
         margin(cfg, direction),
     )? {
         PollOutcome::NoEvent { .. } => {
@@ -349,8 +364,8 @@ fn collect(
 ) -> Result<(bridge_common::BridgeMessage, Vec<bridge_common::RelayerSignature>)> {
     let (relayers, quorum) = registered_relayers(cfg, direction)?;
     let collector = Collector { relayers, quorum };
-    let dest_slot = dest_client(cfg, direction).finalized_slot()?;
-    match collector.collect(Path::new(&cfg.attestation_dir), direction, nonce, dest_slot) {
+    let dest_now = dest_client(cfg, direction).finalized_timestamp()?;
+    match collector.collect(Path::new(&cfg.attestation_dir), direction, nonce, dest_now) {
         Ok((message, signatures)) => {
             log_event(
                 cfg,

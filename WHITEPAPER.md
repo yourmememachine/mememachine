@@ -401,9 +401,9 @@ program writes an **EventRecord PDA** — the canonical on-chain record
 of the event, written by the program itself after the transfer, never
 asserted by a user or a relayer. Relayers observe the finalized event,
 independently verify the source transfer on-chain (6.5), and sign a
-canonical 195-byte `BridgeMessage`; the message hash is
-SHA-256 over a domain separator (`MACHINE-BRIDGE-V1`) and the
-canonical encoding.
+canonical 203-byte `BridgeMessage` (format version 2); the message
+hash is SHA-256 over a domain separator (`MACHINE-BRIDGE-V2`) and
+the canonical encoding.
 
 Release on the destination requires **3-of-5 relayer signatures**,
 verified *inside the destination program* through Solana's ed25519

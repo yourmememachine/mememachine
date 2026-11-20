@@ -1,7 +1,7 @@
 {
  "attestation_dir": "/home/mememachine/bridge-attestations",
  "audit_log_path": "/home/mememachine/relayer-audit.jsonl",
- "expiry_window_slots": 100000,
+ "expiry_window_secs": 40000,
  "lock_program_id": "REPLACE_WITH_LOCK_PROGRAM_ID",
  "machine_program_id": "REPLACE_WITH_MACHINE_BRIDGE_PROGRAM_ID",
  "machine_rpc_url": "http://127.0.0.1:8899",

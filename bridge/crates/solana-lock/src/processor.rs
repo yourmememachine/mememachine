@@ -464,7 +464,9 @@ fn process_unlock(
     }
 
     let clock = Clock::get()?;
-    validate_message(&message, CHAIN_MACHINE, CHAIN_SOLANA, clock.slot)?;
+    // Expiry is timestamp-based (A-F1 fix, 2026-11-20): the two
+    // chains' slot sequences are independent, their clocks are not.
+    validate_message(&message, CHAIN_MACHINE, CHAIN_SOLANA, clock.unix_timestamp)?;
     verify_precompile_attestation(
         &message,
         &config.relayers.relayers,

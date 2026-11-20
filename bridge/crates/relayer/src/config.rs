@@ -2,7 +2,7 @@
 //!
 //! One JSON file per relayer operator. Every operator must run with
 //! the same chain/program/mint values and the same
-//! `expiry_window_slots` — those values are inside the signed message
+//! `expiry_window_secs` — those values are inside the signed message
 //! hash, so a mismatch does not cause a bad mint, it causes (safely)
 //! no quorum. Each operator has a *different* `relayer_keypair_path`.
 //!
@@ -55,13 +55,16 @@ pub struct RelayerConfig {
     /// evidence trail.
     #[serde(default)]
     pub audit_log_path: Option<String>,
-    /// Deterministic expiry: expiry_slot = source_slot + this value.
-    /// MUST be identical for every relayer. Default 100_000 slots
-    /// (~11 hours on Solana's ~400ms slots; Machine slots are faster,
-    /// so the window is longer there — expiry is checked against the
-    /// *destination* chain's slot in the programs).
-    #[serde(default = "default_expiry_window_slots")]
-    pub expiry_window_slots: u64,
+    /// Deterministic expiry: expiry_timestamp = the source event's
+    /// block time + this many seconds. MUST be identical for every
+    /// relayer. Default 40_000 seconds (~11 hours — the same span
+    /// the old 100_000-slot window covered at Solana's ~400 ms slot
+    /// time). Expiry is checked against the *destination* chain's
+    /// Clock timestamp in the programs (A-F1 fix, 2026-11-20: the
+    /// chains' slot sequences are independent, their clocks are
+    /// comparable).
+    #[serde(default = "default_expiry_window_secs")]
+    pub expiry_window_secs: i64,
     /// Extra finalized slots required beyond the finalized slot itself
     /// for Solana -> Machine (BRIDGE.md 2.5: finalized + 16 margin).
     #[serde(default = "default_solana_safety_margin_slots")]
@@ -85,8 +88,8 @@ pub struct RelayerConfig {
     pub submit_enabled: bool,
 }
 
-fn default_expiry_window_slots() -> u64 {
-    100_000
+fn default_expiry_window_secs() -> i64 {
+    40_000
 }
 fn default_solana_safety_margin_slots() -> u64 {
     16
@@ -104,17 +107,20 @@ impl RelayerConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.expiry_window_slots == 0 {
+        if self.expiry_window_secs <= 0 {
             return Err(RelayerError::InvalidConfig(
-                "expiry_window_slots must be > 0".into(),
+                "expiry_window_secs must be > 0".into(),
             ));
         }
-        // Upper bound: 1,000,000 slots is ~4.6 days on Solana — far
-        // beyond the 100,000 default; anything larger is a fat-finger
-        // that would keep unexecuted attestations valid for weeks.
-        if self.expiry_window_slots > 1_000_000 {
+        // Upper bound: 400,000 seconds is ~4.6 days (the old
+        // 1,000,000-slot cap restated in seconds, matching the
+        // on-chain MAX_ATTESTATION_LIFETIME_SECS) — far beyond the
+        // 40,000 default; anything larger is a fat-finger that would
+        // keep unexecuted attestations valid for weeks, and the
+        // programs would reject the messages anyway.
+        if self.expiry_window_secs > 400_000 {
             return Err(RelayerError::InvalidConfig(
-                "expiry_window_slots must be <= 1_000_000".into(),
+                "expiry_window_secs must be <= 400_000".into(),
             ));
         }
         if self.poll_interval_secs == 0 {
@@ -222,7 +228,7 @@ mod tests {
     fn defaults_are_applied() {
         let cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
         cfg.validate().unwrap();
-        assert_eq!(cfg.expiry_window_slots, 100_000);
+        assert_eq!(cfg.expiry_window_secs, 40_000);
         assert_eq!(cfg.solana_safety_margin_slots, 16);
         assert_eq!(cfg.machine_safety_margin_slots, 0);
         assert_eq!(cfg.poll_interval_secs, 10);
@@ -246,7 +252,7 @@ mod tests {
         cfg.solana_safety_margin_slots = 0;
         assert!(cfg.validate().is_err(), "solana margin below 16 must be rejected");
         let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
-        cfg.expiry_window_slots = 10_000_000;
+        cfg.expiry_window_secs = 10_000_000;
         assert!(cfg.validate().is_err(), "unbounded expiry must be rejected");
         let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
         cfg.relayer_keypair_path = "/tmp/attestations/relayer.json".into();
@@ -265,7 +271,7 @@ mod tests {
     #[test]
     fn zero_expiry_window_rejected() {
         let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
-        cfg.expiry_window_slots = 0;
+        cfg.expiry_window_secs = 0;
         assert!(cfg.validate().is_err());
     }
 }

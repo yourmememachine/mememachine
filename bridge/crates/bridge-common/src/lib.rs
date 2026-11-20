@@ -21,8 +21,11 @@
 //!   unlock at most 1% of the vault's locked total, each day's unlocks
 //!   at most 5% (see `check_dynamic_caps` for why the mint side, whose
 //!   supply is created by the mints themselves, uses absolutes only).
-//!   The daily window is slot-based (216,000 slots), not wall-clock,
-//!   so it is as deterministic as the message expiry.
+//!   The daily window is slot-based (216,000 slots), not wall-clock:
+//!   a slot cannot be skewed by a validator. Attestation expiry is
+//!   the deliberate exception — it is a coarse freshness deadline,
+//!   not an accounting window, and slots are not comparable across
+//!   two independent chains (see `validate_message`).
 //! - On-chain attestation verification uses the ed25519 precompile +
 //!   instructions sysvar (the Solana-standard path): the submitting
 //!   transaction carries an ed25519-program instruction whose
@@ -49,11 +52,14 @@ use solana_program::{
 pub const CHAIN_SOLANA: u8 = 1;
 pub const CHAIN_MACHINE: u8 = 2;
 
-/// Current message format version.
-pub const MESSAGE_VERSION: u8 = 1;
+/// Current message format version. V2 (2026-11-20): attestation
+/// expiry moved from a source-chain slot to a unix timestamp, and
+/// the message gained the source event's timestamp (see
+/// `validate_message`).
+pub const MESSAGE_VERSION: u8 = 2;
 
 /// Domain separator mixed into every message hash.
-pub const DOMAIN_SEPARATOR: &[u8] = b"MACHINE-BRIDGE-V1";
+pub const DOMAIN_SEPARATOR: &[u8] = b"MACHINE-BRIDGE-V2";
 
 /// Relayer set size and quorum (BRIDGE.md section 3.1: 5 relayers, 3-of-5).
 pub const MAX_RELAYERS: usize = 5;
@@ -72,18 +78,23 @@ pub const PAUSE_RELAYER_THRESHOLD: u8 = 2;
 /// Clock sysvar's timestamp, a slot cannot be skewed by a validator.
 pub const SLOTS_PER_DAY: u64 = 216_000;
 
-/// Maximum attestation lifetime in slots: a message's
-/// `expiry_slot - source_slot` may not exceed this (debate round
-/// 2026-11-18, scope 4, finding A-2/B-F2). Matches the relayer config
-/// cap on `expiry_window_slots`; enforced here, in the one shared
-/// validator every verification path funnels through, so a
-/// quorum-signed message with a far-future expiry cannot become a
-/// permanent bearer instrument. The bound is on the source-chain
-/// basis — the relayer derives `expiry_slot = source_slot + window`,
-/// and both fields live in the message — because source and
-/// destination slot sequences are independent and a destination-basis
-/// bound could false-reject honest crossings.
-pub const MAX_ATTESTATION_LIFETIME_SLOTS: u64 = 1_000_000;
+/// Maximum attestation lifetime in seconds: a message's
+/// `expiry_timestamp - source_timestamp` may not exceed this (the
+/// 2026-11-18 bound of 1,000,000 slots at 400 ms, restated in
+/// seconds). Matches the relayer config cap on `expiry_window_secs`;
+/// enforced in `validate_message`, the one shared validator every
+/// verification path funnels through, so a quorum-signed message
+/// with a far-future expiry cannot become a permanent bearer
+/// instrument.
+pub const MAX_ATTESTATION_LIFETIME_SECS: i64 = 400_000;
+
+/// How far a message's source timestamp may lie ahead of the
+/// destination chain's clock before it is rejected as post-dated.
+/// Source and destination clocks are independent (both Agave
+/// stake-weighted medians); an hour absorbs any realistic drift
+/// while stopping a quorum from stretching a message's effective
+/// life by stamping it in the future.
+pub const MAX_SOURCE_TIMESTAMP_SKEW_SECS: i64 = 3_600;
 
 /// Basis-point denominator for the dynamic percentage caps.
 pub const BPS_DENOMINATOR: u64 = 10_000;
@@ -186,12 +197,20 @@ pub struct BridgeMessage {
     pub amount: u64,
     pub source_tx: [u8; 64],
     pub source_slot: u64,
-    pub expiry_slot: u64,
+    /// Unix timestamp at which this attestation stops being
+    /// executable, on the destination chain's Clock. Derived by the
+    /// relayer as `source_timestamp + window` (BRIDGE.md 2.4).
+    pub expiry_timestamp: i64,
+    /// Unix timestamp of the source event (its block time on the
+    /// source chain), as observed by every relayer from the source
+    /// transaction itself — so all relayers derive the identical
+    /// value and sign the identical message.
+    pub source_timestamp: i64,
 }
 
 /// Fixed-size canonical encoding: 1 + 1 + 1 + 8 + 32 + 32 + 32 + 8 + 64 + 8
-/// + 8 = 195 bytes. Fixed layout means no parsing ambiguity.
-pub const MESSAGE_CANONICAL_LEN: usize = 195;
+/// + 8 + 8 = 203 bytes. Fixed layout means no parsing ambiguity.
+pub const MESSAGE_CANONICAL_LEN: usize = 203;
 
 impl BridgeMessage {
     pub fn canonical_bytes(&self) -> [u8; MESSAGE_CANONICAL_LEN] {
@@ -217,7 +236,9 @@ impl BridgeMessage {
         o += 64;
         out[o..o + 8].copy_from_slice(&self.source_slot.to_le_bytes());
         o += 8;
-        out[o..o + 8].copy_from_slice(&self.expiry_slot.to_le_bytes());
+        out[o..o + 8].copy_from_slice(&self.expiry_timestamp.to_le_bytes());
+        o += 8;
+        out[o..o + 8].copy_from_slice(&self.source_timestamp.to_le_bytes());
         out
     }
 
@@ -243,14 +264,41 @@ pub struct RelayerSignature {
 
 /// The non-signature attestation checks, shared by the on-chain
 /// (precompile) and off-chain (dalek) verification paths: version,
-/// chain binding, a bounded attestation lifetime
-/// (`expiry_slot - source_slot <= MAX_ATTESTATION_LIFETIME_SLOTS`),
-/// and expiry against the current slot.
+/// chain binding, and the expiry rules below.
+///
+/// Expiry is timestamp-based (debate round 7 finding A-F1, fixed
+/// 2026-11-20). The V1 rule compared the destination chain's slot
+/// against an expiry derived on the source chain; the two chains'
+/// slot sequences are independent, so one direction's attestations
+/// always expired once slot heights diverged and the other
+/// direction's never fired. Both chains are Agave and both Clocks
+/// expose `unix_timestamp` — a stake-weighted median no validator
+/// minority can move materially — so expiry is now denominated in
+/// the one quantity both chains share: time. (The cap windows stay
+/// slot-based: they are precision accounting, continuously
+/// monetizable if skewed; expiry is a coarse one-shot freshness
+/// check that only needs order-of-magnitude correctness.)
+///
+/// Four checks, all against the signed fields plus the destination
+/// clock (`current_timestamp`):
+/// 1. Lifetime bound: `expiry_timestamp - source_timestamp` must
+///    lie in (0, MAX_ATTESTATION_LIFETIME_SECS] — the source-basis
+///    bound against a permanent bearer instrument (debate round
+///    2026-11-18, A-2/B-F2), restated in seconds.
+/// 2. Expiry: the destination time must not be past
+///    `expiry_timestamp`.
+/// 3. Destination ceiling: `expiry_timestamp` may not lie more than
+///    MAX_ATTESTATION_LIFETIME_SECS ahead of the destination time,
+///    so even a quorum-signed far-future expiry is useless.
+/// 4. Post-dating: `source_timestamp` may not lie more than
+///    MAX_SOURCE_TIMESTAMP_SKEW_SECS ahead of the destination time,
+///    so a quorum cannot stretch a message's life by stamping its
+///    source event in the future.
 pub fn validate_message(
     message: &BridgeMessage,
     expected_source: u8,
     expected_dest: u8,
-    current_slot: u64,
+    current_timestamp: i64,
 ) -> Result<(), BridgeError> {
     if message.version != MESSAGE_VERSION {
         return Err(BridgeError::InvalidVersion);
@@ -261,16 +309,20 @@ pub fn validate_message(
     if message.dest_chain != expected_dest {
         return Err(BridgeError::WrongDestChain);
     }
-    // Debate round 2026-11-18 (A-2/B-F2): bound the attestation
-    // lifetime on the source basis. An expiry before the source slot,
-    // or more than MAX_ATTESTATION_LIFETIME_SLOTS after it, is not a
-    // message the shipped relayer can honestly produce.
-    match message.expiry_slot.checked_sub(message.source_slot) {
-        Some(lifetime) if lifetime <= MAX_ATTESTATION_LIFETIME_SLOTS => {}
+    match message.expiry_timestamp.checked_sub(message.source_timestamp) {
+        Some(lifetime) if lifetime > 0 && lifetime <= MAX_ATTESTATION_LIFETIME_SECS => {}
         _ => return Err(BridgeError::ExpiredAttestation),
     }
-    if current_slot > message.expiry_slot {
+    if current_timestamp > message.expiry_timestamp {
         return Err(BridgeError::ExpiredAttestation);
+    }
+    match message.expiry_timestamp.checked_sub(current_timestamp) {
+        Some(ahead) if ahead <= MAX_ATTESTATION_LIFETIME_SECS => {}
+        _ => return Err(BridgeError::ExpiredAttestation),
+    }
+    match message.source_timestamp.checked_sub(current_timestamp) {
+        Some(ahead) if ahead <= MAX_SOURCE_TIMESTAMP_SKEW_SECS => {}
+        _ => return Err(BridgeError::ExpiredAttestation),
     }
     Ok(())
 }
@@ -278,10 +330,11 @@ pub fn validate_message(
 /// Verify a quorum attestation over `message` (off-chain path, used by
 /// the relayer to re-verify peer attestations before signing).
 ///
-/// Checks, in order: version, chain binding, expiry against the current
-/// slot, then each signature (relayer must be registered, signature must
-/// verify over the message hash, each relayer counted at most once), and
-/// finally that distinct valid signatures reach `quorum`.
+/// Checks, in order: version, chain binding, expiry against the
+/// current destination timestamp, then each signature (relayer must
+/// be registered, signature must verify over the message hash, each
+/// relayer counted at most once), and finally that distinct valid
+/// signatures reach `quorum`.
 pub fn verify_attestation(
     message: &BridgeMessage,
     signatures: &[RelayerSignature],
@@ -289,9 +342,9 @@ pub fn verify_attestation(
     quorum: u8,
     expected_source: u8,
     expected_dest: u8,
-    current_slot: u64,
+    current_timestamp: i64,
 ) -> Result<(), BridgeError> {
-    validate_message(message, expected_source, expected_dest, current_slot)?;
+    validate_message(message, expected_source, expected_dest, current_timestamp)?;
 
     // Debate round 2026-11-18 (A-3/B-F3): a zero (or impossible)
     // quorum must never verify — with quorum 0 an empty signature
@@ -1186,7 +1239,8 @@ mod tests {
             amount: 1_000_000,
             source_tx: [9u8; 64],
             source_slot: 1234,
-            expiry_slot: 10_000,
+            expiry_timestamp: 1_700_010_000,
+            source_timestamp: 1_700_000_000,
         }
     }
 
@@ -1214,7 +1268,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_encoding_is_stable_and_195_bytes() {
+    fn canonical_encoding_is_stable_and_203_bytes() {
         let msg = test_message();
         let bytes = msg.canonical_bytes();
         assert_eq!(bytes.len(), MESSAGE_CANONICAL_LEN);
@@ -1239,7 +1293,7 @@ mod tests {
         let (keys, pubs) = make_relayers();
         let msg = test_message();
         let sigs = sign_all(&msg, &keys, 3);
-        assert!(verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000).is_ok());
+        assert!(verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000).is_ok());
     }
 
     #[test]
@@ -1247,7 +1301,7 @@ mod tests {
         let (keys, pubs) = make_relayers();
         let msg = test_message();
         let sigs = sign_all(&msg, &keys, 5);
-        assert!(verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000).is_ok());
+        assert!(verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000).is_ok());
     }
 
     #[test]
@@ -1256,7 +1310,7 @@ mod tests {
         let msg = test_message();
         let sigs = sign_all(&msg, &keys, 2);
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::QuorumNotReached)
         );
     }
@@ -1268,7 +1322,7 @@ mod tests {
         let mut sigs = sign_all(&msg, &keys, 2);
         sigs.push(sigs[0].clone()); // same relayer twice
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::DuplicateRelayerSignature)
         );
     }
@@ -1280,7 +1334,7 @@ mod tests {
         let mut sigs = sign_all(&msg, &keys, 3);
         sigs[0].relayer = Pubkey::new_unique(); // not in the set
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::UnknownRelayer)
         );
     }
@@ -1292,7 +1346,7 @@ mod tests {
         let mut sigs = sign_all(&msg, &keys, 3);
         sigs[1].signature[0] ^= 0xff;
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::InvalidSignature)
         );
     }
@@ -1303,8 +1357,72 @@ mod tests {
         let msg = test_message();
         let sigs = sign_all(&msg, &keys, 3);
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_MACHINE, CHAIN_SOLANA, 5000),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_MACHINE, CHAIN_SOLANA, 1_700_005_000),
             Err(BridgeError::WrongSourceChain)
+        );
+    }
+
+    #[test]
+    fn af1_honest_attestation_survives_diverged_slot_heights() {
+        // A-F1 regression (debate round 7): under V1 this exact
+        // shape — a Machine -> Solana message with source_slot
+        // 50_000 and a source-basis expiry — was rejected at a
+        // destination slot of 380_000_000, because the destination
+        // chain's independent slot sequence was compared against a
+        // source-chain expiry. Expiry is timestamp-based now: the
+        // destination's slot height plays no part. The attestation
+        // below is fresh (validated 20,000 s after its source event,
+        // inside its 40,000 s window) and must pass; the same
+        // message validated after its window must fail — in this
+        // direction the V1 check never fired at all once the
+        // destination's slots lagged the source's.
+        let mut msg = test_message();
+        msg.source_chain = CHAIN_MACHINE;
+        msg.dest_chain = CHAIN_SOLANA;
+        msg.source_slot = 50_000;
+        msg.source_timestamp = 1_700_000_000;
+        msg.expiry_timestamp = 1_700_040_000;
+        assert_eq!(
+            validate_message(&msg, CHAIN_MACHINE, CHAIN_SOLANA, 1_700_020_000),
+            Ok(())
+        );
+        assert_eq!(
+            validate_message(&msg, CHAIN_MACHINE, CHAIN_SOLANA, 1_700_040_001),
+            Err(BridgeError::ExpiredAttestation)
+        );
+    }
+
+    #[test]
+    fn af1_far_future_and_postdated_messages_rejected() {
+        // A-F1 fix guards: a quorum-signed message whose expiry lies
+        // more than MAX_ATTESTATION_LIFETIME_SECS ahead of the
+        // destination clock is a bearer instrument even if its
+        // internal lifetime is within bounds (its source is stamped
+        // far in the future); the post-dating guard rejects it too.
+        let mut msg = test_message();
+        msg.source_timestamp = 1_700_000_000 + 10 * MAX_ATTESTATION_LIFETIME_SECS;
+        msg.expiry_timestamp = msg.source_timestamp + 40_000;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_000_000),
+            Err(BridgeError::ExpiredAttestation)
+        );
+        // Post-dated by just over the skew tolerance, with an expiry
+        // the destination ceiling alone would still allow.
+        let mut msg = test_message();
+        msg.source_timestamp = 1_700_000_000 + MAX_SOURCE_TIMESTAMP_SKEW_SECS + 1;
+        msg.expiry_timestamp = msg.source_timestamp + 40_000;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_000_000),
+            Err(BridgeError::ExpiredAttestation)
+        );
+        // Post-dated within the skew tolerance passes (clock drift
+        // between two honest chains must not false-reject).
+        let mut msg = test_message();
+        msg.source_timestamp = 1_700_000_000 + MAX_SOURCE_TIMESTAMP_SKEW_SECS;
+        msg.expiry_timestamp = msg.source_timestamp + 40_000;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_000_000),
+            Ok(())
         );
     }
 
@@ -1314,44 +1432,46 @@ mod tests {
         let msg = test_message();
         let sigs = sign_all(&msg, &keys, 3);
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 10_001),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_010_001),
             Err(BridgeError::ExpiredAttestation)
         );
     }
 
     #[test]
     fn debate_unbounded_attestation_lifetime_rejected() {
-        // Debate round 2026-11-18 (A-2/B-F2): expiry = u64::MAX was a
-        // permanent bearer instrument; expiry before the source slot
-        // was also accepted. The bound is source-basis:
-        // expiry - source <= MAX_ATTESTATION_LIFETIME_SLOTS.
+        // Debate round 2026-11-18 (A-2/B-F2): an unbounded expiry
+        // was a permanent bearer instrument; an expiry at or before
+        // the source time was also accepted. The bound is
+        // source-basis: 0 < expiry - source <=
+        // MAX_ATTESTATION_LIFETIME_SECS (restated in seconds with
+        // the V2 timestamp expiry, 2026-11-20).
         let (keys, pubs) = make_relayers();
         let mut msg = test_message();
-        msg.expiry_slot = u64::MAX;
+        msg.expiry_timestamp = i64::MAX;
         let sigs = sign_all(&msg, &keys, 3);
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::ExpiredAttestation)
         );
         let mut msg = test_message();
-        msg.expiry_slot = msg.source_slot - 1;
+        msg.expiry_timestamp = msg.source_timestamp - 1;
         let sigs = sign_all(&msg, &keys, 3);
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 500),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_000_500),
             Err(BridgeError::ExpiredAttestation)
         );
-        // Exactly at the cap passes; one slot past it fails.
+        // Exactly at the cap passes; one second past it fails.
         let mut msg = test_message();
-        msg.expiry_slot = msg.source_slot + MAX_ATTESTATION_LIFETIME_SLOTS;
+        msg.expiry_timestamp = msg.source_timestamp + MAX_ATTESTATION_LIFETIME_SECS;
         let sigs = sign_all(&msg, &keys, 3);
         assert!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000)
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000)
                 .is_ok()
         );
-        msg.expiry_slot += 1;
+        msg.expiry_timestamp += 1;
         let sigs = sign_all(&msg, &keys, 3);
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::ExpiredAttestation)
         );
     }
@@ -1363,11 +1483,11 @@ mod tests {
         let (_keys, pubs) = make_relayers();
         let msg = test_message();
         assert_eq!(
-            verify_attestation(&msg, &[], &pubs, 0, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &[], &pubs, 0, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::QuorumNotReached)
         );
         assert_eq!(
-            verify_attestation(&msg, &[], &pubs, 6, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &[], &pubs, 6, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::QuorumNotReached)
         );
         let admins = [Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique()];
@@ -1397,10 +1517,10 @@ mod tests {
     fn wrong_version_rejected() {
         let (keys, pubs) = make_relayers();
         let mut msg = test_message();
-        msg.version = 2;
+        msg.version = 1; // the retired V1 format must not verify
         let sigs = sign_all(&msg, &keys, 3);
         assert_eq!(
-            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 5000),
+            verify_attestation(&msg, &sigs, &pubs, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_005_000),
             Err(BridgeError::InvalidVersion)
         );
     }
@@ -1681,7 +1801,8 @@ mod sysvar_parser_tests {
             amount: 1_000,
             source_tx: [9u8; 64],
             source_slot: 100,
-            expiry_slot: 1_000_000,
+            expiry_timestamp: 1_700_010_000,
+            source_timestamp: 1_700_000_000,
         }
     }
 
@@ -2006,12 +2127,15 @@ mod sysvar_parser_tests {
             m.source_slot += 1;
             v.push(("source_slot", m));
             let mut m = original.clone();
-            m.expiry_slot += 1;
-            v.push(("expiry_slot", m));
+            m.expiry_timestamp += 1;
+            v.push(("expiry_timestamp", m));
+            let mut m = original.clone();
+            m.source_timestamp += 1;
+            v.push(("source_timestamp", m));
             v
         };
         // Every field of BridgeMessage is mutated exactly once.
-        assert_eq!(mutations.len(), 11);
+        assert_eq!(mutations.len(), 12);
         for (field, mutated) in mutations {
             assert_ne!(
                 mutated.hash(),

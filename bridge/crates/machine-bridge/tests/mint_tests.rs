@@ -21,6 +21,34 @@ use solana_program::program_pack::Pack;
 
 const PROGRAM_ID_SEED: u8 = 42;
 
+/// Fixed source-event timestamp for attestation fixtures (A-F1 fix,
+/// 2026-11-20: expiry is timestamp-based). Tests pin the Clock
+/// sysvar's unix_timestamp with `set_clock_ts`; `warp_to_slot` is
+/// still used for the slot-based cap windows and does not move the
+/// timestamp reliably.
+const TEST_SOURCE_TS: i64 = 1_700_000_000;
+/// The destination "now" the suites pin before attestation-bearing
+/// sends: one minute after the fixture source event, far inside the
+/// fixtures' 40,000-second expiry window.
+const TEST_NOW: i64 = TEST_SOURCE_TS + 60;
+
+/// Set the Clock sysvar's unix_timestamp (slot untouched) and prove
+/// it landed by reading the sysvar back. If this assert ever fires,
+/// `set_sysvar` is not taking effect in this program-test version —
+/// stop and escalate; do not fall back to warp_to_slot silently.
+async fn set_clock_ts(env: &mut Env, ts: i64) {
+    let mut clock: solana_program::clock::Clock =
+        env.context.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = ts;
+    env.context.set_sysvar(&clock);
+    let readback: solana_program::clock::Clock =
+        env.context.banks_client.get_sysvar().await.unwrap();
+    assert_eq!(
+        readback.unix_timestamp, ts,
+        "harness clock probe: set_sysvar did not take effect"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -87,7 +115,8 @@ fn test_message(nonce: u64, amount: u64, recipient: Pubkey, source_mint: Pubkey)
         amount,
         source_tx: [7u8; 64],
         source_slot: 100,
-        expiry_slot: 1_000_000,
+        expiry_timestamp: TEST_SOURCE_TS + 40_000,
+        source_timestamp: TEST_SOURCE_TS,
     }
 }
 
@@ -267,14 +296,19 @@ async fn setup(per_tx_cap: u64, daily_cap: u64) -> Env {
     );
     context.banks_client.process_transaction(tx).await.unwrap();
 
-    Env {
+    let mut env = Env {
         context,
         relayers,
         admins,
         wrapped_mint,
         recipient,
         recipient_token_account,
-    }
+    };
+    // Pin the destination clock for every attestation-bearing test
+    // (see TEST_NOW). The harness clock starts at wall-clock time,
+    // which is years past the fixtures' expiry window.
+    set_clock_ts(&mut env, TEST_NOW).await;
+    env
 }
 
 async fn create_mint(
@@ -706,18 +740,17 @@ async fn duplicate_relayer_signature_counts_once() {
 #[tokio::test]
 async fn mint_at_expiry_boundary() {
     let mut env = setup(100_000, 500_000).await;
-    // At the exact expiry slot the attestation is still valid
-    // (rejection is current_slot > expiry_slot).
+    // At the exact expiry timestamp the attestation is still valid
+    // (rejection is current_timestamp > expiry_timestamp). The
+    // suite clock is pinned at TEST_NOW (see setup).
     let mut msg = test_message(1, 1_000, env.recipient.pubkey(), env.wrapped_mint);
-    msg.expiry_slot = 500;
+    msg.expiry_timestamp = TEST_NOW;
     let sigs = sign_attestation(&msg, &env.relayers, 3);
-    env.context.warp_to_slot(500).unwrap();
     send_mint(&mut env, msg, sigs).await.unwrap();
-    // One slot past expiry, the same-shaped attestation is dead.
+    // One second past expiry, the same-shaped attestation is dead.
     let mut msg2 = test_message(2, 1_000, env.recipient.pubkey(), env.wrapped_mint);
-    msg2.expiry_slot = 500;
+    msg2.expiry_timestamp = TEST_NOW - 1;
     let sigs2 = sign_attestation(&msg2, &env.relayers, 3);
-    env.context.warp_to_slot(501).unwrap();
     let result = send_mint(&mut env, msg2, sigs2).await;
     assert_custom_error(result, BridgeError::ExpiredAttestation);
 }

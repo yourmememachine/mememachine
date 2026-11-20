@@ -54,6 +54,19 @@ impl RpcClient {
             .ok_or_else(|| RelayerError::Rpc("getSlot: not a number".into()))
     }
 
+    /// Estimated unix timestamp of the latest finalized slot
+    /// (`getBlockTime` of the finalized slot). Used as the
+    /// destination "now" for attestation expiry checks, mirroring
+    /// the destination program's Clock. Fails closed: a chain that
+    /// cannot report a block time for its finalized slot yields no
+    /// timestamp, never a guessed one.
+    pub fn finalized_timestamp(&self) -> Result<i64> {
+        let slot = self.finalized_slot()?;
+        let r = self.call("getBlockTime", json!([slot]))?;
+        r.as_i64()
+            .ok_or_else(|| RelayerError::Rpc("getBlockTime: no timestamp".into()))
+    }
+
     /// Raw account data, or None if the account does not exist.
     /// Read at finalized commitment.
     pub fn account_data(&self, pubkey: &Pubkey) -> Result<Option<Vec<u8>>> {

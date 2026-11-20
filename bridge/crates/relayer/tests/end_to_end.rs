@@ -44,12 +44,13 @@ fn deposit_to_quorum_to_mint_instruction() {
         },
         sender: Pubkey::new_unique(),
         source_tx: [42u8; 64],
+        source_block_time: 1_700_000_000,
     };
     let message = build_message(
         Direction::SolanaToMachine,
         &event,
         source_mint,
-        100_000,
+        40_000,
     )
     .unwrap();
     assert_eq!(message.source_chain, CHAIN_SOLANA);
@@ -71,7 +72,7 @@ fn deposit_to_quorum_to_mint_instruction() {
         quorum: QUORUM,
     };
     let (collected, signatures) = collector
-        .collect(&dir, Direction::SolanaToMachine, 7, 50_000)
+        .collect(&dir, Direction::SolanaToMachine, 7, 1_700_000_060)
         .unwrap();
     assert_eq!(collected, message);
     assert_eq!(signatures.len(), 3);
@@ -82,7 +83,7 @@ fn deposit_to_quorum_to_mint_instruction() {
         QUORUM,
         CHAIN_SOLANA,
         CHAIN_MACHINE,
-        50_000,
+        1_700_000_060,
     )
     .unwrap();
 
@@ -138,7 +139,8 @@ fn expired_attestation_is_rejected_by_collector() {
         amount: 1,
         source_tx: [1u8; 64],
         source_slot: 10,
-        expiry_slot: 110,
+        expiry_timestamp: 110,
+        source_timestamp: 10,
     };
     let dir = std::env::temp_dir().join(format!("relayer-e2e-exp-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -151,7 +153,7 @@ fn expired_attestation_is_rejected_by_collector() {
         relayers,
         quorum: QUORUM,
     };
-    // Destination slot 111 is past expiry_slot 110.
+    // Destination time 111 is past expiry_timestamp 110.
     assert!(collector
         .collect(&dir, Direction::SolanaToMachine, 1, 111)
         .is_err());

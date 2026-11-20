@@ -22,11 +22,12 @@
 //!
 //! Determinism rule (load-bearing): every field of `BridgeMessage` is
 //! part of the signed hash, so all relayers must build the *identical*
-//! message for the same event. That is why `expiry_slot` is derived
-//! deterministically from `source_slot` (`source_slot + expiry_window_slots`,
-//! a shared config value), never from the local clock or the current
-//! destination slot. Relayers running different expiry windows will
-//! (safely) never reach quorum — the collector reports the mismatch.
+//! message for the same event. That is why `expiry_timestamp` is derived
+//! deterministically from the source transaction's own block time
+//! (`block_time + expiry_window_secs`, a shared config value), never
+//! from the local clock or the destination chain's current time.
+//! Relayers running different expiry windows will (safely) never
+//! reach quorum — the collector reports the mismatch.
 
 pub mod attestation;
 pub mod audit_log;

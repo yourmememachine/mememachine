@@ -8,17 +8,23 @@ use bridge_common::{
 };
 use solana_program::pubkey::Pubkey;
 
-/// A source-chain event, enriched with the two fields the on-chain
-/// `EventRecord` does not store: who sent it, and in which transaction.
-/// Both are read from that transaction by the watcher (see rpc.rs) —
-/// they are chain data, not relayer opinion, so every honest relayer
-/// derives the same values.
+/// A source-chain event, enriched with the fields the on-chain
+/// `EventRecord` does not store: who sent it, in which transaction,
+/// and that transaction's block time. All are read from the source
+/// transaction by the watcher (see rpc.rs) — they are chain data,
+/// not relayer opinion, so every honest relayer derives the same
+/// values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservedEvent {
     pub record: EventRecord,
     pub sender: Pubkey,
     /// Raw 64-byte source transaction signature.
     pub source_tx: [u8; 64],
+    /// The source transaction's block time (unix seconds), from the
+    /// `getTransaction` response. The message's expiry is derived
+    /// from it, so `enrich` must fail closed when the chain does not
+    /// report one — never substitute a local clock or zero.
+    pub source_block_time: i64,
 }
 
 /// Direction of a crossing.
@@ -93,28 +99,31 @@ pub fn check_finalized(
 /// destination token account against its configured `source_mint`,
 /// and BRIDGE.md 2.3 defines the field that way.
 ///
-/// `expiry_window_slots` must be the same for all relayers (see lib.rs).
+/// `expiry_window_secs` must be the same for all relayers (see lib.rs).
 pub fn build_message(
     direction: Direction,
     event: &ObservedEvent,
     source_mint: Pubkey,
-    expiry_window_slots: u64,
+    expiry_window_secs: i64,
 ) -> Result<BridgeMessage> {
     if event.record.amount == 0 {
         return Err(RelayerError::InvalidConfig(
             "event amount is zero; refusing to build a message".into(),
         ));
     }
-    if expiry_window_slots == 0 {
+    if expiry_window_secs <= 0 {
         return Err(RelayerError::InvalidConfig(
-            "expiry_window_slots must be > 0".into(),
+            "expiry_window_secs must be > 0".into(),
         ));
     }
-    let expiry_slot = event
-        .record
-        .slot
-        .checked_add(expiry_window_slots)
-        .ok_or_else(|| RelayerError::InvalidConfig("expiry slot overflow".into()))?;
+    // Expiry is timestamp-based (A-F1 fix, 2026-11-20): both fields
+    // come from the source transaction's own block time, observed
+    // identically by every relayer, so all relayers derive the
+    // identical expiry and sign the identical message.
+    let expiry_timestamp = event
+        .source_block_time
+        .checked_add(expiry_window_secs)
+        .ok_or_else(|| RelayerError::InvalidConfig("expiry timestamp overflow".into()))?;
     Ok(BridgeMessage {
         version: MESSAGE_VERSION,
         source_chain: direction.source_chain(),
@@ -126,7 +135,8 @@ pub fn build_message(
         amount: event.record.amount,
         source_tx: event.source_tx,
         source_slot: event.record.slot,
-        expiry_slot,
+        expiry_timestamp,
+        source_timestamp: event.source_block_time,
     })
 }
 
@@ -146,6 +156,7 @@ mod tests {
             },
             sender: Pubkey::new_unique(),
             source_tx: [9u8; 64],
+            source_block_time: 1_700_000_000,
         }
     }
 
@@ -163,17 +174,18 @@ mod tests {
     }
 
     #[test]
-    fn expiry_is_deterministic_from_source_slot() {
+    fn expiry_is_deterministic_from_source_block_time() {
         let mint = Pubkey::new_unique();
         let e = event(500, 1_000);
-        let m1 = build_message(Direction::SolanaToMachine, &e, mint, 100_000).unwrap();
-        let m2 = build_message(Direction::SolanaToMachine, &e, mint, 100_000).unwrap();
+        let m1 = build_message(Direction::SolanaToMachine, &e, mint, 40_000).unwrap();
+        let m2 = build_message(Direction::SolanaToMachine, &e, mint, 40_000).unwrap();
         assert_eq!(m1, m2);
         assert_eq!(m1.hash(), m2.hash());
-        assert_eq!(m1.expiry_slot, 100_500);
+        assert_eq!(m1.source_timestamp, 1_700_000_000);
+        assert_eq!(m1.expiry_timestamp, 1_700_040_000);
         // A different window produces a different hash — which is why
         // all relayers must share this config value.
-        let m3 = build_message(Direction::SolanaToMachine, &e, mint, 200_000).unwrap();
+        let m3 = build_message(Direction::SolanaToMachine, &e, mint, 80_000).unwrap();
         assert_ne!(m1.hash(), m3.hash());
     }
 
@@ -181,9 +193,9 @@ mod tests {
     fn directions_are_bound() {
         let mint = Pubkey::new_unique();
         let e = event(500, 1_000);
-        let s2m = build_message(Direction::SolanaToMachine, &e, mint, 100_000).unwrap();
+        let s2m = build_message(Direction::SolanaToMachine, &e, mint, 40_000).unwrap();
         assert_eq!((s2m.source_chain, s2m.dest_chain), (CHAIN_SOLANA, CHAIN_MACHINE));
-        let m2s = build_message(Direction::MachineToSolana, &e, mint, 100_000).unwrap();
+        let m2s = build_message(Direction::MachineToSolana, &e, mint, 40_000).unwrap();
         assert_eq!((m2s.source_chain, m2s.dest_chain), (CHAIN_MACHINE, CHAIN_SOLANA));
         assert_ne!(s2m.hash(), m2s.hash());
     }

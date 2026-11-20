@@ -26,9 +26,10 @@ independent audit, worthless-amount crossings, monitoring.
    before any signature exists.
 3. **Build the message deterministically** — every field of
    `BridgeMessage` is in the signed hash, so all relayers must build
-   the identical message. `expiry_slot` is therefore derived from
-   the source slot (`source_slot + expiry_window_slots`, a shared
-   config value), never from a local clock. Sender and source
+   the identical message. `expiry_timestamp` is therefore derived
+   from the source transaction's own block time
+   (`block_time + expiry_window_secs`, a shared config value),
+   never from a local clock. Sender and source
    transaction are read from the source transaction itself — and
    verified, not just read: the deposit/burn transfer is a CPI of
    the lock/bridge program, so it is found in the transaction's
@@ -67,7 +68,7 @@ and replay protection are enforced on-chain, not here.
 ```bash
 cp bridge/crates/relayer/relayer.example.json relayer.json
 # Edit relayer.json: real program ids, mints, vault, YOUR keypair path.
-# Every operator uses the same shared values and expiry_window_slots;
+# Every operator uses the same shared values and expiry_window_secs;
 # only the keypair (and usually the payer) differs.
 
 cargo run --release -p relayer -- --config relayer.json sign-once

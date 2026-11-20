@@ -152,6 +152,27 @@ async fn create_token_account(
     account.pubkey()
 }
 
+/// Fixed source-event timestamp for attestation fixtures (A-F1
+/// fix, 2026-11-20: expiry is timestamp-based). The harness clock
+/// starts at wall-clock time, so `setup` pins it to TEST_NOW.
+const TEST_SOURCE_TS: i64 = 1_700_000_000;
+const TEST_NOW: i64 = TEST_SOURCE_TS + 60;
+
+/// Set a context's Clock unix_timestamp (slot untouched) and prove
+/// it landed by reading the sysvar back.
+async fn set_clock_ts(ctx: &mut ProgramTestContext, ts: i64) {
+    let mut clock: solana_program::clock::Clock =
+        ctx.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = ts;
+    ctx.set_sysvar(&clock);
+    let readback: solana_program::clock::Clock =
+        ctx.banks_client.get_sysvar().await.unwrap();
+    assert_eq!(
+        readback.unix_timestamp, ts,
+        "harness clock probe: set_sysvar did not take effect"
+    );
+}
+
 async fn setup() -> Env {
     let pid = program_id();
     let deployer = Keypair::new();
@@ -159,6 +180,7 @@ async fn setup() -> Env {
     test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
     seed_programdata(&mut test, &deployer.pubkey());
     let mut ctx = test.start_with_context().await;
+    set_clock_ts(&mut ctx, TEST_NOW).await;
     let blockhash = ctx.banks_client.get_latest_blockhash().await.unwrap();
     let fund = Transaction::new_signed_with_payer(
         &[system_instruction::transfer(&ctx.payer.pubkey(), &deployer.pubkey(), 1_000_000_000)],
@@ -239,7 +261,8 @@ fn test_message(env: &Env, nonce: u64, amount: u64) -> BridgeMessage {
         amount,
         source_tx: [7u8; 64],
         source_slot: 100,
-        expiry_slot: 1_000_000,
+        expiry_timestamp: TEST_SOURCE_TS + 40_000,
+        source_timestamp: TEST_SOURCE_TS,
     }
 }
 

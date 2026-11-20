@@ -111,7 +111,7 @@ pub fn poll_once(
     direction: Direction,
     next_nonce: u64,
     source_mint: Pubkey,
-    expiry_window_slots: u64,
+    expiry_window_secs: i64,
     safety_margin_slots: u64,
 ) -> Result<PollOutcome> {
     let (record_pda, _) = nonce_pda(&chain.event_program_id(), direction.nonce_dir(), next_nonce);
@@ -138,7 +138,7 @@ pub fn poll_once(
             "enrich returned a record different from the one that passed finality".into(),
         ));
     }
-    let message = build_message(direction, &event, source_mint, expiry_window_slots)?;
+    let message = build_message(direction, &event, source_mint, expiry_window_secs)?;
     Ok(PollOutcome::Ready { message })
 }
 
@@ -171,6 +171,7 @@ mod tests {
                 record: record.clone(),
                 sender: self.sender,
                 source_tx: [8u8; 64],
+                source_block_time: 1_700_000_000,
             })
         }
     }
@@ -205,23 +206,26 @@ mod tests {
         let mint = Pubkey::new_unique();
         // Nothing at nonce 3 yet.
         assert_eq!(
-            poll_once(&chain, Direction::SolanaToMachine, 3, mint, 100_000, 16).unwrap(),
+            poll_once(&chain, Direction::SolanaToMachine, 3, mint, 40_000, 16).unwrap(),
             PollOutcome::NoEvent { nonce: 3 }
         );
         // Event at slot 990; finalized 1000 is only 10 past it (< 16 margin).
         let (pda, rec) = record(program, 3, 990);
         chain.records.borrow_mut().insert(pda, rec);
         assert_eq!(
-            poll_once(&chain, Direction::SolanaToMachine, 3, mint, 100_000, 16).unwrap(),
+            poll_once(&chain, Direction::SolanaToMachine, 3, mint, 40_000, 16).unwrap(),
             PollOutcome::NotFinalized { nonce: 3 }
         );
         // Finality advances past the margin: ready, with a built message.
         chain.finalized = 1_006;
-        match poll_once(&chain, Direction::SolanaToMachine, 3, mint, 100_000, 16).unwrap() {
+        match poll_once(&chain, Direction::SolanaToMachine, 3, mint, 40_000, 16).unwrap() {
             PollOutcome::Ready { message } => {
                 assert_eq!(message.nonce, 3);
                 assert_eq!(message.amount, 500);
-                assert_eq!(message.expiry_slot, 990 + 100_000);
+                // Expiry derives from the event's block time (the
+                // mock's 1_700_000_000), not from its slot.
+                assert_eq!(message.source_timestamp, 1_700_000_000);
+                assert_eq!(message.expiry_timestamp, 1_700_000_000 + 40_000);
             }
             other => panic!("expected Ready, got {other:?}"),
         }
@@ -245,7 +249,7 @@ mod tests {
         let (pda, rec) = record(program, 3, 990);
         chain.records.borrow_mut().insert(pda, rec);
         let diverging = DivergingChain(chain);
-        assert!(poll_once(&diverging, Direction::SolanaToMachine, 3, Pubkey::new_unique(), 100_000, 16).is_err());
+        assert!(poll_once(&diverging, Direction::SolanaToMachine, 3, Pubkey::new_unique(), 40_000, 16).is_err());
     }
 
     #[test]

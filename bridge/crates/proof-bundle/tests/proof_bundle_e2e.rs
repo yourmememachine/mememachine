@@ -32,7 +32,29 @@ use solana_sdk::{
 use spl_token::state::{Account as TokenAccount, Mint};
 use std::path::PathBuf;
 
-const EXPIRY_WINDOW: u64 = 100_000;
+const EXPIRY_WINDOW: i64 = 40_000;
+/// Fixed source-event block time for the crossing's message (A-F1
+/// fix, 2026-11-20: expiry is timestamp-based), and the destination
+/// "now" both contexts are pinned to in `setup_chains` — the
+/// program-test harness clock starts at wall-clock time, years past
+/// any fixed fixture window.
+const TEST_SOURCE_TS: i64 = 1_700_000_000;
+const DEST_NOW: i64 = TEST_SOURCE_TS + 60;
+
+/// Set a context's Clock unix_timestamp (slot untouched) and prove
+/// it landed by reading the sysvar back.
+async fn set_clock_ts(ctx: &mut ProgramTestContext, ts: i64) {
+    let mut clock: solana_program::clock::Clock =
+        ctx.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = ts;
+    ctx.set_sysvar(&clock);
+    let readback: solana_program::clock::Clock =
+        ctx.banks_client.get_sysvar().await.unwrap();
+    assert_eq!(
+        readback.unix_timestamp, ts,
+        "harness clock probe: set_sysvar did not take effect"
+    );
+}
 
 fn machine_program_id() -> Pubkey {
     Pubkey::new_from_array([42u8; 32])
@@ -368,6 +390,13 @@ async fn setup_chains() -> Chains {
     );
     machine.banks_client.process_transaction(tx).await.unwrap();
 
+    // Pin both chains' clocks to the destination "now" so the
+    // crossing's expiry check runs against the fixture window (the
+    // receipt the program writes carries this timestamp, and bundle
+    // verification evaluates expiry against it).
+    set_clock_ts(&mut sol, DEST_NOW).await;
+    set_clock_ts(&mut machine, DEST_NOW).await;
+
     Chains {
         sol,
         machine,
@@ -458,6 +487,7 @@ async fn real_crossing_exports_a_bundle_that_verifies() {
         record,
         sender: chains.user.pubkey(),
         source_tx: [7u8; 64],
+        source_block_time: TEST_SOURCE_TS,
     };
     let message = build_message(
         Direction::SolanaToMachine,
@@ -470,7 +500,7 @@ async fn real_crossing_exports_a_bundle_that_verifies() {
     attest(&dir, Direction::SolanaToMachine, &message, &chains.signers, &[0, 1, 2]);
     let (collected, sigs) = chains
         .collector
-        .collect(&dir, Direction::SolanaToMachine, 1, 50_000)
+        .collect(&dir, Direction::SolanaToMachine, 1, DEST_NOW)
         .unwrap();
     assert_eq!(collected, message);
     let mint_ixs = build_mint_instructions(

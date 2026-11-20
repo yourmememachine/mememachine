@@ -37,8 +37,29 @@ use solana_program::program_pack::Pack;
 use spl_token::state::{Account as TokenAccount, Mint};
 use std::path::PathBuf;
 
-const EXPIRY_WINDOW: u64 = 100_000;
-const DEST_SLOT: u64 = 50_000;
+const EXPIRY_WINDOW: i64 = 40_000;
+/// Fixed source-event block time for the drill's messages (A-F1
+/// fix, 2026-11-20: expiry is timestamp-based), and the destination
+/// "now" both drill chains are pinned to. The program-test harness
+/// clock starts at wall-clock time, years past any fixed fixture
+/// window, so both contexts are pinned in `setup_chains`.
+const TEST_SOURCE_TS: i64 = 1_700_000_000;
+const DEST_NOW: i64 = TEST_SOURCE_TS + 60;
+
+/// Set a context's Clock unix_timestamp (slot untouched) and prove
+/// it landed by reading the sysvar back.
+async fn set_clock_ts(ctx: &mut ProgramTestContext, ts: i64) {
+    let mut clock: solana_program::clock::Clock =
+        ctx.banks_client.get_sysvar().await.unwrap();
+    clock.unix_timestamp = ts;
+    ctx.set_sysvar(&clock);
+    let readback: solana_program::clock::Clock =
+        ctx.banks_client.get_sysvar().await.unwrap();
+    assert_eq!(
+        readback.unix_timestamp, ts,
+        "harness clock probe: set_sysvar did not take effect"
+    );
+}
 
 fn machine_program_id() -> Pubkey {
     Pubkey::new_from_array([42u8; 32])
@@ -423,6 +444,11 @@ async fn setup_chains() -> Chains {
     );
     machine.banks_client.process_transaction(tx).await.unwrap();
 
+    // Pin both chains' clocks to the drill's destination "now" so
+    // attestation expiry checks run against the fixtures' window.
+    set_clock_ts(&mut sol, DEST_NOW).await;
+    set_clock_ts(&mut machine, DEST_NOW).await;
+
     Chains {
         sol,
         machine,
@@ -502,6 +528,7 @@ async fn full_local_drill() {
         record,
         sender: chains.user.pubkey(),
         source_tx: [7u8; 64],
+        source_block_time: TEST_SOURCE_TS,
     };
     let message = build_message(
         Direction::SolanaToMachine,
@@ -514,7 +541,7 @@ async fn full_local_drill() {
     attest(&dir_a, Direction::SolanaToMachine, &message, &chains.signers, &[0, 1, 2]);
     let (collected, sigs) = chains
         .collector
-        .collect(&dir_a, Direction::SolanaToMachine, 1, DEST_SLOT)
+        .collect(&dir_a, Direction::SolanaToMachine, 1, DEST_NOW)
         .unwrap();
     assert_eq!(collected, message);
     let mint_ixs = build_mint_instructions(
@@ -539,6 +566,7 @@ async fn full_local_drill() {
         record,
         sender: chains.user.pubkey(),
         source_tx: [8u8; 64],
+        source_block_time: TEST_SOURCE_TS,
     };
     let message = build_message(
         Direction::SolanaToMachine,
@@ -551,7 +579,7 @@ async fn full_local_drill() {
     attest(&dir_b, Direction::SolanaToMachine, &message, &chains.signers, &[0, 1, 2]);
     let (collected, sigs) = chains
         .collector
-        .collect(&dir_b, Direction::SolanaToMachine, 2, DEST_SLOT)
+        .collect(&dir_b, Direction::SolanaToMachine, 2, DEST_NOW)
         .unwrap();
     let mint_ixs = build_mint_instructions(
         &machine_pid,
@@ -664,6 +692,7 @@ async fn full_local_drill() {
         record,
         sender: chains.recipient.pubkey(),
         source_tx: [9u8; 64],
+        source_block_time: TEST_SOURCE_TS,
     };
     let message = build_message(
         Direction::MachineToSolana,
@@ -676,7 +705,7 @@ async fn full_local_drill() {
     attest(&dir_c, Direction::MachineToSolana, &message, &chains.signers, &[0, 1, 2]);
     let (collected, sigs) = chains
         .collector
-        .collect(&dir_c, Direction::MachineToSolana, 1, DEST_SLOT)
+        .collect(&dir_c, Direction::MachineToSolana, 1, DEST_NOW)
         .unwrap();
     let unlock_ixs = build_unlock_instructions(
         &lock_pid,
@@ -701,6 +730,7 @@ async fn full_local_drill() {
         record,
         sender: chains.user.pubkey(),
         source_tx: [11u8; 64],
+        source_block_time: TEST_SOURCE_TS,
     };
     let message = build_message(
         Direction::SolanaToMachine,
@@ -730,7 +760,7 @@ async fn full_local_drill() {
     // Two relayers attest one hash, two another: no quorum may form.
     let result = chains
         .collector
-        .collect(&dir_d, Direction::SolanaToMachine, 3, DEST_SLOT);
+        .collect(&dir_d, Direction::SolanaToMachine, 3, DEST_NOW);
     assert!(
         result.is_err(),
         "collector must refuse quorum on disagreement, got: {result:?}"
@@ -790,6 +820,7 @@ async fn cross_to_machine(chains: &mut Chains, nonce: u64, amount: u64) {
         record,
         sender: chains.user.pubkey(),
         source_tx: [nonce as u8; 64],
+        source_block_time: TEST_SOURCE_TS,
     };
     let message = build_message(
         Direction::SolanaToMachine,
@@ -802,7 +833,7 @@ async fn cross_to_machine(chains: &mut Chains, nonce: u64, amount: u64) {
     attest(&dir, Direction::SolanaToMachine, &message, &chains.signers, &[0, 1, 2]);
     let (collected, sigs) = chains
         .collector
-        .collect(&dir, Direction::SolanaToMachine, nonce, DEST_SLOT)
+        .collect(&dir, Direction::SolanaToMachine, nonce, DEST_NOW)
         .unwrap();
     let mint_ixs = build_mint_instructions(
         &machine_pid,
@@ -855,6 +886,7 @@ async fn cross_to_solana(chains: &mut Chains, nonce: u64, amount: u64) {
         record,
         sender: chains.recipient.pubkey(),
         source_tx: [100 + nonce as u8; 64],
+        source_block_time: TEST_SOURCE_TS,
     };
     let message = build_message(
         Direction::MachineToSolana,
@@ -867,7 +899,7 @@ async fn cross_to_solana(chains: &mut Chains, nonce: u64, amount: u64) {
     attest(&dir, Direction::MachineToSolana, &message, &chains.signers, &[0, 1, 2]);
     let (collected, sigs) = chains
         .collector
-        .collect(&dir, Direction::MachineToSolana, nonce, DEST_SLOT)
+        .collect(&dir, Direction::MachineToSolana, nonce, DEST_NOW)
         .unwrap();
     let unlock_ixs = build_unlock_instructions(
         &lock_pid,

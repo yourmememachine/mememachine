@@ -24,13 +24,14 @@
 //!
 //! Verification is fully offline and re-runs the bridge's own
 //! checks: the message hash is recomputed from the canonical
-//! 195-byte encoding under the `MACHINE-BRIDGE-V1` domain separator,
+//! 203-byte encoding under the `MACHINE-BRIDGE-V2` domain separator,
 //! the receipt is compared field-by-field against the message, and
 //! the signatures are verified with bridge-common's
 //! `verify_attestation` — the same code the relayer collector runs
 //! before submitting, with the expiry check evaluated at the
-//! receipt's slot (the destination slot at which the crossing
-//! completed, which is when the on-chain program evaluated it too).
+//! receipt's timestamp (the destination chain's Clock time at which
+//! the crossing completed, which is when the on-chain program
+//! evaluated it too).
 //!
 //! What a valid bundle proves — and only this: a quorum of the
 //! stated relayer set signed this exact message, and the bundle
@@ -132,7 +133,7 @@ pub struct CrossingBundle {
     /// Direction label: `solana-to-machine` or `machine-to-solana`.
     pub direction: String,
     pub message: MessageFile,
-    /// hex, 32 bytes: sha256("MACHINE-BRIDGE-V1" || canonical message).
+    /// hex, 32 bytes: sha256("MACHINE-BRIDGE-V2" || canonical message).
     pub message_hash: String,
     pub attestations: Vec<SignatureFile>,
     /// The registered relayer set the attestations are checked
@@ -316,7 +317,7 @@ pub struct VerificationReport {
 /// 7. bridge-common's `verify_attestation` accepts the signature
 ///    set against the stated relayer set — signatures valid over
 ///    the recomputed hash, signers registered and distinct, quorum
-///    reached, message unexpired at the receipt's slot.
+///    reached, message unexpired at the receipt's timestamp.
 ///
 /// The relayer set is the bundle's own statement: this function
 /// checks its shape, not its identity. To pin the set to a known
@@ -426,7 +427,7 @@ fn verify_bundle_inner(
         QUORUM,
         direction.source_chain(),
         direction.dest_chain(),
-        receipt.slot,
+        receipt.timestamp,
     )
     .map_err(BundleError::Attestation)?;
 
@@ -510,7 +511,7 @@ pub fn export_bundle(
         quorum,
     };
     let (message, signatures) = collector
-        .collect(attestations_dir, direction, nonce, receipt.slot)
+        .collect(attestations_dir, direction, nonce, receipt.timestamp)
         .map_err(|e| BundleError::Export(format!("attestation collection: {e}")))?;
     build_bundle(direction, &message, &signatures, relayer_set, quorum, receipt)
 }
@@ -553,7 +554,8 @@ mod tests {
             amount: 250_000,
             source_tx: [9u8; 64],
             source_slot: 12_345,
-            expiry_slot: 112_345,
+            expiry_timestamp: 1_763_060_000,
+            source_timestamp: 1_762_960_000,
         };
         let signatures: Vec<RelayerSignature> =
             signers.iter().take(3).map(|s| s.sign(&message)).collect();
@@ -896,7 +898,7 @@ mod tests {
         // rejected it, so the bundle must not verify.
         let fx = fixture();
         let mut bundle = fx.bundle.clone();
-        bundle.receipt.slot = fx.message.expiry_slot + 1;
+        bundle.receipt.timestamp = fx.message.expiry_timestamp + 1;
         assert_eq!(
             verify_bundle(&bundle),
             Err(BundleError::Attestation(BridgeError::ExpiredAttestation))

@@ -126,7 +126,8 @@ mod tests {
             amount: 10,
             source_tx: [1u8; 64],
             source_slot: 5,
-            expiry_slot: 100_005,
+            expiry_timestamp: 100_005,
+            source_timestamp: 5,
         }
     }
 

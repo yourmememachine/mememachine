@@ -86,7 +86,8 @@ pub struct MessageFile {
     pub amount: u64,
     pub source_tx: String,
     pub source_slot: u64,
-    pub expiry_slot: u64,
+    pub expiry_timestamp: i64,
+    pub source_timestamp: i64,
 }
 
 impl From<&BridgeMessage> for MessageFile {
@@ -102,7 +103,8 @@ impl From<&BridgeMessage> for MessageFile {
             amount: m.amount,
             source_tx: bytes64_to_string(&m.source_tx),
             source_slot: m.source_slot,
-            expiry_slot: m.expiry_slot,
+            expiry_timestamp: m.expiry_timestamp,
+            source_timestamp: m.source_timestamp,
         }
     }
 }
@@ -120,7 +122,8 @@ impl MessageFile {
             amount: self.amount,
             source_tx: string_to_bytes64("source_tx", &self.source_tx)?,
             source_slot: self.source_slot,
-            expiry_slot: self.expiry_slot,
+            expiry_timestamp: self.expiry_timestamp,
+            source_timestamp: self.source_timestamp,
         })
     }
 }
@@ -240,14 +243,15 @@ impl Collector {
     /// agreement, and return the message plus at least `quorum`
     /// distinct valid signatures, re-verified with bridge-common.
     ///
-    /// `current_dest_slot` is used for the expiry check inside
-    /// `verify_attestation`, exactly as the destination program will.
+    /// `current_dest_timestamp` is used for the expiry check inside
+    /// `verify_attestation`, exactly as the destination program will
+    /// (its Clock unix_timestamp).
     pub fn collect(
         &self,
         dir: &Path,
         direction: Direction,
         nonce: u64,
-        current_dest_slot: u64,
+        current_dest_timestamp: i64,
     ) -> Result<(BridgeMessage, Vec<RelayerSignature>)> {
         let mut message: Option<BridgeMessage> = None;
         let mut hashes: Vec<String> = Vec::new();
@@ -321,7 +325,7 @@ impl Collector {
             self.quorum,
             direction.source_chain(),
             direction.dest_chain(),
-            current_dest_slot,
+            current_dest_timestamp,
         )
         .map_err(|e| RelayerError::InvalidSignature(format!("attestation failed verification: {e:?}")))?;
         Ok((message, signatures))
@@ -356,7 +360,8 @@ mod tests {
             amount: 1_000,
             source_tx: [5u8; 64],
             source_slot: 100,
-            expiry_slot: 100_100,
+            expiry_timestamp: 100_100,
+            source_timestamp: 100,
         };
         (signers, pubs.try_into().unwrap(), msg)
     }

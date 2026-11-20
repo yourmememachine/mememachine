@@ -18,7 +18,7 @@ whoever handed over the bundle.
 | Field | What it is |
 |---|---|
 | `message` | The canonical `BridgeMessage` for the crossing (BRIDGE.md 2.3), in the same wire form the relayer attestation exchange uses. |
-| `message_hash` | `sha256("MACHINE-BRIDGE-V1" \|\| canonical 195-byte encoding)`, hex. |
+| `message_hash` | `sha256("MACHINE-BRIDGE-V2" \|\| canonical 203-byte encoding)`, hex. |
 | `attestations` | The relayer signatures over that hash: who signed, and the signature bytes (base58). |
 | `relayer_set` | The registered relayer set the signatures are checked against — all five pubkeys, in config order. |
 | `quorum` | The quorum claimed. The verifier requires it to equal the protocol constant (3); see below. |

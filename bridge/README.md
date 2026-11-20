@@ -43,14 +43,15 @@ bridge/
 - **Lock / mint:** lock SPL tokens in a program-owned vault PDA on Solana,
   mint wrapped tokens 1:1 on Machine. Burn on Machine, unlock on Solana.
   $MACHINE itself is never bridged.
-- **Message format:** versioned (`version = 1`), fixed 195-byte canonical
-  encoding, `sha256("MACHINE-BRIDGE-V1" || canonical)` is what relayers
+- **Message format:** versioned (`version = 2`), fixed 203-byte canonical
+  encoding, `sha256("MACHINE-BRIDGE-V2" || canonical)` is what relayers
   sign. Chain binding, nonce, amount, recipient, and source transaction
   are all in the signed hash.
 - **Quorum:** 5 relayers, 3-of-5 distinct valid signatures required.
   Relayers hold no funds and cannot move assets alone.
 - **Replay protection:** one PDA per (direction, nonce). A nonce can never
-  be processed twice. Attestations expire (`expiry_slot`).
+  be processed twice. Attestations expire (`expiry_timestamp`, compared
+  against the destination chain's own Clock time — see BRIDGE.md 2.4).
 - **Caps:** per-transaction and daily mint/unlock caps, enforced on-chain
   in the programs, not in the relayer. The lock side also enforces a vault
   ceiling on deposits.

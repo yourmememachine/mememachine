@@ -81,7 +81,7 @@ Every cross-chain event is a canonical, versioned message signed by relayers:
 
 ```
 BridgeMessage {
-  version:        u8,          // 1
+  version:        u8,          // 2
   source_chain:   u8,          // 1 = Solana mainnet, 2 = Machine
   dest_chain:     u8,
   nonce:          u64,         // caller-chosen; must be unused (uniqueness only, see §2.4)
@@ -91,7 +91,8 @@ BridgeMessage {
   amount:         u64,         // raw base units, no decimals conversion
   source_tx:      [u8; 64],    // source-chain transaction signature
   source_slot:    u64,         // slot of the source transaction
-  expiry_slot:    u64,         // attestation valid only until this slot
+  expiry_timestamp: i64,       // attestation valid only until this unix time
+  source_timestamp: i64,       // block time of the source transaction
 }
 ```
 
@@ -109,7 +110,7 @@ cryptography.
 
 - **Nonce registry:** nonces are caller-chosen; neither config holds a nonce counter. The programs enforce uniqueness only — a set of processed nonces (PDA per nonce); `unlock` / `mint_wrapped` reject any nonce already processed. (The phase-1 relayer discovers events by a sequential nonce cursor, so a skipped nonce stalls that relayer's discovery — a safe stall, not a loss — and operators should use sequential nonces.)
 - **Chain binding:** `source_chain` and `dest_chain` are part of the signed hash, so an attestation for one direction cannot be replayed in the other.
-- **Expiry:** attestations carry an `expiry_slot`, derived on the source chain (`expiry_slot = source_slot + window`). The lifetime is bounded on-chain (debate round 2026-11-18): `validate_message` rejects any message whose `expiry_slot - source_slot` exceeds 1,000,000 slots (or whose expiry precedes its source slot). **Known defect (debate round 2026-11-20, not yet fixed — a protocol design decision is pending):** `validate_message` also compares the *destination* chain's current slot against that source-chain expiry, and the two chains' slot sequences are independent — so once their slot heights diverge, the Machine-to-Solana check rejects every honest attestation and the Solana-to-Machine check never fires. Until the remedy is chosen (drop the destination-slot comparison, or move expiry to a timestamp basis — a message-format change), do not rely on expiry as a replay window; replay itself remains prevented by the nonce registry above, and attestations still require a live 3-of-5 quorum over the exact message.
+- **Expiry:** attestations expire on a **timestamp basis** (fixed 2026-11-20; the earlier slot basis compared the destination chain's slot against a source-chain expiry — the two chains' slot sequences are independent, so one direction rejected every honest attestation once slot heights diverged and the other direction's expiry never fired). The relayer derives `expiry_timestamp = source block time + window` from the source transaction's own `blockTime` (a transaction without one is never signed — fail closed), and the destination program compares it against its own Clock `unix_timestamp`. Both chains are Agave forks, so Clock timestamps are the same stake-weighted median on both sides and stay within seconds of each other — far inside the window. `validate_message` enforces, in seconds: the signed lifetime `expiry_timestamp - source_timestamp` must lie in (0, 400,000]; the destination rejects once its time passes the expiry; it also rejects a message whose expiry is more than 400,000 seconds ahead of its own time, or whose source time is more than 3,600 seconds ahead of its own time — so a quorum-signed message cannot be stockpiled and submitted long after the fact, and a post-dated message cannot be pre-positioned. The window is message format **version 2** (canonical encoding 203 bytes, domain separator `MACHINE-BRIDGE-V2`); version-1 messages no longer verify anywhere. Replay itself remains prevented by the nonce registry above, and attestations still require a live 3-of-5 quorum over the exact message.
 - **Asset binding:** both destination programs bind `message.source_mint` to the mint registered in their config at initialization (lock side since 2026-11-17; Machine side since the 2026-11-18 debate round, which added `source_mint` to `MachineConfig`), so an attestation for a different asset sharing the relayer set cannot move this deployment's tokens.
 - **Source-tx binding:** the source transaction signature is in the message, so one deposit cannot fund two mints even if a relayer double-signs.
 
