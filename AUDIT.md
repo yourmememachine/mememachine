@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `54aca89` (2026-11-20; `make verify` green —
+Last verified commit: `852a74d` (2026-11-20; `make verify` green —
 bridge workspace 197 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 74 passed). The pin is refreshed after every full verification run;
+passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 96 passed, app JS suite 139 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -91,6 +91,32 @@ chain configuration gates any public chain launch. Both scopes:
 > devnet-only in intent, not part of Scope A, gating
 > nothing. 74 Node tests; `make verify` runs them as
 > `test-resolver`.
+>
+> **Scope update (2026-11-20, later still — RugCall app,
+> judge page and resolver live mode, commit `852a74d`):**
+> `rugcall/app/` gains the market front end (a data layer
+> whose decoders mirror the program's account layouts, a
+> transaction layer whose encoders, account metas and PDA
+> derivations are pinned against vectors generated from the
+> Rust crate, wallet adapters with a simulated demo wallet
+> that signs nothing, and the app UI) plus a generated
+> single-file judge page whose lifecycle replay is produced
+> by running the resolver itself over the recorded fixtures,
+> with the canonical evidence bundle published under
+> `rugcall/evidence/`. The resolver's live submission path
+> is wired behind the dry-run rails: one shared decision
+> path, a fixed-order preflight that refuses before any
+> signing is attempted, and processed-ledger entries written
+> only after confirmed submissions. Nothing has been
+> deployed and nothing has been submitted: the devnet
+> keypairs remain unfunded (public faucet rate limit), the
+> program id is null in every fixture and page, and the live
+> mode's tested behaviour today is refusal. The OS still
+> does not consume `evidence.js`. Off-chain, devnet-only in
+> intent, not part of Scope A, gating nothing. 235 Node
+> tests across the two suites (96 resolver + 139 app);
+> `make verify` runs them as `test-resolver` and
+> `test-predict`.
 >
 > **Scope update (2026-11-19, code-review debate round 6 —
 > consistency pass, commit `ba65722`):** a whole-repo
