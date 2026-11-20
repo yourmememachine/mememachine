@@ -13,8 +13,10 @@
 //! only and holds no real assets.
 //!
 //! Build status: the state layout, instruction set and error
-//! space are final; the instruction handlers land incrementally
-//! and each returns RugCallError::NotImplemented until it does.
+//! space are final. InitializeConfig, CreateMarket and
+//! BuyPosition are implemented; ResolveMarket, Claim and
+//! CancelMarket each return RugCallError::NotImplemented until
+//! their implementation lands.
 
 pub mod processor;
 pub mod state;
