@@ -63,13 +63,13 @@ impl RpcClient {
     pub fn finalized_timestamp(&self) -> Result<i64> {
         let slot = self.finalized_slot()?;
         let r = self.call("getBlockTime", json!([slot]))?;
-        r.as_i64()
-            .ok_or_else(|| RelayerError::Rpc("getBlockTime: no timestamp".into()))
+        timestamp_from_block_time_result(&r)
     }
 
     /// Raw account data, or None if the account does not exist.
     /// Read at finalized commitment.
     pub fn account_data(&self, pubkey: &Pubkey) -> Result<Option<Vec<u8>>> {
+
         let r = self.call(
             "getAccountInfo",
             json!([pubkey.to_string(), {"encoding": "base64", "commitment": "finalized"}]),
@@ -169,6 +169,30 @@ impl RpcClient {
             .map(|s| s.to_string())
             .ok_or_else(|| RelayerError::Rpc("sendTransaction: no signature".into()))
     }
+}
+
+/// Extract the `blockTime` field from a `getTransaction` reply,
+/// failing closed when the chain does not report one (war room
+/// 2026-11-21, F-TEST-2): the A-F1 expiry derivation depends on
+/// this value, so a missing or null block time is an error —
+/// never a substituted local clock or zero.
+pub fn block_time_from_transaction(tx: &Value) -> Result<i64> {
+    tx.get("blockTime")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            RelayerError::Rpc(
+                "getTransaction: no blockTime for the source transaction; refusing to sign".into(),
+            )
+        })
+}
+
+/// Parse a `getBlockTime` result into a unix timestamp, failing
+/// closed on a null or non-numeric result (war room 2026-11-21,
+/// F-TEST-2).
+pub fn timestamp_from_block_time_result(result: &Value) -> Result<i64> {
+    result
+        .as_i64()
+        .ok_or_else(|| RelayerError::Rpc("getBlockTime: no timestamp".into()))
 }
 
 /// What the source transaction must prove before the relayer signs.
@@ -335,6 +359,27 @@ pub fn sender_from_verified_source_transfer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn block_time_extraction_fails_closed() {
+        // War room 2026-11-21 (F-TEST-2): both fail-closed block
+        // time conversions are pinned — a present value parses;
+        // null, missing, and wrong-typed values are errors, never
+        // a substituted zero or local time.
+        assert_eq!(
+            block_time_from_transaction(&json!({"blockTime": 1_700_000_000})).unwrap(),
+            1_700_000_000
+        );
+        assert!(block_time_from_transaction(&json!({"blockTime": null})).is_err());
+        assert!(block_time_from_transaction(&json!({})).is_err());
+        assert!(block_time_from_transaction(&json!({"blockTime": "1700000000"})).is_err());
+        assert_eq!(
+            timestamp_from_block_time_result(&json!(1_700_000_000)).unwrap(),
+            1_700_000_000
+        );
+        assert!(timestamp_from_block_time_result(&json!(null)).is_err());
+        assert!(timestamp_from_block_time_result(&json!("1700000000")).is_err());
+    }
 
     /// A realistic deposit transaction: one top-level instruction
     /// (the lock program's Deposit, unparsed — it is not a known

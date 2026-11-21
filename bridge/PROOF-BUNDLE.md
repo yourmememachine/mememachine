@@ -60,9 +60,14 @@ in this order:
    hash: signers must be registered members of the stated set,
    each counted at most once, at least a quorum of distinct valid
    signatures, and the message must not have been expired at the
-   receipt's slot (the destination slot at which the crossing
-   completed — the same slot basis the on-chain program used when
-   it accepted the attestation).
+   receipt's timestamp (the destination Clock time at which the
+   crossing completed — the same timestamp basis the on-chain
+   program used when it accepted the attestation). Note the
+   limit: the receipt — including that timestamp — is
+   exporter-supplied stated data (assumption A-4), so the expiry
+   verdict is exactly as trustworthy as the receipt itself; the
+   bundle proves the attestation was valid, not that the
+   destination program ever saw it.
 
 Every rejection exits non-zero with the specific reason: which
 receipt field disagrees, that the hash does not recompute, that a

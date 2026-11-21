@@ -90,10 +90,16 @@ pub const MAX_ATTESTATION_LIFETIME_SECS: i64 = 400_000;
 
 /// How far a message's source timestamp may lie ahead of the
 /// destination chain's clock before it is rejected as post-dated.
-/// Source and destination clocks are independent (both Agave
-/// stake-weighted medians); an hour absorbs any realistic drift
-/// while stopping a quorum from stretching a message's effective
-/// life by stamping it in the future.
+/// Source and destination clocks are independent, and this
+/// allowance is an operational bound, not a measured constant:
+/// validator clocks on both chains must be kept within it of each
+/// other, and a direction whose clocks diverge by more than this
+/// halts fail-closed (check 4 rejects every message) until they
+/// are brought back in line. On Solana the destination clock is a
+/// stake-weighted median of validator votes; on Machine's current
+/// single-node localnet it is that one validator's own clock —
+/// the bridge deployment gate (BRIDGE.md section 5) is what keeps
+/// that net from being a bridge endpoint.
 pub const MAX_SOURCE_TIMESTAMP_SKEW_SECS: i64 = 3_600;
 
 /// Basis-point denominator for the dynamic percentage caps.
@@ -272,12 +278,18 @@ pub struct RelayerSignature {
 /// slot sequences are independent, so one direction's attestations
 /// always expired once slot heights diverged and the other
 /// direction's never fired. Both chains are Agave and both Clocks
-/// expose `unix_timestamp` — a stake-weighted median no validator
-/// minority can move materially — so expiry is now denominated in
-/// the one quantity both chains share: time. (The cap windows stay
-/// slot-based: they are precision accounting, continuously
-/// monetizable if skewed; expiry is a coarse one-shot freshness
-/// check that only needs order-of-magnitude correctness.)
+/// expose `unix_timestamp`, so expiry is now denominated in the
+/// one quantity both chains share: time. The destination Clock is
+/// trusted as that chain's time: on Solana it is a stake-weighted
+/// median of validator votes, but on a small validator set — and
+/// above all on Machine's current single-node localnet — it is
+/// only as honest as that set's own clocks, and every check below
+/// shifts with it. That trust is accepted deliberately (the cap
+/// windows stay slot-based: they are precision accounting,
+/// continuously monetizable if skewed; expiry is a coarse
+/// one-shot freshness check), and the deployment gate in
+/// BRIDGE.md section 5 keeps the single-node net from being a
+/// bridge endpoint.
 ///
 /// Four checks, all against the signed fields plus the destination
 /// clock (`current_timestamp`):
@@ -291,9 +303,11 @@ pub struct RelayerSignature {
 ///    MAX_ATTESTATION_LIFETIME_SECS ahead of the destination time,
 ///    so even a quorum-signed far-future expiry is useless.
 /// 4. Post-dating: `source_timestamp` may not lie more than
-///    MAX_SOURCE_TIMESTAMP_SKEW_SECS ahead of the destination time,
-///    so a quorum cannot stretch a message's life by stamping its
-///    source event in the future.
+///    MAX_SOURCE_TIMESTAMP_SKEW_SECS ahead of the destination time.
+///    This bounds future-stamping to the skew allowance (a message
+///    may become executable up to that allowance before its claimed
+///    source time); check 3 is what caps the total span of
+///    destination time over which any message can execute.
 pub fn validate_message(
     message: &BridgeMessage,
     expected_source: u8,
@@ -1423,6 +1437,44 @@ mod tests {
         assert_eq!(
             validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, 1_700_000_000),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn af1_destination_ceiling_isolated() {
+        // War room 2026-11-21 (F-TEST-1): the destination ceiling
+        // (check 3) needs a case no other check can reject. The
+        // source is post-dated by exactly the skew tolerance (check
+        // 4 passes) and the lifetime is exactly the cap (check 1
+        // passes), so only the ceiling decides: at the source time
+        // the expiry is exactly MAX ahead of the destination clock
+        // and the message passes; one second earlier it is one
+        // second too far ahead and the ceiling alone rejects it.
+        let mut msg = test_message();
+        msg.source_timestamp = 1_700_000_000 + MAX_SOURCE_TIMESTAMP_SKEW_SECS;
+        msg.expiry_timestamp = msg.source_timestamp + MAX_ATTESTATION_LIFETIME_SECS;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, msg.source_timestamp),
+            Ok(())
+        );
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, msg.source_timestamp - 1),
+            Err(BridgeError::ExpiredAttestation)
+        );
+    }
+
+    #[test]
+    fn af1_zero_lifetime_rejected() {
+        // War room 2026-11-21 (F-TEST-3): expiry == source is a
+        // zero lifetime, rejected by check 1's `> 0` alone —
+        // validated at the source time itself, so the expiry check
+        // (current > expiry) cannot fire and the ceiling and
+        // post-dating checks both pass trivially.
+        let mut msg = test_message();
+        msg.expiry_timestamp = msg.source_timestamp;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, msg.source_timestamp),
+            Err(BridgeError::ExpiredAttestation)
         );
     }
 

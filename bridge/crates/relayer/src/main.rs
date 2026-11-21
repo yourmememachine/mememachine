@@ -18,8 +18,11 @@ use bridge_common::{nonce_pda, EventRecord};
 use relayer::attestation::{hash_hex, AttestationFile, Collector};
 use relayer::audit_log::{AuditEvent, AuditLog};
 use relayer::config::{parse_pubkey, RelayerConfig};
-use relayer::message::{Direction, ObservedEvent};
-use relayer::rpc::{sender_from_verified_source_transfer, RpcClient, SourceTransferCheck};
+use relayer::message::{check_source_block_time, Direction, ObservedEvent};
+use relayer::rpc::{
+    block_time_from_transaction, sender_from_verified_source_transfer, RpcClient,
+    SourceTransferCheck,
+};
 use relayer::signing::RelayerSigner;
 use relayer::submit::{build_mint_instructions, build_unlock_instructions};
 use relayer::watcher::{poll_once, PollOutcome, RelayerState, SourceChain};
@@ -66,19 +69,20 @@ impl SourceChain for RpcSource {
         }
         let tx = self.client.transaction_parsed(&source_tx)?;
         // The message's expiry is derived from this transaction's
-        // block time (A-F1 fix, 2026-11-20). It is chain data every
-        // relayer reads identically; if the chain does not report
-        // one, fail closed — never substitute a local clock or zero,
-        // which would either split the quorum or forge an expiry.
-        let source_block_time = tx
-            .get("blockTime")
-            .and_then(|v| v.as_i64())
-            .ok_or_else(|| {
-                RelayerError::Rpc(
-                    "getTransaction: no blockTime for the source transaction; refusing to sign"
-                        .into(),
-                )
-            })?;
+        // block time (A-F1 fix, 2026-11-20), which every relayer
+        // reads from the same finalized transaction. If the chain
+        // does not report one, fail closed — never substitute a
+        // local clock or zero, which would either split the quorum
+        // or forge an expiry. The value is also plausibility-checked
+        // against the local clock (war room 2026-11-21, F-ADV-1):
+        // the local clock never supplies the value, it only vetoes
+        // an implausible one.
+        let source_block_time = block_time_from_transaction(&tx)?;
+        let local_now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        check_source_block_time(source_block_time, local_now)?;
         // The sender is proven, not asserted: the source transaction
         // must contain the transfer behind this record — into the
         // vault for a deposit, burning the wrapped mint for a burn —

@@ -602,6 +602,31 @@ async fn unlock_with_valid_3_of_5_burn_attestation() {
 }
 
 #[tokio::test]
+async fn unlock_at_expiry_boundary() {
+    // War room 2026-11-21 (F-TEST-4): the lock side's expiry wiring
+    // (processor.rs Clock unix_timestamp) had no negative test —
+    // a slot-for-timestamp mutant there survived. Mirrors
+    // mint_at_expiry_boundary on the Machine side. The suite clock
+    // is pinned at TEST_NOW (see setup).
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    // At the exact expiry timestamp the attestation is still valid
+    // (rejection is current_timestamp > expiry_timestamp).
+    let mut msg = burn_message(1, 500, env.user.pubkey(), env.source_mint);
+    msg.expiry_timestamp = TEST_NOW;
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_unlock(&mut env, msg, sigs).await.unwrap();
+    // One second past expiry, the same-shaped attestation is dead.
+    let mut msg2 = burn_message(2, 500, env.user.pubkey(), env.source_mint);
+    msg2.expiry_timestamp = TEST_NOW - 1;
+    let sigs2 = sign_attestation(&msg2, &env.relayers, 3);
+    let result = send_unlock(&mut env, msg2, sigs2).await;
+    assert_custom_error(result, BridgeError::ExpiredAttestation);
+}
+
+#[tokio::test]
 async fn unlock_replay_fails() {
     let mut env = setup(100_000, 500_000, 2_000_000).await;
     send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)

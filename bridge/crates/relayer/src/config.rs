@@ -19,6 +19,7 @@ pub fn parse_pubkey(field: &str, value: &str) -> Result<Pubkey> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RelayerConfig {
     /// JSON-RPC endpoint for Solana (the lock program side).
     pub solana_rpc_url: String,
@@ -273,5 +274,37 @@ mod tests {
         let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
         cfg.expiry_window_secs = 0;
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn stale_pre_v2_config_key_rejected() {
+        // War room 2026-11-21 (F-OPS-3): before deny_unknown_fields,
+        // a config still carrying the V1 key `expiry_window_slots`
+        // parsed silently and the window fell back to the 40,000 s
+        // default — an operator's custom window changed with no
+        // error and no log. Unknown keys now fail the load loudly.
+        let json = valid_config_json().replace(
+            "\"machine_rpc_url\"",
+            "\"expiry_window_slots\": 200000, \"machine_rpc_url\"",
+        );
+        assert!(serde_json::from_str::<RelayerConfig>(&json).is_err());
+    }
+
+    #[test]
+    fn negative_and_over_cap_expiry_windows_rejected() {
+        // War room 2026-11-21 (F-TEST-5): the window became a
+        // signed i64 with the V2 timestamp expiry, so negative
+        // values are representable and must be rejected; the cap
+        // boundary itself is pinned (400,000 passes, 400,001
+        // fails), not just a grossly-over value.
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.expiry_window_secs = -1;
+        assert!(cfg.validate().is_err(), "negative expiry window must be rejected");
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.expiry_window_secs = 400_000;
+        assert!(cfg.validate().is_ok(), "expiry window at the cap must pass");
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.expiry_window_secs = 400_001;
+        assert!(cfg.validate().is_err(), "expiry window one past the cap must be rejected");
     }
 }

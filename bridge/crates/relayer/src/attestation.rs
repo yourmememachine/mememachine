@@ -199,7 +199,32 @@ impl AttestationFile {
                         ),
                     )))
                 }
-                Err(e) => return Err(e),
+                Err(e) => {
+                    // The existing file cannot be parsed as a
+                    // current-format attestation at all — e.g. a
+                    // pre-V2 (slot-basis) file left in the shared
+                    // directory by an upgrade (war room 2026-11-21,
+                    // F-OPS-2). Erroring here would brick this
+                    // relayer's signing for the nonce on every poll
+                    // until a human intervened, and the collector
+                    // skips unparseable files anyway, so the stale
+                    // file was never evidence a quorum could use.
+                    // Quarantine it — renamed, never deleted, so
+                    // the evidence survives for inspection — and
+                    // proceed with the write. A *parseable* file
+                    // with different content still hits the
+                    // AlreadyExists refusal above.
+                    let stale = path.with_extension("json.stale");
+                    if stale.exists() || std::fs::rename(&path, &stale).is_err() {
+                        return Err(e);
+                    }
+                    eprintln!(
+                        "warning: quarantined unparseable attestation file {} as {} (stale format?); re-signing nonce {}",
+                        path.display(),
+                        stale.display(),
+                        self.message.nonce
+                    );
+                }
             }
         }
         // Write-then-rename so a collector never reads a half file,
@@ -662,6 +687,27 @@ mod tests {
         assert!(f2.write_to(&dir).is_err());
         let on_disk = AttestationFile::read_from(&dir.join(f1.file_name())).unwrap();
         assert_eq!(on_disk, f1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_to_quarantines_an_unparseable_stale_file() {
+        // War room 2026-11-21 (F-OPS-2): a pre-V2 attestation file
+        // at this relayer's own path must not brick its re-signing
+        // after an upgrade. The stale bytes are preserved under a
+        // .stale name and the new attestation is written.
+        let (signers, _pubs, msg) = setup();
+        let dir = fresh_dir("stalequarantine");
+        let f = AttestationFile::new(Direction::SolanaToMachine, &msg, &signers[0].sign(&msg));
+        write_raw(&dir, &f.file_name(), b"{\"format\": \"v1 slot-basis\"}");
+        f.write_to(&dir).unwrap();
+        let on_disk = AttestationFile::read_from(&dir.join(f.file_name())).unwrap();
+        assert_eq!(on_disk, f);
+        let stale = dir.join(f.file_name().replace(".json", ".json.stale"));
+        assert_eq!(
+            std::fs::read(&stale).unwrap(),
+            b"{\"format\": \"v1 slot-basis\"}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

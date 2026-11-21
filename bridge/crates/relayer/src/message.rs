@@ -4,7 +4,8 @@
 use crate::{RelayerError, Result};
 use bridge_common::{
     BridgeMessage, EventRecord, CHAIN_MACHINE, CHAIN_SOLANA, DIR_MACHINE_TO_SOLANA,
-    DIR_SOLANA_TO_MACHINE, MESSAGE_VERSION,
+    DIR_SOLANA_TO_MACHINE, MAX_ATTESTATION_LIFETIME_SECS, MAX_SOURCE_TIMESTAMP_SKEW_SECS,
+    MESSAGE_VERSION,
 };
 use solana_program::pubkey::Pubkey;
 
@@ -116,10 +117,25 @@ pub fn build_message(
             "expiry_window_secs must be > 0".into(),
         ));
     }
+    // The cap also lives here, not only in config validation (war
+    // room 2026-11-21, F-OPS-6): a caller that bypasses
+    // RelayerConfig::validate must not be able to build a message
+    // validate_message will reject forever.
+    if expiry_window_secs > MAX_ATTESTATION_LIFETIME_SECS {
+        return Err(RelayerError::InvalidConfig(
+            "expiry_window_secs exceeds MAX_ATTESTATION_LIFETIME_SECS".into(),
+        ));
+    }
+    if event.source_block_time <= 0 {
+        return Err(RelayerError::InvalidConfig(
+            "source block time must be > 0; refusing to build a message".into(),
+        ));
+    }
     // Expiry is timestamp-based (A-F1 fix, 2026-11-20): both fields
-    // come from the source transaction's own block time, observed
-    // identically by every relayer, so all relayers derive the
-    // identical expiry and sign the identical message.
+    // come from the source transaction's own block time, which
+    // every relayer reads from the same finalized transaction, so
+    // all relayers derive the identical expiry and sign the
+    // identical message.
     let expiry_timestamp = event
         .source_block_time
         .checked_add(expiry_window_secs)
@@ -140,6 +156,33 @@ pub fn build_message(
     })
 }
 
+/// Plausibility gate on a source block time read from an RPC
+/// response, checked against the relayer's own wall clock (war
+/// room 2026-11-21, F-ADV-1/F-OPS-6). The signed timestamps are
+/// otherwise only the RPC's assertion: nothing on either chain
+/// binds them to the source block, so a shared or compromised RPC
+/// serving a far-future block time would otherwise produce a
+/// unanimous quorum over a post-dated message that becomes
+/// executable when its window arrives. A block time in the past
+/// is always plausible (the relayer may be catching up); a block
+/// time ahead of the relayer's own clock by more than the
+/// cross-chain skew allowance is not. This never substitutes the
+/// local clock for the value — it only refuses to sign an
+/// implausible one, fail-closed and attributable.
+pub fn check_source_block_time(source_block_time: i64, now: i64) -> Result<()> {
+    if source_block_time <= 0 {
+        return Err(RelayerError::Rpc(format!(
+            "source block time {source_block_time} is not a plausible unix timestamp; refusing to sign"
+        )));
+    }
+    match source_block_time.checked_sub(now) {
+        Some(ahead) if ahead <= MAX_SOURCE_TIMESTAMP_SKEW_SECS => Ok(()),
+        _ => Err(RelayerError::Rpc(format!(
+            "source block time {source_block_time} is more than {MAX_SOURCE_TIMESTAMP_SKEW_SECS}s ahead of the local clock ({now}); refusing to sign"
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,6 +201,35 @@ mod tests {
             source_tx: [9u8; 64],
             source_block_time: 1_700_000_000,
         }
+    }
+
+    #[test]
+    fn build_message_rejects_over_cap_window_and_bad_block_time() {
+        // War room 2026-11-21 (F-OPS-6/F-TEST-5): the lifetime cap
+        // is enforced in build_message itself, and a non-positive
+        // source block time can never produce a signable message.
+        let mint = Pubkey::new_unique();
+        let e = event(500, 1_000);
+        assert!(build_message(Direction::SolanaToMachine, &e, mint, 400_000).is_ok());
+        assert!(build_message(Direction::SolanaToMachine, &e, mint, 400_001).is_err());
+        let mut e = event(500, 1_000);
+        e.source_block_time = 0;
+        assert!(build_message(Direction::SolanaToMachine, &e, mint, 40_000).is_err());
+        e.source_block_time = -1;
+        assert!(build_message(Direction::SolanaToMachine, &e, mint, 40_000).is_err());
+    }
+
+    #[test]
+    fn source_block_time_plausibility_gate() {
+        // War room 2026-11-21 (F-ADV-1): past and within-skew block
+        // times pass; non-positive and far-future ones are refused.
+        let now = 1_700_000_000;
+        assert!(check_source_block_time(now - 86_400, now).is_ok());
+        assert!(check_source_block_time(now + MAX_SOURCE_TIMESTAMP_SKEW_SECS, now).is_ok());
+        assert!(check_source_block_time(now + MAX_SOURCE_TIMESTAMP_SKEW_SECS + 1, now).is_err());
+        assert!(check_source_block_time(now + 30 * 86_400, now).is_err());
+        assert!(check_source_block_time(0, now).is_err());
+        assert!(check_source_block_time(-1, now).is_err());
     }
 
     #[test]

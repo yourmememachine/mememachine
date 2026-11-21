@@ -1155,7 +1155,7 @@ async fn mint_writes_a_crossing_receipt() {
 #[tokio::test]
 async fn attestation_with_wrong_message_length_fails() {
     // Same for signatures over a hash of a truncated canonical
-    // encoding (100 of 195 bytes): not an attestation for this
+    // encoding (100 of 203 bytes): not an attestation for this
     // message.
     let mut env = setup(100_000, 500_000).await;
     let msg = test_message(1, 50_000, env.recipient.pubkey(), env.wrapped_mint);
