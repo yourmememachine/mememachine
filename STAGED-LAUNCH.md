@@ -12,10 +12,10 @@ gate allows.
 
 ## Phase 0 — Public proof of work ($0) — *current*
 
-- Everything in the open: code, tests (214 bridge + 49 fork/ops +
+- Everything in the open: code, tests (218 bridge + 49 fork/ops +
   68 LaunchGuard + 11 registry export + 17 PQ vault + 127 RugCall
-  + 99 resolver JS + 139 app JS — 724 total
-  as of 2026-11-20), SBF hashes, runbooks, drills, honest status docs.
+  + 113 resolver JS + 159 app JS — 762 total
+  as of 2026-11-21), SBF hashes, runbooks, drills, honest status docs.
 - Free security passes: `cargo audit`, clippy, cargo-fuzz, plus a
   documented self-review checklist. (Sec3 X-Ray turned out to be
   paid-only and Soteria cannot read this codebase's toolchain —

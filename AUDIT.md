@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `edcfaa9` (2026-11-21; `make verify` green —
-bridge workspace 214 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 99 passed, app JS suite 139 passed). The pin is refreshed after every full verification run;
+Last verified commit: `b2940d8` (2026-11-21; `make verify` green —
+bridge workspace 218 passed, LaunchGuard 68 passed, PQ vault 17
+passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 113 passed, app JS suite 159 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -120,6 +120,38 @@ chain configuration gates any public chain launch. Both scopes:
 > tests across the two suites (99 resolver + 139 app);
 > `make verify` runs them as `test-resolver` and
 > `test-predict`.
+>
+> **Scope update (2026-11-21 — RugCall war-room fix round,
+> commit `b2940d8`):** a six-seat internal review of the
+> RugCall entry reconciled to one fix list, all landed:
+> the judge page now runs an explicit fixture mode
+> end-to-end (it previously booted in live mode over the
+> demo wallet with an empty board) with the real program
+> ID still bound; the resolver ledger is mode-tagged with
+> mode-scoped finality, persists the signature at
+> broadcast, and bounds unconfirmed signatures to a
+> terminal state; the signer derives the pubkey from the
+> seed and refuses a mismatched keypair file;
+> `verifyBundle` checks partial/blocker consistency and
+> recomputes the qualifying-trigger split against the
+> bundle's expiry; live preflight checks the on-chain
+> market account. 272 Node tests across the two suites
+> (113 resolver + 159 app); RugCall total 399 including
+> the unchanged 127 Rust program tests. **Trust model,
+> disclosed for the entry and recorded here:** v1
+> resolution is a single resolver key (mitigation: every
+> resolution is hash-bound to a published, recomputable
+> evidence bundle; a 3-of-5 quorum is roadmap, not
+> built); the resolver can cancel any Open market at any
+> time on-chain, and its 24-hour pre-cancel grace is
+> policy, not program enforcement; evidence that first
+> completes after the grace window resolves rather than
+> refunds; the trigger event-time rule is
+> resolver-enforced, not program-enforced; completeness
+> is global, so a proven trigger can refund if an
+> unrelated evidence family stays incomplete; there is
+> no dispute or appeal instruction. Still devnet-only,
+> still not part of Scope A, still gating nothing.
 >
 > **Scope update (2026-11-19, code-review debate round 6 —
 > consistency pass, commit `ba65722`):** a whole-repo

@@ -95,6 +95,36 @@ wallet to Devnet" banner until `classifyNetwork` reports devnet.
   the shared module directly happens on a copy, with the
   RugCall-enabled build.
 
+## Trust disclosures (v1)
+
+The trust limits of the v1 design, stated as plainly in the
+submission package and recorded here:
+
+- **One resolver key resolves in v1.** A single named resolver key
+  posts resolutions. The mitigation — not a fix — is that every
+  resolution is hash-bound to a published evidence bundle that
+  anyone can recompute and re-derive with `verifyBundle`. A 3-of-5
+  resolver quorum (the bridge's pattern) is roadmap, not built.
+- **F3 — the resolver can cancel any Open market at any time,
+  on-chain.** The 24-hour grace the resolver observes after expiry
+  before cancelling an unresolved market is resolver policy, not
+  program enforcement. (Anyone else can cancel only after expiry
+  plus the 24-hour grace, and that part is program-enforced.)
+- **F4 — late evidence resolves; it does not refund.** If complete
+  evidence first becomes available after the grace window, the
+  market resolves on it rather than cancelling. The grace window is
+  not a deadline after which every unresolved market refunds.
+- **F5 — the event-time rule is resolver-enforced, not
+  program-enforced.** A trigger counts only if its *event*
+  timestamp is ≤ the market's expiry. The program sees only the
+  outcome and the evidence hash; the bundle records both the event
+  and detection timestamps so the rule stays auditable.
+- **Completeness is global.** A market resolves only on a complete
+  evidence snapshot; a proven trigger can still refund if an
+  unrelated evidence family stays incomplete past grace.
+- **No dispute or appeal in v1.** A posted resolution is final in
+  the program; the check on a bad one is the published bundle.
+
 ## Honest remaining pieces
 
 - **Live send path.** Signing and sending real devnet transactions

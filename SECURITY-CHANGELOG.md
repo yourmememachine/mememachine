@@ -7,6 +7,37 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-21 — `b2940d8`** RugCall war-room fix round
+  (six-seat internal review of the hackathon entry, blind
+  + cross-critiqued; verdict provisional until the
+  external seats are reconciled). Resolver: ledger
+  entries are mode-tagged and finality is mode-scoped, so
+  a dry run can no longer block a live submission or
+  overwrite an unconfirmed entry; the signature is
+  persisted the moment broadcast succeeds, polling
+  failures route into the persisted unconfirmed state,
+  and unconfirmed signatures reach a bounded terminal
+  state instead of resubmitting blind; `signerFromBytes`
+  derives the pubkey from the seed and refuses a keypair
+  file whose halves do not belong together;
+  `verifyBundle` now checks partial/blocker consistency
+  and recomputes the qualifying-trigger split against the
+  bundle's expiry; live preflight gained an on-chain
+  market-account check. App: the judge page runs an
+  explicit fixture mode end-to-end (it previously booted
+  in live mode over the demo wallet with an empty board)
+  with the real program ID still bound. On-chain program
+  unchanged; SBF untouched. Devnet only.
+- **2026-11-21 — `68fa4b6`** Positivity guard in
+  bridge-common's `validate_message` (external-seat fix
+  on the A-F1 timestamp expiry). The four timestamp
+  checks bound differences only, so a message whose
+  source timestamp and the destination clock reading both
+  sat in a non-positive range satisfied all of them while
+  naming no real time; `validate_message` now rejects
+  `source_timestamp <= 0` or `current_timestamp <= 0`
+  with `ExpiredAttestation` before the four checks.
+  Localnet only; not deployed.
 - **2026-11-21 — `edcfaa9`** War-room follow-up to the A-F1
   timestamp expiry (six-seat internal review of the fix,
   blind + cross-critiqued). Relayer hardening, all

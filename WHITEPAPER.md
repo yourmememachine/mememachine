@@ -708,7 +708,7 @@ or it doesn't ship.
 | Dynamic caps (unlock) | 1% per tx / 5% per 216,000 slots of live locked total; quarter strength for 216,000 slots after any unpause |
 | LaunchGuard minimums | Authorities revoked; ≥10% of supply locked ≥6,480,000 slots (30 days) |
 | Demo launch mint | `AjTP23T2HhMryZVDPpzVYrTsWHgH6jKkMt9b8cLdn7hc` (localnet, worthless) |
-| Tests | 724 passing (214 bridge workspace, 68 LaunchGuard, 17 PQ vault, 11 registry export, 127 RugCall, 49 fork/ops checks, 99 resolver JS, 139 app JS) |
+| Tests | 762 passing (218 bridge workspace, 68 LaunchGuard, 17 PQ vault, 11 registry export, 127 RugCall, 49 fork/ops checks, 113 resolver JS, 159 app JS) |
 | Licence | Apache-2.0 |
 
 ## Appendix B — Document map

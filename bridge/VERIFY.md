@@ -9,7 +9,7 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **214 passed, 0 failed** (45
+- **Tests:** bridge workspace **218 passed, 0 failed** (49
   bridge-common unit + 35 machine-bridge
   + 30 solana-lock (29 + 1 precompile-cost) + 66 relayer + 23 proof bundle + 15 receipt
   indexer, including the
@@ -17,10 +17,10 @@ the current state and supersedes their numbers.
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
   `programs/PQ-VERIFY.md`); fork suite 49 OK.
-  Full `make verify` 2026-11-21: **724 passed, 0 failed**.
-  This run verifies commit `edcfaa9` (war-room fixes for the
-  A-F1 timestamp expiry: relayer fail-closed hardening + the
-  tests isolating the new expiry checks). The SBF rebuild is
+  Full `make verify` 2026-11-21: **762 passed, 0 failed**.
+  This run verifies commit `b2940d8` (the RugCall war-room fix
+  round; the bridge side carries the A-F1 external-seat
+  positivity guard from `68fa4b6`). The SBF rebuild is
   byte-identical to the previous pin (solana_lock.so
   `42bbfadc…` 212,840 B, machine_bridge.so `e8b85254…`
   215,832 B) — the on-chain programs did not change.

@@ -5,9 +5,9 @@
 # Machine
 Website: https://machinechain.netlify.app/
 
-**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 724 tests, localnet, built in public.**
+**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 762 tests, localnet, built in public.**
 
-![Tests: 724 passing](https://img.shields.io/badge/tests-724%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
+![Tests: 762 passing](https://img.shields.io/badge/tests-762%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
 
 A Solana-derived L1 with its own token, its own culture, and apps
 running on it — built to be one of the best Solana forks, not just a
@@ -184,6 +184,18 @@ not a claim.
 - **The keypairs in `keys/` are dev-only.** They are throwaway test
   keys for this chain. They hold no mainnet value and must be replaced
   before any public or production use.
+- **RugCall's resolver is a single key in v1.** RugCall (the devnet
+  prediction-market entry in `rugcall/`) resolves through one named
+  resolver key; the mitigation is that every resolution is hash-bound
+  to a published evidence bundle anyone can recompute — a 3-of-5
+  quorum is roadmap, not built. The resolver can also cancel any open
+  market at any time on-chain (its 24-hour pre-cancel grace is policy,
+  not program enforcement), the trigger event-time rule is
+  resolver-enforced rather than program-enforced, and a market
+  resolves only on globally complete evidence — so a proven trigger
+  can still refund if another evidence family stays incomplete. Full
+  disclosure: `STATUS.md` P44 and `AUDIT.md` (2026-11-21 scope
+  update). Devnet play money only; it gates nothing in the bridge.
 
 ## Dev3pack submission notes
 

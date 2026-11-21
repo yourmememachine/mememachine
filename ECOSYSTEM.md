@@ -25,10 +25,10 @@ Repositories / locations:
 | Public status snapshot | `status/` in this repo |
 | Solana OS (browser interface) | Hosted browser artifact (slug `solana-os`), source at `~/workspace/ts-spaces/solana-os/index.html` — not a GitHub repo |
 
-Verified totals at this date (`make verify`, 2026-11-20, against
-commit `edcfaa9`): **724 passed, 0 failed** — bridge workspace 214,
+Verified totals at this date (`make verify`, 2026-11-21, against
+commit `b2940d8`): **762 passed, 0 failed** — bridge workspace 218,
 LaunchGuard 68, PQ Vault 17, registry export 11, RugCall 127, fork
-suite 49, resolver JS 99, app JS 139.
+suite 49, resolver JS 113, app JS 159.
 
 ---
 
@@ -90,8 +90,8 @@ relayer exists (`bridge/crates/relayer/`) but has never run live;
 no asset has crossed, nothing here holds real funds.
 
 **Proven.** Built and tested locally only. Re-verified 2026-11-21:
-`cargo test --release` in `bridge/` — **214 passed, 0 failed**
-(45 bridge-common, 35 machine-bridge, 30 solana-lock
+`cargo test --release` in `bridge/` — **218 passed, 0 failed**
+(49 bridge-common, 35 machine-bridge, 30 solana-lock
 including the precompile-cost test, 66 relayer including the
 full end-to-end drill, 23 proof bundle, 15 receipt indexer).
 Full output in `bridge/VERIFY.md`.
@@ -140,7 +140,7 @@ native Rust style, all tested locally and none deployed to Machine:
   six instructions (InitializeConfig, CreateMarket, BuyPosition,
   ResolveMarket, Claim, CancelMarket) with a per-mint lock that
   enforces one live market per mint. **127 passed, 0 failed**, plus
-  99 resolver JS tests and 139 app JS tests. **RugCall is the one
+  113 resolver JS tests and 159 app JS tests. **RugCall is the one
   deployed program in the ecosystem — on Solana devnet only** (not
   Machine, not mainnet), program
   `DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ`, custoding only
