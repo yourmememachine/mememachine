@@ -7,6 +7,22 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-21 — `bd02459`** RugCall judge-page fixture
+  integrity fix. The shipped page's pre-seeded fixture
+  markets carried readable label addresses that decode to
+  33 bytes, so the client's PDA derivation refused every
+  seeded buy/claim and no result panel could render; the
+  soft-flag market also had no recorded evidence snapshot
+  embedded, so its panel showed none. Fixture market,
+  live-market and position addresses are now the derived
+  PDAs under the deployed devnet program id, every fixture
+  label decodes to exactly 32 bytes, the resolved fixture
+  markets' evidence hashes were recomputed over the
+  corrected records, and the soft-flag market's recorded
+  snapshot is embedded in the resolver's fixture format.
+  Regression tests exercise buys/claims on the seeded
+  markets and the built page's embedded bundle. On-chain
+  program unchanged; SBF untouched. Devnet only.
 - **2026-11-21 — `b2940d8`** RugCall war-room fix round
   (six-seat internal review of the hackathon entry, blind
   + cross-critiqued; verdict provisional until the

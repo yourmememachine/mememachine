@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `e9a5dca` (2026-11-21; `make verify` green —
+Last verified commit: `bd02459` (2026-11-21; `make verify` green —
 bridge workspace 222 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 113 passed, app JS suite 159 passed). The pin is refreshed after every full verification run;
+passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 114 passed, app JS suite 169 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -135,8 +135,8 @@ chain configuration gates any public chain launch. Both scopes:
 > `verifyBundle` checks partial/blocker consistency and
 > recomputes the qualifying-trigger split against the
 > bundle's expiry; live preflight checks the on-chain
-> market account. 272 Node tests across the two suites
-> (113 resolver + 159 app); RugCall total 399 including
+> market account. 283 Node tests across the two suites
+> (114 resolver + 169 app); RugCall total 410 including
 > the unchanged 127 Rust program tests. **Trust model,
 > disclosed for the entry and recorded here:** v1
 > resolution is a single resolver key (mitigation: every
