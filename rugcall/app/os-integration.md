@@ -138,9 +138,10 @@ submission package and recorded here:
   dUSDC and rate-limit top-ups per wallet. The "Get dUSDC" flow
   waits on that service; nothing about the current demo wallet
   implies a funded on-chain account.
-- **Program id.** The program id enters the app config (the single
-  `programId` binding the judge page and the OS window both read)
-  once the program is deployed to devnet. Until then the config
-  carries `null`, every surface says the program is not yet
-  deployed, and explorer entries stay disabled rather than linking
-  to a placeholder address.
+- **Program id.** The program id is in the app config (the single
+  `programId` binding the judge page and the OS window both read):
+  the program was deployed to devnet on 2026-11-20 as
+  `DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ`. The judge page
+  binds that real id in fixture mode — its markets are labelled
+  fixtures and its transactions are simulated; live devnet reads
+  go through the app's data layer.
