@@ -14,7 +14,7 @@ gate allows.
 
 - Everything in the open: code, tests (222 bridge + 49 fork/ops +
   68 LaunchGuard + 11 registry export + 17 PQ vault + 130 RugCall
-  + 114 resolver JS + 174 app JS — 785 total
+  + 114 resolver JS + 174 app JS — 793 total
   as of 2026-11-21), SBF hashes, runbooks, drills, honest status docs.
 - Free security passes: `cargo audit`, clippy, cargo-fuzz, plus a
   documented self-review checklist. (Sec3 X-Ray turned out to be

@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `683767d` (2026-11-21; `make verify` green —
-bridge workspace 222 passed, LaunchGuard 68 passed, PQ vault 17
+Last verified commit: `8efaa66` (2026-11-21; `make verify` green —
+bridge workspace 230 passed, LaunchGuard 68 passed, PQ vault 17
 passed, registry export 11 passed, RugCall 130 passed, fork suite 49 OK, resolver JS suite 114 passed, app JS suite 174 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -563,6 +563,34 @@ chain configuration gates any public chain launch. Both scopes:
 > unexecuted attestation inside its window), and the
 > signed source timestamp is the quorum's assertion —
 > nothing on either chain binds it to the source block.
+>
+> **Scope update 2026-11-21 (commit `8efaa66`) — debate
+> round 8, scope 2 second rotation (relayer).** Two
+> independent reviewers audited the relayer cold, debated
+> each other's findings to agreement on substance, and the
+> surviving findings were fixed, each reproduced by a
+> failing test first: the collector now skips attestations
+> whose signed chain fields belong to the other direction
+> (a copied cross-direction file previously manufactured a
+> false disagreement blocking a genuine quorum); the
+> submitter treats a crossing as processed only on a
+> genuine destination-program receipt (owner + parsed
+> contents), not on any account existing at the receipt
+> PDA; source-transaction discovery pages through the
+> signature list and tries every candidate in the record's
+> slot instead of stalling on the oldest signature in one
+> 1,000-entry window; the run loop writes each distinct
+> audit event once per process instead of re-appending on
+> every poll; the stale-attestation quarantine picks a
+> fresh `.stale` name instead of failing on the second
+> stale file; the payer keypair gets the signer's 0600
+> permission refusal and a missing payer no longer blocks
+> dry-run reports; the config shared-directory guard
+> compares normalized paths; and the audit log decodes
+> hashes byte-wise (a crafted non-ASCII hash previously
+> panicked instead of failing closed) and streams its
+> reads. Off-chain relayer only: no program change, no
+> SBF rebuild; the relayer was already in Scope A.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
@@ -576,7 +604,7 @@ chain configuration gates any public chain launch. Both scopes:
 
 ```bash
 ./tests/run.sh                    # fork-script suite: 49 tests
-cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (197)
+cd bridge && cargo test --release # bridge workspace: programs + relayer + proof bundle + receipt indexer (230)
 cd programs && cargo test --release # LaunchGuard 68 tests (16 integration + 18 adversarial + 1 demo launch + 28 dust floor + 5 unit) + PQ vault 17 + registry export 11
 ./ops/check-host.sh               # explains why validators cannot run on a restricted VM
 ```

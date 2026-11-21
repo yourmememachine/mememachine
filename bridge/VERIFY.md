@@ -9,7 +9,7 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **222 passed, 0 failed** (49
+- **Tests:** bridge workspace **230 passed, 0 failed** (49
   bridge-common unit + 4 cap-accounting property tests + 35 machine-bridge
   + 30 solana-lock (29 + 1 precompile-cost) + 66 relayer + 23 proof bundle + 15 receipt
   indexer, including the
@@ -17,8 +17,8 @@ the current state and supersedes their numbers.
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
   `programs/PQ-VERIFY.md`); fork suite 49 OK.
-  Full `make verify` 2026-11-21: **785 passed, 0 failed**.
-  This run verifies commit `683767d` (the RugCall judge-page
+  Full `make verify` 2026-11-21: **793 passed, 0 failed**.
+  This run verifies commit `8efaa66` (the RugCall judge-page
   fixture review close; the bridge side also carries the cap-accounting
   property tests from `e9a5dca` and the
   A-F1 external-seat positivity guard from `68fa4b6`). The SBF rebuild is

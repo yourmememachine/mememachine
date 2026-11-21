@@ -7,6 +7,25 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-21 — `8efaa66`** Relayer debate-round
+  hardening (scope 2, second rotation; two reviewers,
+  debate reconciled, every fix reproduced failing-first).
+  The collector skips cross-direction attestation files
+  instead of reporting a manufactured disagreement; the
+  submitter requires a genuine program-written receipt
+  (owner + contents), not mere account existence at the
+  receipt PDA; source-transaction discovery pages the
+  signature list and verifies each candidate in the
+  record's slot; the run loop dedupes audit events per
+  process; the stale-file quarantine is repeatable; the
+  payer keypair gets the 0600 permission refusal; the
+  config shared-directory guard compares normalized
+  paths; the audit log's hash decode is byte-wise (no
+  panic on crafted non-ASCII input) and its reads stream.
+  Off-chain relayer only; programs and SBF unchanged.
+  Local only.
+
+
 - **2026-11-21 — `683767d`** RugCall judge-page fixture
   review close. The fixture bundle's PDA-truth is now pinned
   cross-language: golden vectors generated from the Rust
