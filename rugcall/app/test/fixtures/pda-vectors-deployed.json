@@ -1,0 +1,274 @@
+{
+  "config": {
+    "address": "D8upBvHaUh7pX8PT3AZWFFWa78PkDJAJ5xPoumBSwANp",
+    "bump": 252
+  },
+  "generated_by": "rugcall/app/test/gen-pda-vectors-deployed.sh",
+  "generator": "rust: rug_call::state SEED_* + Pubkey::find_program_address (processor.rs seed constructions)",
+  "markets": [
+    {
+      "created_at": 1799913600,
+      "live_market": {
+        "address": "3aYk19dohjKvn9rWzEuXMWVEU8TYsAGR8wHV8dZSx1wj",
+        "bump": 255
+      },
+      "market": {
+        "address": "5z1WF2nXLdx9UGJTnQy7VGZqAzLoeha5m2SNQUxXHG2B",
+        "bump": 254
+      },
+      "subject_mint": "MintH2Bund1e1111111111111111111111111111111",
+      "vault": {
+        "address": "Ffahjx4ngbdnVDnqRHkNcrUxLMA84y1nWmuL82qJr6bw",
+        "bump": 255
+      }
+    },
+    {
+      "created_at": 1799913600,
+      "live_market": {
+        "address": "5Tv2DoaCmsheZ7hN853Nqfu3kP7s1e4pGcA3sdrmrSKA",
+        "bump": 253
+      },
+      "market": {
+        "address": "F9dX2Wmiuncv4wxRGsGCLZKqWtdwF9prwMyNSFxaikG6",
+        "bump": 255
+      },
+      "subject_mint": "MintC1ean1111111111111111111111111111111111",
+      "vault": {
+        "address": "4CoKtG4KZpcQptNxDNGp3ow7dAjDzye84Rqkybca9Kpo",
+        "bump": 255
+      }
+    },
+    {
+      "created_at": 1799913600,
+      "live_market": {
+        "address": "AkwHWaJPg5dPwaRnkGSCseBFEiyNi7c2JT4weq1VBe88",
+        "bump": 255
+      },
+      "market": {
+        "address": "4uSMzKLhKyeBixvjvwMWurRVJ3yZm5TrcmVAzk1dVtvK",
+        "bump": 254
+      },
+      "subject_mint": "MintSoftF1ag1111111111111111111111111111111",
+      "vault": {
+        "address": "Hnixvseyi5acLusheiMYPMH16aoArAJi4ViBVZYnSCmj",
+        "bump": 252
+      }
+    },
+    {
+      "created_at": 1799740800,
+      "live_market": {
+        "address": "8Ki6j7zuhRbkNqFCqa5bYK3QdjBiSf3FHi8Md1HF4xKp",
+        "bump": 255
+      },
+      "market": {
+        "address": "CCy8Bv67xbpqc4iuiUwjeRiqo78oy1dvSBtafe161aP",
+        "bump": 254
+      },
+      "subject_mint": "MintLateTrig1111111111111111111111111111111",
+      "vault": {
+        "address": "HTEM3NdwuRs6u3p3gaZUeXsB2xZnbRUtkfS7vg8yhLQF",
+        "bump": 253
+      }
+    },
+    {
+      "created_at": 1799913599,
+      "live_market": {
+        "address": "3aYk19dohjKvn9rWzEuXMWVEU8TYsAGR8wHV8dZSx1wj",
+        "bump": 255
+      },
+      "market": {
+        "address": "35CWhb1k5sHzNADdnywbDVTFj2DYEymgW1GVnusbSjrX",
+        "bump": 253
+      },
+      "subject_mint": "MintH2Bund1e1111111111111111111111111111111",
+      "vault": {
+        "address": "gX4D92B9HuZB5hJ2pViLH2Z5RFRCFBTLAbTNttBmieu",
+        "bump": 255
+      }
+    },
+    {
+      "created_at": 1799913599,
+      "live_market": {
+        "address": "5Tv2DoaCmsheZ7hN853Nqfu3kP7s1e4pGcA3sdrmrSKA",
+        "bump": 253
+      },
+      "market": {
+        "address": "9oU9at86jc4YRHTYRwnEgubToGPyaMqe9EaU4viYh9wV",
+        "bump": 253
+      },
+      "subject_mint": "MintC1ean1111111111111111111111111111111111",
+      "vault": {
+        "address": "EWcinSuQfVQUzEh8tmDu8bso5wqBsGTp783Ggs7Y9uBJ",
+        "bump": 255
+      }
+    },
+    {
+      "created_at": 1799913598,
+      "live_market": {
+        "address": "5Tv2DoaCmsheZ7hN853Nqfu3kP7s1e4pGcA3sdrmrSKA",
+        "bump": 253
+      },
+      "market": {
+        "address": "4QMH7uGXhuwzsTXKLmGdJt72L2Dwvpufhk8vFrgT4MFV",
+        "bump": 255
+      },
+      "subject_mint": "MintC1ean1111111111111111111111111111111111",
+      "vault": {
+        "address": "CpHYMgTxDssMRx1kvYv5cqxNACwrUPzE3tfv7QnAEq3i",
+        "bump": 255
+      }
+    },
+    {
+      "created_at": 1799913600,
+      "live_market": {
+        "address": "8cB6aoZkwktztkbzE9yzFmTVZwPxxwnuKZEU1nAkAbTW",
+        "bump": 252
+      },
+      "market": {
+        "address": "EZ56YLVyZxYBvWfVS13RpdD4Sz4SfXM4NeKUVjYCoMUP",
+        "bump": 255
+      },
+      "subject_mint": "MintZeroWin11111111111111111111111111111111",
+      "vault": {
+        "address": "A6B2G4zMzFpKJj3AAVq9LVf62K2X9bzDzseoFmBrMxGw",
+        "bump": 255
+      }
+    }
+  ],
+  "positions": [
+    {
+      "address": "41va32EZkq4UoSaVdo64mnd4CVuRTWRVyNiUx8bStAnN",
+      "bump": 253,
+      "market": "5z1WF2nXLdx9UGJTnQy7VGZqAzLoeha5m2SNQUxXHG2B",
+      "user": "DemoUserWa11et111111111111111111111111111111"
+    },
+    {
+      "address": "5ND9MheSR6h5xKnUuj4hEmMSCYXvPjKYWfnHXAjo6EYT",
+      "bump": 254,
+      "market": "5z1WF2nXLdx9UGJTnQy7VGZqAzLoeha5m2SNQUxXHG2B",
+      "user": "UserBWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "CYkPmyhXPw2JJUeNVrk2bvfjtT9GUCNGfbdsUx5csZZ1",
+      "bump": 255,
+      "market": "5z1WF2nXLdx9UGJTnQy7VGZqAzLoeha5m2SNQUxXHG2B",
+      "user": "UserCWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "9ebTHimToL7HUVnkabfsTqwXwWZCnyjbJckQmXjZFhTG",
+      "bump": 254,
+      "market": "F9dX2Wmiuncv4wxRGsGCLZKqWtdwF9prwMyNSFxaikG6",
+      "user": "DemoUserWa11et111111111111111111111111111111"
+    },
+    {
+      "address": "3tXp8s2RQXWuoqV2P5HNu2qoWtWCiWHTUS8cJ52Y1hVj",
+      "bump": 253,
+      "market": "F9dX2Wmiuncv4wxRGsGCLZKqWtdwF9prwMyNSFxaikG6",
+      "user": "UserBWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "4vygN1GJo5tdDWR9L2Ghimm7McQ6Px75ntYKdTF1YUA6",
+      "bump": 254,
+      "market": "F9dX2Wmiuncv4wxRGsGCLZKqWtdwF9prwMyNSFxaikG6",
+      "user": "UserDWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "39ce4KcXRLsQ7ktExMw637nTvmCBXzQzBnM7V57xHeok",
+      "bump": 254,
+      "market": "F9dX2Wmiuncv4wxRGsGCLZKqWtdwF9prwMyNSFxaikG6",
+      "user": "UserCWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "5wL1jVbeLDFFaQLTt8HcWrG3PXABRQnfrwQkJ41m2GPv",
+      "bump": 253,
+      "market": "4uSMzKLhKyeBixvjvwMWurRVJ3yZm5TrcmVAzk1dVtvK",
+      "user": "DemoUserWa11et111111111111111111111111111111"
+    },
+    {
+      "address": "ByN6wtx9TaZVt442hg3C78MCC6fvSK4Q3n8cDcjnG7fS",
+      "bump": 255,
+      "market": "4uSMzKLhKyeBixvjvwMWurRVJ3yZm5TrcmVAzk1dVtvK",
+      "user": "UserBWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "8pBYGmLk3PiuFS8sSwsRmgUo4j3YjgJb7tGcQjy6kzCc",
+      "bump": 255,
+      "market": "CCy8Bv67xbpqc4iuiUwjeRiqo78oy1dvSBtafe161aP",
+      "user": "DemoUserWa11et111111111111111111111111111111"
+    },
+    {
+      "address": "GX24fEi2rKEuTNKd9dVmNQoVejUfLoZmLazm3YoDebef",
+      "bump": 255,
+      "market": "CCy8Bv67xbpqc4iuiUwjeRiqo78oy1dvSBtafe161aP",
+      "user": "UserBWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "EinaLy42MuqtffDne1oqQwWCnnspk5XgzSao8jzjAL99",
+      "bump": 254,
+      "market": "35CWhb1k5sHzNADdnywbDVTFj2DYEymgW1GVnusbSjrX",
+      "user": "DemoUserWa11et111111111111111111111111111111"
+    },
+    {
+      "address": "89SM3Z96GNZjJRvF4mCohh74PvTwaWaUj3DBwvQEq3RT",
+      "bump": 255,
+      "market": "35CWhb1k5sHzNADdnywbDVTFj2DYEymgW1GVnusbSjrX",
+      "user": "UserDWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "5syem71apyTsiE1uiep2iWYR1CUHXYwdeAQEZXxCTqCW",
+      "bump": 255,
+      "market": "35CWhb1k5sHzNADdnywbDVTFj2DYEymgW1GVnusbSjrX",
+      "user": "UserCWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "FDXTViUwWSLZifNgBoJpNxpowkGNRsMj8Qza2BeUoLG8",
+      "bump": 253,
+      "market": "9oU9at86jc4YRHTYRwnEgubToGPyaMqe9EaU4viYh9wV",
+      "user": "DemoUserWa11et111111111111111111111111111111"
+    },
+    {
+      "address": "7jmdDdz2r59KTcQ2oyB5e8BjErngkkG7kDTdmvCaqCdj",
+      "bump": 255,
+      "market": "9oU9at86jc4YRHTYRwnEgubToGPyaMqe9EaU4viYh9wV",
+      "user": "UserBWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "6zjuKsHB5b1j8jGuxqG4odWxiRm2FfzVucktzmekrb2n",
+      "bump": 255,
+      "market": "9oU9at86jc4YRHTYRwnEgubToGPyaMqe9EaU4viYh9wV",
+      "user": "UserCWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "4qztgkZsMop12P1cJsprXatgSZMVNLEm3WrgWeiZ4yRi",
+      "bump": 254,
+      "market": "4QMH7uGXhuwzsTXKLmGdJt72L2Dwvpufhk8vFrgT4MFV",
+      "user": "DemoUserWa11et111111111111111111111111111111"
+    },
+    {
+      "address": "2YJ2L3MuKrsoEEnYBDNEek1NJrwsQ83Kvb8U9mivvAzz",
+      "bump": 255,
+      "market": "4QMH7uGXhuwzsTXKLmGdJt72L2Dwvpufhk8vFrgT4MFV",
+      "user": "UserBWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "8aNrEFgrsMwTZeWZFvDSUj2hk5W3SXrra4SpV8jxFbV",
+      "bump": 255,
+      "market": "4QMH7uGXhuwzsTXKLmGdJt72L2Dwvpufhk8vFrgT4MFV",
+      "user": "UserCWa11et11111111111111111111111111111111"
+    },
+    {
+      "address": "6vUVuL4k27UpRU7dvwE9zAyfKCwBoeUS4wupPkEGj8kW",
+      "bump": 254,
+      "market": "EZ56YLVyZxYBvWfVS13RpdD4Sz4SfXM4NeKUVjYCoMUP",
+      "user": "DemoUserWa11et111111111111111111111111111111"
+    },
+    {
+      "address": "5QsTKMydTDeCTRQD4PPUEJ71QLuukP7CkmWzBf1rL8is",
+      "bump": 254,
+      "market": "EZ56YLVyZxYBvWfVS13RpdD4Sz4SfXM4NeKUVjYCoMUP",
+      "user": "UserBWa11et11111111111111111111111111111111"
+    }
+  ],
+  "program_id": "DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ",
+  "schema": "rugcall-pda-vectors-deployed/v1"
+}

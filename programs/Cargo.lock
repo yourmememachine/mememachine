@@ -3442,6 +3442,7 @@ name = "rug-call"
 version = "0.1.0"
 dependencies = [
  "borsh 1.8.1",
+ "serde_json",
  "solana-program",
  "solana-program-test",
  "solana-sdk",

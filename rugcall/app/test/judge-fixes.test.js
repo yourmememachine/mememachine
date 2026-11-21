@@ -333,3 +333,49 @@ test("shipped page: a buy on the embedded H2 market uses the page's derivation p
   assert.ok(html.includes("Simulated (fixture mode)"), "result panel marks the simulation");
   assert.ok(html.includes("BuyPosition"), "result panel names the instruction");
 });
+
+/* ---------------- check: every replay / built-page address decodes to 32 bytes ----------------
+ * The bundle's own decode-length sweep lives in fixtures.test.js;
+ * the replay record and the BUILT page's shell literals were only
+ * covered indirectly (a 33-byte literal would throw inside a buy).
+ * This asserts the decoded byte length explicitly for both. The
+ * slot list is explicit on purpose: a regex sweep over the replay
+ * would false-positive on hashes and canonical prose. */
+
+test("check5: the built judge page's shell literals and the replay addresses decode to exactly 32 bytes", () => {
+  const literalSet = (text) =>
+    [...new Set([...text.matchAll(/"(Fixture[1-9A-HJ-NP-Za-km-z]+)"/g)].map((m) => m[1]))].sort();
+  const judgeLiterals = literalSet(JUDGE_HTML);
+  const index = fs.readFileSync(path.join(APP_DIR, "index.html"), "utf8");
+  assert.deepEqual(judgeLiterals, literalSet(index), "built page carries the shell's literal set");
+  assert.equal(judgeLiterals.length, 2);
+  for (const lit of judgeLiterals) {
+    assert.equal(tx.base58Decode(lit).length, 32, lit);
+  }
+  const slots = [];
+  slots.push(["replay.config.programId", REPLAY.config.programId]);
+  for (const k of ["address", "live_market", "subject_mint", "creator"]) {
+    slots.push(["replay.market." + k, REPLAY.market[k]]);
+  }
+  for (const k of ["market", "subject_mint", "creator", "resolver"]) {
+    slots.push(["replay.record." + k, REPLAY.record[k]]);
+  }
+  REPLAY.record.instruction.accounts.forEach((a, i) => {
+    slots.push(["replay.record.instruction.accounts[" + i + "]", a.pubkey]);
+  });
+  const canonical = JSON.parse(REPLAY.bundle.canonical);
+  for (const k of ["address", "live_market", "subject_mint", "creator"]) {
+    slots.push(["replay.bundle.canonical.market." + k, canonical.market[k]]);
+  }
+  slots.push(["replay.bundle.canonical.evidence.mint", canonical.evidence.mint]);
+  slots.push(["replay.bundle.canonical.resolver", canonical.resolver]);
+  slots.push(["replay.bundle.canonical.subjectMint", canonical.subjectMint]);
+  slots.push(["replay.bundle.canonical.evidence.deep.creator", canonical.evidence.deep.creator]);
+  for (const k of Object.keys(REPLAY.summaries)) {
+    slots.push(["replay.summaries key", k]);
+  }
+  for (const [label, addr] of slots) {
+    assert.equal(typeof addr, "string", label);
+    assert.equal(tx.base58Decode(addr).length, 32, label + " " + addr);
+  }
+});

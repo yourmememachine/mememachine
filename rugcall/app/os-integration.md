@@ -144,4 +144,9 @@ submission package and recorded here:
   `DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ`. The judge page
   binds that real id in fixture mode — its markets are labelled
   fixtures and its transactions are simulated; live devnet reads
-  go through the app's data layer.
+  go through the app's data layer. The fixture bundle's config
+  address, `ConfigRugCa111111111111111111111111111111111`, is a
+  fixture placeholder label only and is not that config PDA; the
+  real config account under the deployed program is
+  `D8upBvHaUh7pX8PT3AZWFFWa78PkDJAJ5xPoumBSwANp` (config PDA,
+  bump 252).

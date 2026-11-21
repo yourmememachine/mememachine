@@ -180,4 +180,17 @@ test("judge page: frozen honesty copy is present, without overclaims", () => {
     flat.includes("does not consume this module yet") || flat.includes("does not consume") ,
     "the page states the current non-consumption honestly"
   );
+  // Duplicate-mint disclosure (external review fix): the fixture
+  // list's repeated mints are recorded snapshots at different
+  // stages, not simultaneous on-chain markets, and their 1-2
+  // second creation-time gaps are a derivation detail. Pinned here
+  // so a future page regeneration cannot silently drop it.
+  assert.ok(
+    flat.includes("not separate markets that existed on-chain at the same time"),
+    "duplicate-mint snapshot disclosure is present"
+  );
+  assert.ok(
+    flat.includes("that small gap is a fixture detail, not a real launch interval"),
+    "snapshot creation-time gap is explained as a fixture detail"
+  );
 });

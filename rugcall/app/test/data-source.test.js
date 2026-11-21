@@ -251,6 +251,66 @@ test("devnet getLiveMarketForMint scans live locks at dataSize 34", async () => 
   assert.deepEqual(scan.filter.memcmp, [{ offset: 0, bytes: tx.base58Encode(Uint8Array.of(4)) }]);
 });
 
+test("duplicate-mint snapshot markets: lookups key on the market PDA, never the shared live-market PDA", async () => {
+  const src = fixtureSource();
+  // Group the bundle's markets by mint; two mints carry snapshot
+  // duplicates (the H2 pair, the Clean triple).
+  const byMint = new Map();
+  for (const m of APP_FIXTURES.markets) {
+    if (!byMint.has(m.subject_mint)) byMint.set(m.subject_mint, []);
+    byMint.get(m.subject_mint).push(m);
+  }
+  const duplicated = [...byMint.values()].filter((rows) => rows.length > 1);
+  assert.equal(duplicated.length, 2);
+  for (const rows of duplicated) {
+    // One shared live-market PDA, distinct market PDAs, exactly
+    // one open market per duplicated mint.
+    assert.equal(new Set(rows.map((m) => m.live_market)).size, 1);
+    assert.equal(new Set(rows.map((m) => m.address)).size, rows.length);
+    const open = rows.filter((m) => m.state === 1);
+    assert.equal(open.length, 1);
+    const livePda = rows[0].live_market;
+    // The shared live-market PDA is not a market key: looking it up
+    // as a market finds nothing, so no market's state can be read
+    // through it.
+    assert.equal(await src.getMarket(livePda), null);
+    // The mint's live lock resolves to the OPEN market's PDA, with
+    // the lock address carried alongside — never the other way round.
+    const live = await src.getLiveMarketForMint(rows[0].subject_mint);
+    assert.equal(live.market, open[0].address);
+    assert.equal(live.address, livePda);
+    // Positions partition by market PDA: each snapshot's positions
+    // are exactly its own, disjoint from its siblings'.
+    const seen = new Set();
+    for (const m of rows) {
+      const ps = await src.listPositions({ market: m.address });
+      assert.ok(ps.length > 0, "fixture cast gives every market positions");
+      for (const p of ps) {
+        assert.equal(p.market, m.address);
+        assert.ok(!seen.has(p.address), "position " + p.address + " surfaced under two markets");
+        seen.add(p.address);
+      }
+    }
+  }
+  // The portfolio join is by market PDA too: the resolved H2
+  // snapshot's row carries the snapshot's own demo position, not
+  // the open sibling's.
+  const decodedMarkets = await src.listMarkets();
+  const demoPositions = await src.listPositionsForUser(APP_FIXTURES.users.demo);
+  const portfolio = predict.buildPortfolio(decodedMarkets, demoPositions, 1799950000);
+  const snapshot = APP_FIXTURES.markets.find((m) => m.state === 2 && m.evidence_file === "h2-bundle.json");
+  const openSibling = APP_FIXTURES.markets.find(
+    (m) => m.subject_mint === snapshot.subject_mint && m.state === 1);
+  const snapRow = portfolio.find((r) => r.market.address === snapshot.address);
+  const openRow = portfolio.find((r) => r.market.address === openSibling.address);
+  assert.ok(snapRow.position && openRow.position);
+  assert.equal(snapRow.position.market, snapshot.address);
+  assert.equal(snapRow.position.flaggedAmount, "1000000");
+  assert.equal(openRow.position.market, openSibling.address);
+  assert.equal(openRow.position.survivesAmount, "8000000");
+  assert.notEqual(snapRow.position.address, openRow.position.address);
+});
+
 test("a failing transport rejects with RPC_FAILED, never an empty list", async () => {
   const broken = {
     async getProgramAccounts() { throw new Error("connection reset"); },

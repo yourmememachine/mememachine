@@ -294,6 +294,20 @@ test("golden soft-flagged: soft score 46 across two families flags with no hard 
   });
 });
 
+// Fixture-label note (check 6 exclusion, recorded 2026-11-21):
+// soft-exact45.json and soft-44.json retain their original
+// 44-character Side*Wa11et side-wallet labels, which decode to 33
+// bytes — unlike soft-flagged.json above, whose labels were
+// shortened to 43 characters when the judge-page fixture addresses
+// were made PDA-truthful (commit bd02459). The longer labels are
+// harmless here and are deliberately left as-is: these two files
+// are resolver-internal scoring fixtures, the evidence module
+// treats wallet strings as opaque values (scoring and hashing
+// only, never base58-decoded), and neither file feeds the judge
+// page or any other surface where an address is decoded. A future
+// repo-wide decode sweep should either exclude these two files or
+// shorten the labels with the golden expectations re-checked.
+
 test("golden soft-exact45: soft score exactly 45 flags", () => {
   checkGolden("soft-exact45", {
     verdict: "FLAGGED",
