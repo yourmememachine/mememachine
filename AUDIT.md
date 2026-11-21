@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `b2940d8` (2026-11-21; `make verify` green —
-bridge workspace 218 passed, LaunchGuard 68 passed, PQ vault 17
+Last verified commit: `e9a5dca` (2026-11-21; `make verify` green —
+bridge workspace 222 passed, LaunchGuard 68 passed, PQ vault 17
 passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 113 passed, app JS suite 159 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 

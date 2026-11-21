@@ -26,7 +26,7 @@ Repositories / locations:
 | Solana OS (browser interface) | Hosted browser artifact (slug `solana-os`), source at `~/workspace/ts-spaces/solana-os/index.html` — not a GitHub repo |
 
 Verified totals at this date (`make verify`, 2026-11-21, against
-commit `b2940d8`): **762 passed, 0 failed** — bridge workspace 218,
+commit `e9a5dca`): **766 passed, 0 failed** — bridge workspace 222,
 LaunchGuard 68, PQ Vault 17, registry export 11, RugCall 127, fork
 suite 49, resolver JS 113, app JS 159.
 
@@ -90,7 +90,7 @@ relayer exists (`bridge/crates/relayer/`) but has never run live;
 no asset has crossed, nothing here holds real funds.
 
 **Proven.** Built and tested locally only. Re-verified 2026-11-21:
-`cargo test --release` in `bridge/` — **218 passed, 0 failed**
+`cargo test --release` in `bridge/` — **222 passed, 0 failed**
 (49 bridge-common, 35 machine-bridge, 30 solana-lock
 including the precompile-cost test, 66 relayer including the
 full end-to-end drill, 23 proof bundle, 15 receipt indexer).
