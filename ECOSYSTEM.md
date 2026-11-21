@@ -26,7 +26,7 @@ Repositories / locations:
 | Solana OS (browser interface) | Hosted browser artifact (slug `solana-os`), source at `~/workspace/ts-spaces/solana-os/index.html` — not a GitHub repo |
 
 Verified totals at this date (`make verify`, 2026-11-20, against
-commit `1b0f96c`): **715 passed, 0 failed** — bridge workspace 205,
+commit `edcfaa9`): **724 passed, 0 failed** — bridge workspace 214,
 LaunchGuard 68, PQ Vault 17, registry export 11, RugCall 127, fork
 suite 49, resolver JS 99, app JS 139.
 
@@ -89,10 +89,10 @@ and submitted. No admin mint; $MACHINE itself is never bridged.
 relayer exists (`bridge/crates/relayer/`) but has never run live;
 no asset has crossed, nothing here holds real funds.
 
-**Proven.** Built and tested locally only. Re-verified 2026-11-20:
-`cargo test --release` in `bridge/` — **205 passed, 0 failed**
-(43 bridge-common, 35 machine-bridge, 29 solana-lock
-including the precompile-cost test, 60 relayer including the
+**Proven.** Built and tested locally only. Re-verified 2026-11-21:
+`cargo test --release` in `bridge/` — **214 passed, 0 failed**
+(45 bridge-common, 35 machine-bridge, 30 solana-lock
+including the precompile-cost test, 66 relayer including the
 full end-to-end drill, 23 proof bundle, 15 receipt indexer).
 Full output in `bridge/VERIFY.md`.
 

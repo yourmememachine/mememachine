@@ -7,6 +7,26 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-21 — `edcfaa9`** War-room follow-up to the A-F1
+  timestamp expiry (six-seat internal review of the fix,
+  blind + cross-critiqued). Relayer hardening, all
+  fail-closed: config loading rejects unknown keys (a
+  stale pre-V2 `expiry_window_slots` key previously fell
+  back to the default 40,000 s window silently);
+  `build_message` enforces the 400,000 s lifetime cap and
+  a positive source block time itself; the signer
+  plausibility-checks the RPC-reported block time against
+  its own clock (veto only); an unparseable pre-V2
+  attestation file at a relayer's own path is quarantined
+  (renamed `.json.stale`, never deleted) instead of
+  bricking that relayer's signing for the nonce. Tests now
+  isolate the destination-ceiling and zero-lifetime
+  expiry checks and pin the lock program's expiry
+  boundary. Docs corrected where they overstated the
+  design (destination Clock trust, skew-allowance bound,
+  proof-bundle receipt timestamp). On-chain programs
+  unchanged; SBF byte-identical to the previous pin.
+  Localnet only; not deployed.
 - **2026-11-20 — `1b0f96c`** A-F1 fixed: attestation expiry
   moved from a slot basis to a timestamp basis (the
   code-review debate round 7 surviving High, STATUS.md

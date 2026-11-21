@@ -79,7 +79,7 @@ cargo test --release
 
 `cargo test` runs:
 
-- **bridge-common unit tests** (41): canonical encoding and hashing,
+- **bridge-common unit tests** (45): canonical encoding and hashing,
   valid 3-of-5 and 5-of-5 attestations, 2-of-5 quorum failure, duplicate
   relayer signature, unknown relayer, tampered signature, wrong direction,
   expired attestation, wrong version, daily-cap window reset, per-tx cap,

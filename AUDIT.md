@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `1b0f96c` (2026-11-20; `make verify` green —
-bridge workspace 205 passed, LaunchGuard 68 passed, PQ vault 17
+Last verified commit: `edcfaa9` (2026-11-21; `make verify` green —
+bridge workspace 214 passed, LaunchGuard 68 passed, PQ vault 17
 passed, registry export 11 passed, RugCall 127 passed, fork suite 49 OK, resolver JS suite 99 passed, app JS suite 139 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -501,6 +501,36 @@ chain configuration gates any public chain launch. Both scopes:
 > (212,840 B), machine_bridge.so `e8b85254…`
 > (215,832 B). **Program scope changed — auditors must
 > quote against the new HEAD.**
+>
+> **Scope update 2026-11-21 (commit `edcfaa9`) — war-room
+> follow-up to the A-F1 fix.** A six-seat internal review of
+> the timestamp-basis expiry (blind review + cross-critique)
+> produced relayer-only, fail-closed hardening: config
+> loading now rejects unknown keys (a stale pre-V2
+> `expiry_window_slots` key previously fell back to the
+> default window silently); `build_message` enforces the
+> attestation lifetime cap and a positive source block time
+> itself; the signer plausibility-checks the RPC-reported
+> block time against its own clock (veto only — the local
+> clock never supplies the value); an unparseable pre-V2
+> attestation file at a relayer's own path is quarantined
+> (renamed `.json.stale`, never deleted) instead of
+> bricking that relayer's signing. New tests isolate the
+> destination-ceiling and zero-lifetime checks and add the
+> lock program's expiry boundary test. Documentation was
+> corrected where it overstated the design: the destination
+> Clock is trusted as that chain's time (on the single-node
+> localnet that is one validator's clock), future-stamping
+> is bounded by the 3,600-second skew allowance rather
+> than prevented, and the proof bundle's expiry verdict
+> rests on the receipt's unauthenticated timestamp. The
+> on-chain programs are unchanged and the SBF binaries are
+> byte-identical to the previous pin. Recorded limitations
+> the auditor should note: expiry verdicts are not latched
+> (a destination clock stepping backwards can revive an
+> unexecuted attestation inside its window), and the
+> signed source timestamp is the quorum's assertion —
+> nothing on either chain binds it to the source block.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |
