@@ -255,7 +255,7 @@ Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine:
 Machine is self-funded and built in the open. If you would like
 to support development, SOL donations are welcome at:
 
-**Solana address:** `7N4eyDPb8Q6MxhvbRK4Ztak8t6voM1y4jAa5PwCU7NHw`
+**Solana address:** `BgexPmPXD27pu4cBkkvxzT8MCNYRmvKfng68FLRx3Zip`
 
 Donations are gifts toward development — they buy no token, no
 equity, and no return. $MACHINE is the chain's gas token; it is
