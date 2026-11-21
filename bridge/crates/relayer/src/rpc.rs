@@ -69,7 +69,16 @@ impl RpcClient {
     /// Raw account data, or None if the account does not exist.
     /// Read at finalized commitment.
     pub fn account_data(&self, pubkey: &Pubkey) -> Result<Option<Vec<u8>>> {
+        Ok(self.account_info(pubkey)?.map(|(_, data)| data))
+    }
 
+    /// Account owner and raw data, or None if the account does not
+    /// exist. Read at finalized commitment. Callers that treat an
+    /// account's EXISTENCE as meaningful (the receipt check in
+    /// main.rs) must use this form and validate the owner and
+    /// contents — existence alone proves nothing (debate
+    /// scope-2r2, A-F1).
+    pub fn account_info(&self, pubkey: &Pubkey) -> Result<Option<(Pubkey, Vec<u8>)>> {
         let r = self.call(
             "getAccountInfo",
             json!([pubkey.to_string(), {"encoding": "base64", "commitment": "finalized"}]),
@@ -81,9 +90,15 @@ impl RpcClient {
         let b64 = value["data"][0]
             .as_str()
             .ok_or_else(|| RelayerError::Rpc("getAccountInfo: no base64 data".into()))?;
-        Ok(Some(B64.decode(b64).map_err(|e| {
-            RelayerError::Rpc(format!("getAccountInfo: base64: {e}"))
-        })?))
+        let data = B64
+            .decode(b64)
+            .map_err(|e| RelayerError::Rpc(format!("getAccountInfo: base64: {e}")))?;
+        let owner_str = value["owner"]
+            .as_str()
+            .ok_or_else(|| RelayerError::Rpc("getAccountInfo: no owner".into()))?;
+        let owner = Pubkey::from_str(owner_str)
+            .map_err(|e| RelayerError::Rpc(format!("getAccountInfo: owner: {e}")))?;
+        Ok(Some((owner, data)))
     }
 
     /// Decode an `EventRecord` account (a recorded deposit or burn).
@@ -104,38 +119,59 @@ impl RpcClient {
         }
     }
 
-    /// The signature of the transaction that created / first touched
-    /// an account, at finalized commitment. For an event-record PDA
-    /// that is the deposit/burn transaction — this becomes the
-    /// message's `source_tx`.
-    pub fn first_signature_for_address(&self, pubkey: &Pubkey) -> Result<([u8; 64], u64)> {
-        let r = self.call(
-            "getSignaturesForAddress",
-            json!([pubkey.to_string(), {"limit": 1000, "commitment": "finalized"}]),
-        )?;
-        let arr = r
-            .as_array()
-            .ok_or_else(|| RelayerError::Rpc("getSignaturesForAddress: not an array".into()))?;
-        // Results are newest first; the record was created by the oldest
-        // successful signature for its address.
-        let entry = arr
-            .iter()
-            .rev()
-            .find(|e| e["err"].is_null())
-            .ok_or_else(|| {
-                RelayerError::EventNotFound(format!("no successful signature for {pubkey}"))
+    /// All successful transaction signatures for an address that
+    /// sit in `target_slot`, oldest first, at finalized commitment.
+    /// For an event-record PDA these are the candidate creating
+    /// transactions — the caller verifies the transfer inside each
+    /// candidate and signs only for the one that created the
+    /// record (see main.rs `enrich`).
+    ///
+    /// Pages BACKWARD through `getSignaturesForAddress` with the
+    /// `before` cursor (debate scope-2r2, A-F2): the old
+    /// oldest-in-a-single-1000-window heuristic permanently
+    /// stalled a nonce when cheap pre-spam referencing the
+    /// predictable record PDA (or >1,000 later signatures) pushed
+    /// the creating transaction out of the window, and the hard
+    /// slot-equality check then failed identically on every poll.
+    /// Paging stops once a page's oldest entry is older than the
+    /// target slot, the RPC returns a short page, or a sanity cap
+    /// of 100 pages (100,000 signatures) is hit.
+    pub fn signatures_at_slot(&self, pubkey: &Pubkey, target_slot: u64) -> Result<Vec<[u8; 64]>> {
+        const PAGE: usize = 1000;
+        const MAX_PAGES: usize = 100;
+        let mut found: Vec<[u8; 64]> = Vec::new();
+        let mut before: Option<String> = None;
+        for _ in 0..MAX_PAGES {
+            let mut opts = json!({"limit": PAGE, "commitment": "finalized"});
+            if let Some(b) = &before {
+                opts["before"] = json!(b);
+            }
+            let r = self.call(
+                "getSignaturesForAddress",
+                json!([pubkey.to_string(), opts]),
+            )?;
+            let arr = r.as_array().ok_or_else(|| {
+                RelayerError::Rpc("getSignaturesForAddress: not an array".into())
             })?;
-        let sig_str = entry["signature"]
-            .as_str()
-            .ok_or_else(|| RelayerError::Rpc("getSignaturesForAddress: no signature".into()))?;
-        let bytes = bs58::decode(sig_str)
-            .into_vec()
-            .map_err(|e| RelayerError::Rpc(format!("signature bs58: {e}")))?;
-        let sig: [u8; 64] = bytes
-            .try_into()
-            .map_err(|_| RelayerError::Rpc("signature is not 64 bytes".into()))?;
-        let slot = entry["slot"].as_u64().unwrap_or(0);
-        Ok((sig, slot))
+            let (mut candidates, cursor, done) = signature_page(arr, target_slot);
+            found.append(&mut candidates);
+            if done || arr.len() < PAGE {
+                break;
+            }
+            before = Some(cursor.ok_or_else(|| {
+                RelayerError::Rpc("getSignaturesForAddress: page without a cursor".into())
+            })?);
+        }
+        // Pages arrive newest-first and each page's candidates are
+        // oldest-first within the page; reverse the whole list so
+        // the result is oldest-first overall.
+        found.reverse();
+        if found.is_empty() {
+            return Err(RelayerError::EventNotFound(format!(
+                "no successful signature for {pubkey} at slot {target_slot}"
+            )));
+        }
+        Ok(found)
     }
 
     /// Full parsed transaction (jsonParsed), at finalized commitment.
@@ -169,6 +205,42 @@ impl RpcClient {
             .map(|s| s.to_string())
             .ok_or_else(|| RelayerError::Rpc("sendTransaction: no signature".into()))
     }
+}
+
+/// Process one `getSignaturesForAddress` page (newest first) for
+/// the paging search in `signatures_at_slot`. Returns:
+/// - the successful signatures sitting exactly in `target_slot`,
+///   oldest first within this page;
+/// - the `before` cursor for the next (older) page: the oldest
+///   entry's signature string;
+/// - `done`: true when no older page can contain the target slot
+///   (the page is empty, or its oldest entry is already older).
+/// Pure over the RPC JSON so the selection is unit-testable.
+pub fn signature_page(
+    entries: &[Value],
+    target_slot: u64,
+) -> (Vec<[u8; 64]>, Option<String>, bool) {
+    let mut candidates: Vec<[u8; 64]> = Vec::new();
+    for e in entries.iter().rev() {
+        if e["slot"].as_u64() != Some(target_slot) || !e["err"].is_null() {
+            continue;
+        }
+        if let Some(bytes) = e["signature"]
+            .as_str()
+            .and_then(|s| bs58::decode(s).into_vec().ok())
+            .and_then(|v| <[u8; 64]>::try_from(v).ok())
+        {
+            candidates.push(bytes);
+        }
+    }
+    let cursor = entries
+        .last()
+        .and_then(|e| e["signature"].as_str().map(|s| s.to_string()));
+    let done = match entries.last() {
+        None => true,
+        Some(oldest) => oldest["slot"].as_u64().map(|s| s < target_slot).unwrap_or(true),
+    };
+    (candidates, cursor, done)
 }
 
 /// Extract the `blockTime` field from a `getTransaction` reply,
@@ -359,6 +431,33 @@ pub fn sender_from_verified_source_transfer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signature_page_selects_only_successful_at_target_slot() {
+        // Debate scope-2r2 (A-F2): the page processor must pick
+        // exactly the successful signatures in the record's slot,
+        // oldest first, ignore spam in other slots and failed
+        // transactions, and report when older pages cannot help.
+        let sig = |b: u8| bs58::encode([b; 64]).into_string();
+        let page = vec![
+            json!({"signature": sig(9), "slot": 150, "err": null}),
+            json!({"signature": sig(8), "slot": 100, "err": null}),
+            json!({"signature": sig(7), "slot": 100, "err": {"InstructionError": [0, "Custom"]}}),
+            json!({"signature": sig(6), "slot": 100, "err": null}),
+            json!({"signature": sig(5), "slot": 90, "err": null}),
+        ];
+        let (cands, cursor, done) = signature_page(&page, 100);
+        assert_eq!(cands, vec![[6u8; 64], [8u8; 64]]);
+        assert_eq!(cursor, Some(sig(5)));
+        assert!(done, "oldest entry is below the target slot");
+        // A page entirely at/above the target slot is not done.
+        let page2 = vec![json!({"signature": sig(3), "slot": 100, "err": null})];
+        let (_, _, done2) = signature_page(&page2, 100);
+        assert!(!done2);
+        // Empty page: done, no cursor.
+        let (c3, cur3, done3) = signature_page(&[], 100);
+        assert!(c3.is_empty() && cur3.is_none() && done3);
+    }
 
     #[test]
     fn block_time_extraction_fails_closed() {

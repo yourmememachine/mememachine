@@ -89,6 +89,37 @@ pub struct RelayerConfig {
     pub submit_enabled: bool,
 }
 
+/// The path a config value actually denotes: canonicalized when
+/// it exists (resolving symlinks), otherwise made absolute and
+/// lexically normalized ("." removed, ".." resolved against the
+/// accumulated components). Used only for the shared-directory
+/// guard, so two spellings of one directory compare equal.
+fn effective_path(p: &str) -> std::path::PathBuf {
+    use std::path::{Component, PathBuf};
+    let raw = std::path::Path::new(p);
+    if let Ok(canon) = std::fs::canonicalize(raw) {
+        return canon;
+    }
+    let abs: PathBuf = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("/"))
+            .join(raw)
+    };
+    let mut out = PathBuf::new();
+    for comp in abs.components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 fn default_expiry_window_secs() -> i64 {
     40_000
 }
@@ -138,21 +169,25 @@ impl RelayerConfig {
             ));
         }
         // The attestation directory is shared and peer-writable:
-        // keypairs and local state must never live inside it.
-        let shared = self.attestation_dir.trim_end_matches('/');
+        // keypairs and local state must never live inside it. The
+        // comparison is on NORMALIZED paths (debate scope-2r2,
+        // A-F6/B-F5): the old raw string-prefix test was bypassed
+        // by "/tmp/./attestations/…", ".." segments, and
+        // relative-vs-absolute spellings of the same directory.
+        let shared = effective_path(&self.attestation_dir);
         for (field, p) in [
             ("relayer_keypair_path", &self.relayer_keypair_path),
             ("payer_keypair_path", &self.payer_keypair_path),
             ("state_path", &self.state_path),
         ] {
-            if p == shared || p.starts_with(&format!("{shared}/")) {
+            if effective_path(p).starts_with(&shared) {
                 return Err(RelayerError::InvalidConfig(format!(
                     "{field} must not be inside the shared attestation_dir"
                 )));
             }
         }
         if let Some(audit) = &self.audit_log_path {
-            if audit == shared || audit.starts_with(&format!("{shared}/")) {
+            if effective_path(audit).starts_with(&shared) {
                 return Err(RelayerError::InvalidConfig(
                     "audit_log_path must not be inside the shared attestation_dir".into(),
                 ));
@@ -267,6 +302,25 @@ mod tests {
     fn default_audit_log_is_not_inside_shared_attestation_dir() {
         let cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
         assert!(!cfg.audit_log_path().starts_with(&cfg.attestation_dir), "default audit log must be local, got {}", cfg.audit_log_path());
+    }
+
+    #[test]
+    fn shared_dir_guard_rejects_noncanonical_spellings() {
+        // Debate scope-2r2 (A-F6/B-F5): the guard must compare
+        // normalized paths — ".", ".." and relative spellings of
+        // the shared directory are the same directory.
+        for spelling in [
+            "/tmp/./attestations/relayer.json",
+            "/tmp/x/../attestations/relayer.json",
+            "/tmp/attestations/../attestations/relayer.json",
+        ] {
+            let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+            cfg.relayer_keypair_path = spelling.into();
+            assert!(cfg.validate().is_err(), "{spelling} must be rejected");
+        }
+        // A genuinely outside path still passes.
+        let cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        assert!(cfg.validate().is_ok());
     }
 
     #[test]

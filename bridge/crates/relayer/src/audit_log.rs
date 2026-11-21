@@ -67,10 +67,26 @@ fn hex_decode_32(field: &str, s: &str) -> Result<[u8; 32]> {
     if s.len() != 64 {
         return Err(bad("expected 64 hex characters (32 bytes)"));
     }
+    // Decode from BYTES, never by slicing the string: a 64-byte
+    // string containing multi-byte UTF-8 passes the length check
+    // but a &s[2*i..2*i+2] slice can land inside a character and
+    // panic — on untrusted on-disk data that turns the promised
+    // fail-closed error into a crash (debate scope-2r2, A-F7;
+    // same fix as bridge-common in scope-4).
+    fn hex_val(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    }
+    let bytes = s.as_bytes();
     let mut out = [0u8; 32];
     for i in 0..32 {
-        out[i] = u8::from_str_radix(&s[2 * i..2 * i + 2], 16)
-            .map_err(|_| bad("not hex"))?;
+        let hi = hex_val(bytes[2 * i]).ok_or_else(|| bad("not hex"))?;
+        let lo = hex_val(bytes[2 * i + 1]).ok_or_else(|| bad("not hex"))?;
+        out[i] = (hi << 4) | lo;
     }
     Ok(out)
 }
@@ -222,13 +238,20 @@ pub fn verify_checkpoint(
 /// Parsing only — call `verify_chain` on the result; `AuditLog::open`
 /// does both.
 pub fn read_entries(path: &Path) -> Result<Vec<LogEntry>> {
-    let text = std::fs::read_to_string(path)?;
+    // Stream line by line instead of reading the whole log into a
+    // String first (debate scope-2r2, B-F6): the log grows with
+    // every event and is re-read on every open, so peak memory
+    // must not hold the file text AND the parsed entries at once.
+    use std::io::BufRead;
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
     let mut entries = Vec::new();
-    for (n, line) in text.lines().enumerate() {
+    for (n, line) in reader.lines().enumerate() {
+        let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        let entry: LogEntry = serde_json::from_str(line).map_err(|e| {
+        let entry: LogEntry = serde_json::from_str(&line).map_err(|e| {
             RelayerError::AuditLog(format!("line {}: unparseable entry: {e}", n + 1))
         })?;
         entries.push(entry);
@@ -496,6 +519,24 @@ mod tests {
         std::fs::write(&path, "{\"seq\": torn write\n").unwrap();
         assert!(AuditLog::open(&path).is_err());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn non_ascii_hash_is_an_error_not_a_panic() {
+        // Debate scope-2r2 (A-F7): a crafted 64-BYTE hash string
+        // whose bytes are not ASCII ("a" + "€" + 60*"a" = 64 bytes,
+        // 62 chars) must fail closed with an AuditLog error.
+        // Pre-fix, hex_decode_32 sliced &s[2..4] inside the €
+        // character and panicked.
+        let bad_hash = format!("a€{}", "a".repeat(60));
+        assert_eq!(bad_hash.len(), 64);
+        let entry = LogEntry {
+            seq: 0,
+            prev_hash: bad_hash,
+            event: signed(0),
+            entry_hash: "ab".repeat(32),
+        };
+        assert!(verify_chain(&[entry]).is_err());
     }
 
     #[test]

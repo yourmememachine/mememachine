@@ -16,6 +16,25 @@ pub struct RelayerSigner {
     key: SigningKey,
 }
 
+/// Refuse a keypair file that group/other users can read. Shared
+/// by the relayer signer and the submission payer (debate
+/// scope-2r2, A-F5/B-F4): the payer key holds the fee float and
+/// was previously loaded with no permission check at all.
+pub fn check_keypair_permissions(path: &str) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(RelayerError::InvalidKeypair(format!(
+                "{path}: keypair file permissions {:o} are too open; require 0600",
+                mode & 0o777
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl RelayerSigner {
     /// Load a Solana-format keypair file: a JSON array of 64 bytes
     /// (32-byte seed || 32-byte public key), as produced by
@@ -23,17 +42,7 @@ impl RelayerSigner {
     pub fn load(path: &str) -> Result<Self> {
         // A signing key readable by group/other users on a shared
         // host is a relayer identity waiting to be taken; refuse it.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(path)?.permissions().mode();
-            if mode & 0o077 != 0 {
-                return Err(RelayerError::InvalidKeypair(format!(
-                    "{path}: keypair file permissions {:o} are too open; require 0600",
-                    mode & 0o777
-                )));
-            }
-        }
+        check_keypair_permissions(path)?;
         let text = std::fs::read_to_string(path)?;
         let bytes: Vec<u8> = serde_json::from_str(&text).map_err(|e| {
             RelayerError::InvalidKeypair(format!("{path}: not a JSON byte array: {e}"))
@@ -125,6 +134,25 @@ mod tests {
             &msg, &sigs, &relayers, QUORUM, CHAIN_SOLANA, CHAIN_MACHINE, 500
         )
         .is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keypair_permission_check_refuses_open_files() {
+        // Debate scope-2r2 (A-F5/B-F4): the shared permission
+        // check (relayer signer AND submission payer) refuses a
+        // group/other-readable keypair file and accepts 0600.
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!(
+            "relayer-perm-test-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"[0]").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(check_keypair_permissions(path.to_str().unwrap()).is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(check_keypair_permissions(path.to_str().unwrap()).is_ok());
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

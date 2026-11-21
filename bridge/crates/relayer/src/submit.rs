@@ -6,9 +6,35 @@
 
 use bridge_common::{
     authority_pda, build_ed25519_instruction, config_pda, nonce_pda, receipt_pda, BridgeMessage,
-    LockInstruction, MachineInstruction, RelayerSignature, DIR_MACHINE_TO_SOLANA,
-    DIR_SOLANA_TO_MACHINE,
+    CrossingReceipt, LockInstruction, MachineInstruction, RelayerSignature,
+    DIR_MACHINE_TO_SOLANA, DIR_SOLANA_TO_MACHINE, DISCRIMINATOR_RECEIPT,
 };
+use borsh::BorshDeserialize as _;
+
+/// Is the account at the receipt PDA a GENUINE crossing receipt
+/// written by the destination program — right owner, parses as a
+/// `CrossingReceipt`, right discriminator, direction, and nonce?
+/// Existence alone is NOT proof (debate scope-2r2, A-F1): anyone
+/// can pre-fund the predictable receipt PDA with an empty
+/// system-owned account, and the destination programs deliberately
+/// adopt such pristine shells when they write the real receipt —
+/// so an existence-only check in the submitter permanently
+/// suppresses a crossing that was never processed.
+pub fn receipt_is_genuine(
+    owner: &Pubkey,
+    data: &[u8],
+    program_id: &Pubkey,
+    direction: u8,
+    nonce: u64,
+) -> bool {
+    if owner != program_id {
+        return false;
+    }
+    let Ok(r) = CrossingReceipt::try_from_slice(data) else {
+        return false;
+    };
+    r.discriminator == DISCRIMINATOR_RECEIPT && r.direction == direction && r.nonce == nonce
+}
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -129,6 +155,56 @@ mod tests {
             expiry_timestamp: 100_005,
             source_timestamp: 5,
         }
+    }
+
+    #[test]
+    fn receipt_genuineness_requires_owner_and_contents() {
+        // Debate scope-2r2 (A-F1): a pre-funded empty account at
+        // the receipt PDA, a foreign-owned account, and a
+        // program-owned account with the wrong contents must all
+        // read as NOT processed; only the program's own receipt
+        // for this direction+nonce counts.
+        let program = Pubkey::new_unique();
+        let receipt = CrossingReceipt {
+            discriminator: DISCRIMINATOR_RECEIPT,
+            direction: DIR_SOLANA_TO_MACHINE,
+            nonce: 7,
+            message_hash: [9u8; 32],
+            source_tx: [7u8; 64],
+            amount: 1_000,
+            recipient: Pubkey::new_unique(),
+            slot: 123,
+            timestamp: 1_700_000_000,
+        };
+        let bytes = borsh::to_vec(&receipt).unwrap();
+        assert!(receipt_is_genuine(&program, &bytes, &program, DIR_SOLANA_TO_MACHINE, 7));
+        // Pre-funded empty shell (system-owned, no data).
+        assert!(!receipt_is_genuine(
+            &solana_program::system_program::id(),
+            &[],
+            &program,
+            DIR_SOLANA_TO_MACHINE,
+            7
+        ));
+        // Right bytes, wrong owner.
+        assert!(!receipt_is_genuine(
+            &Pubkey::new_unique(),
+            &bytes,
+            &program,
+            DIR_SOLANA_TO_MACHINE,
+            7
+        ));
+        // Genuine receipt, wrong nonce or direction.
+        assert!(!receipt_is_genuine(&program, &bytes, &program, DIR_SOLANA_TO_MACHINE, 8));
+        assert!(!receipt_is_genuine(&program, &bytes, &program, DIR_MACHINE_TO_SOLANA, 7));
+        // Program-owned garbage.
+        assert!(!receipt_is_genuine(
+            &program,
+            &[1u8; 10],
+            &program,
+            DIR_SOLANA_TO_MACHINE,
+            7
+        ));
     }
 
     #[test]

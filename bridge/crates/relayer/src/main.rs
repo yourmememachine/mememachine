@@ -54,20 +54,39 @@ impl SourceChain for RpcSource {
     }
     fn enrich(&self, record: &EventRecord) -> Result<ObservedEvent> {
         let (record_pda, _) = nonce_pda(&self.program_id, self.direction.nonce_dir(), record.nonce);
-        let (source_tx, slot) = self.client.first_signature_for_address(&record_pda)?;
-        // Bind the candidate transaction to THIS record: the
-        // creating transaction must sit in the record's own slot.
-        // A different slot means the oldest-signature heuristic
-        // picked a transaction that merely references the PDA
-        // (pre-spam or a window overflow) — fail closed instead of
-        // stalling on it or signing against it.
-        if slot != record.slot {
-            return Err(RelayerError::SourceTransferNotVerified(format!(
-                "oldest signature for record {record_pda} is at slot {slot}, but the record is at slot {}; refusing to sign",
-                record.slot
-            )));
+        // Candidates: every successful transaction in the record's
+        // OWN slot that references the record PDA (paged, so spam
+        // referencing the predictable PDA cannot push the creating
+        // transaction out of reach — debate scope-2r2, A-F2). Try
+        // each candidate: only the one whose inner instructions
+        // actually contain this record's transfer verifies, and
+        // that verification is what binds the message to the
+        // record. If no candidate verifies, fail closed.
+        let candidates = self.client.signatures_at_slot(&record_pda, record.slot)?;
+        let mut last_err: Option<RelayerError> = None;
+        for source_tx in &candidates {
+            match self.enrich_candidate(record, source_tx) {
+                Ok(ev) => return Ok(ev),
+                Err(e) => last_err = Some(e),
+            }
         }
-        let tx = self.client.transaction_parsed(&source_tx)?;
+        Err(last_err.unwrap_or_else(|| {
+            RelayerError::SourceTransferNotVerified(format!(
+                "no candidate transaction at slot {} created record {record_pda}",
+                record.slot
+            ))
+        }))
+    }
+}
+
+impl RpcSource {
+    fn enrich_candidate(
+        &self,
+        record: &EventRecord,
+        source_tx: &[u8; 64],
+    ) -> Result<ObservedEvent> {
+        let (record_pda, _) = nonce_pda(&self.program_id, self.direction.nonce_dir(), record.nonce);
+        let tx = self.client.transaction_parsed(source_tx)?;
         // The message's expiry is derived from this transaction's
         // block time (A-F1 fix, 2026-11-20), which every relayer
         // reads from the same finalized transaction. If the chain
@@ -116,7 +135,7 @@ impl SourceChain for RpcSource {
         Ok(ObservedEvent {
             record: record.clone(),
             sender,
-            source_tx,
+            source_tx: *source_tx,
             source_block_time,
         })
     }
@@ -130,6 +149,68 @@ fn log_event(cfg: &RelayerConfig, event: AuditEvent) -> Result<()> {
     let mut log = AuditLog::open(Path::new(&cfg.audit_log_path()))?;
     log.append(event)?;
     Ok(())
+}
+
+/// Audit events this process has already written, for the `run`
+/// loop's dedupe (debate scope-2r2, A-F4/B-F2): the loop rescans
+/// every nonce from `start_nonce` on every poll, and a nonce whose
+/// submission never lands (dry-run — the default — or a permanent
+/// collection failure) used to re-append the identical Collected /
+/// DryRun / CollectionFailed entry on EVERY poll, each append
+/// re-reading and re-verifying the whole log: unbounded growth
+/// and quadratic slowdown with no attacker involved. Within one
+/// process an identical event is written once; a changed event
+/// (new hash, new failure reason) is written again. One-shot
+/// commands use a fresh set, so their behaviour is unchanged.
+#[derive(Default)]
+struct LoggedEvents(std::collections::HashSet<String>);
+
+impl LoggedEvents {
+    /// True the first time this exact event is seen in this
+    /// process, false for repeats.
+    fn mark(&mut self, event: &AuditEvent) -> bool {
+        self.0.insert(format!("{event:?}"))
+    }
+
+    fn log(&mut self, cfg: &RelayerConfig, event: AuditEvent) -> Result<()> {
+        if self.mark(&event) {
+            log_event(cfg, event)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dry_run(nonce: u64) -> AuditEvent {
+        AuditEvent::DryRun {
+            direction: "solana-to-machine".to_string(),
+            nonce,
+            message_hash: "ab".repeat(32),
+        }
+    }
+
+    #[test]
+    fn logged_events_dedupes_identical_events_only() {
+        // Debate scope-2r2 (A-F4/B-F2): the same event repeated by
+        // the run loop's rescan is marked once; a different nonce
+        // or a different failure reason is a new event.
+        let mut logged = LoggedEvents::default();
+        assert!(logged.mark(&dry_run(7)));
+        assert!(!logged.mark(&dry_run(7)));
+        assert!(logged.mark(&dry_run(8)));
+        let fail = |reason: &str| AuditEvent::CollectionFailed {
+            direction: "solana-to-machine".to_string(),
+            nonce: 7,
+            reason: reason.to_string(),
+        };
+        assert!(logged.mark(&fail("disagreement")));
+        assert!(!logged.mark(&fail("disagreement")));
+        assert!(logged.mark(&fail("quorum changed")));
+    }
 }
 
 /// Verify the audit log's existing chain WITHOUT appending. This
@@ -365,13 +446,14 @@ fn collect(
     cfg: &RelayerConfig,
     direction: Direction,
     nonce: u64,
+    logged: &mut LoggedEvents,
 ) -> Result<(bridge_common::BridgeMessage, Vec<bridge_common::RelayerSignature>)> {
     let (relayers, quorum) = registered_relayers(cfg, direction)?;
     let collector = Collector { relayers, quorum };
     let dest_now = dest_client(cfg, direction).finalized_timestamp()?;
     match collector.collect(Path::new(&cfg.attestation_dir), direction, nonce, dest_now) {
         Ok((message, signatures)) => {
-            log_event(
+            logged.log(
                 cfg,
                 AuditEvent::Collected {
                     direction: direction.label().to_string(),
@@ -389,7 +471,7 @@ fn collect(
             // logged. Recording is best-effort here — the collection
             // error is the one the caller must see.
             if !matches!(e, RelayerError::QuorumNotReached { .. }) {
-                let _ = log_event(
+                let _ = logged.log(
                     cfg,
                     AuditEvent::CollectionFailed {
                         direction: direction.label().to_string(),
@@ -408,10 +490,16 @@ fn submit(
     direction: Direction,
     nonce: u64,
     destination_token_account: &Pubkey,
+    logged: &mut LoggedEvents,
 ) -> Result<()> {
-    // Already processed on the destination? The receipt PDA is the
-    // on-chain proof; if it exists there is nothing to submit, and
-    // re-sending would only waste RPC cycles every poll.
+    // Already processed on the destination? A GENUINE receipt —
+    // owned by the destination program and parsing as its
+    // CrossingReceipt for this direction+nonce — is the on-chain
+    // proof. Mere existence is not (debate scope-2r2, A-F1):
+    // anyone can pre-fund the predictable receipt PDA with an
+    // empty account, and the programs adopt such pristine shells
+    // when writing the real receipt, so an existence-only check
+    // permanently suppresses an unprocessed crossing.
     {
         let (dest_program, dir_u8) = match direction {
             Direction::SolanaToMachine => (
@@ -424,16 +512,18 @@ fn submit(
             ),
         };
         let (receipt, _) = bridge_common::receipt_pda(&dest_program, dir_u8, nonce);
-        if dest_client(cfg, direction).account_data(&receipt)?.is_some() {
-            println!(
-                "{}: nonce {} already processed on the destination (receipt exists); skipping",
-                direction.label(),
-                nonce
-            );
-            return Ok(());
+        if let Some((owner, data)) = dest_client(cfg, direction).account_info(&receipt)? {
+            if relayer::submit::receipt_is_genuine(&owner, &data, &dest_program, dir_u8, nonce) {
+                println!(
+                    "{}: nonce {} already processed on the destination (receipt exists); skipping",
+                    direction.label(),
+                    nonce
+                );
+                return Ok(());
+            }
         }
     }
-    let (message, signatures) = collect(cfg, direction, nonce)?;
+    let (message, signatures) = collect(cfg, direction, nonce, logged)?;
     // The destination token account must belong to the message
     // recipient and hold the expected mint. The destination program
     // enforces both, but checking here turns a guaranteed on-chain
@@ -476,10 +566,36 @@ fn submit(
 
     // The payer keypair is loaded through solana-sdk, whose keypair
     // file format is the same JSON array the relayer signer uses.
-    let payer = solana_sdk::signature::read_keypair_file(&cfg.payer_keypair_path)
-        .map_err(|e| RelayerError::InvalidKeypair(format!("payer: {e}")))?;
+    // It gets the same 0600 permission refusal as the relayer key
+    // (debate scope-2r2, A-F5/B-F4) — it holds the fee float. In
+    // dry-run mode a MISSING payer file must not block the report:
+    // nothing is signed or sent, so a placeholder payer stands in
+    // for instruction building and the run says so.
+    relayer::signing::check_keypair_permissions(&cfg.payer_keypair_path).or_else(|e| {
+        if !cfg.submit_enabled && !Path::new(&cfg.payer_keypair_path).exists() {
+            Ok(())
+        } else {
+            Err(e)
+        }
+    })?;
+    let payer = match solana_sdk::signature::read_keypair_file(&cfg.payer_keypair_path) {
+        Ok(p) => Some(p),
+        Err(e) if !cfg.submit_enabled => {
+            eprintln!(
+                "warning: payer keypair {} unreadable ({e}); dry-run continues with a placeholder payer",
+                cfg.payer_keypair_path
+            );
+            None
+        }
+        Err(e) => {
+            return Err(RelayerError::InvalidKeypair(format!("payer: {e}")));
+        }
+    };
     use solana_sdk::signer::Signer as _;
-    let payer_pubkey = payer.pubkey();
+    let payer_pubkey = payer
+        .as_ref()
+        .map(|p| p.pubkey())
+        .unwrap_or_else(|| solana_sdk::pubkey::Pubkey::new_from_array([0u8; 32]));
     // Convert the sdk pubkey to a solana-program pubkey via string
     // form (they are the same bytes; the crates are distinct re-exports
     // in SDK 2.x and string conversion is unambiguous).
@@ -512,7 +628,7 @@ fn submit(
             ixs.len(),
             ixs[1].program_id
         );
-        log_event(
+        logged.log(
             cfg,
             AuditEvent::DryRun {
                 direction: direction.label().to_string(),
@@ -549,6 +665,10 @@ fn submit(
     // Gate BEFORE broadcasting: a tampered audit log must stop the
     // transaction from being sent, not be noticed afterwards.
     verify_audit_log(cfg)?;
+    // Reaching here means submit_enabled is true, which means the
+    // payer load above succeeded (a missing/unreadable payer is a
+    // hard error in live mode, a placeholder only in dry-run).
+    let payer = payer.expect("live submission implies a loaded payer");
     let tx = solana_sdk::transaction::Transaction::new_signed_with_payer(
         &sdk_ixs,
         Some(&payer_pubkey),
@@ -615,7 +735,7 @@ fn run() -> Result<()> {
                 .ok_or_else(|| RelayerError::InvalidConfig("--nonce required".into()))?
                 .parse()
                 .map_err(|_| RelayerError::InvalidConfig("--nonce must be a number".into()))?;
-            let (message, sigs) = collect(&cfg, direction, nonce)?;
+            let (message, sigs) = collect(&cfg, direction, nonce, &mut LoggedEvents::default())?;
             println!(
                 "quorum reached for {} nonce {}: {} signatures, message hash {}",
                 direction.label(),
@@ -640,7 +760,7 @@ fn run() -> Result<()> {
                     RelayerError::InvalidConfig("--destination-token-account required".into())
                 })?,
             )?;
-            submit(&cfg, direction, nonce, &dest)
+            submit(&cfg, direction, nonce, &dest, &mut LoggedEvents::default())
         }
         "run" => {
             let signer = RelayerSigner::load(&cfg.relayer_keypair_path)?;
@@ -658,6 +778,7 @@ fn run() -> Result<()> {
                 signer.pubkey(),
                 cfg.submit_enabled
             );
+            let mut logged = LoggedEvents::default();
             loop {
                 for direction in [Direction::SolanaToMachine, Direction::MachineToSolana] {
                     if let Err(e) = sign_once(&cfg, &signer, &mut state, direction) {
@@ -671,7 +792,7 @@ fn run() -> Result<()> {
                     // so re-scanning processed nonces is cheap.
                     if let Some(dest) = &dest {
                         for nonce in cfg.start_nonce..state.next_nonce(direction) {
-                            if let Err(e) = submit(&cfg, direction, nonce, dest) {
+                            if let Err(e) = submit(&cfg, direction, nonce, dest, &mut logged) {
                                 // QuorumNotReached is normal in the
                                 // loop; report and continue.
                                 eprintln!("{}: submit nonce {}: {e}", direction.label(), nonce);

@@ -214,8 +214,21 @@ impl AttestationFile {
                     // proceed with the write. A *parseable* file
                     // with different content still hits the
                     // AlreadyExists refusal above.
-                    let stale = path.with_extension("json.stale");
-                    if stale.exists() || std::fs::rename(&path, &stale).is_err() {
+                    // Quarantine under the first free .stale name:
+                    // an earlier quarantined file must not make the
+                    // quarantine itself fail and brick signing on
+                    // the second stale file (debate scope-2r2,
+                    // B-F3). Every stale copy is preserved.
+                    let mut stale = path.with_extension("json.stale");
+                    let mut n = 1u32;
+                    while stale.exists() {
+                        stale = path.with_extension(format!("json.stale.{n}"));
+                        n += 1;
+                        if n > 100 {
+                            return Err(e);
+                        }
+                    }
+                    if std::fs::rename(&path, &stale).is_err() {
                         return Err(e);
                     }
                     eprintln!(
@@ -305,6 +318,22 @@ impl Collector {
                 let Ok(file) = AttestationFile::read_from(&path) else { continue };
                 let Ok((msg, sig)) = file.to_parts() else { continue };
                 if msg.nonce != nonce {
+                    continue;
+                }
+                // A file for the OTHER direction is not evidence
+                // about this one (debate scope-2r2, A-F3/B-F1): a
+                // machine-to-solana attestation copied under a
+                // solana-to-machine file name (sync error or a
+                // shared-directory writer manufacturing a false
+                // equivocation) must be skipped, never reach the
+                // disagreement branch. The chain fields are inside
+                // the signed message hash, so this check cannot be
+                // forged away; the unsigned `direction` string is
+                // checked too, as a first line.
+                if file.direction != direction.label()
+                    || msg.source_chain != direction.source_chain()
+                    || msg.dest_chain != direction.dest_chain()
+                {
                     continue;
                 }
                 if !self.relayers.contains(&sig.relayer) {
@@ -708,6 +737,53 @@ mod tests {
             std::fs::read(&stale).unwrap(),
             b"{\"format\": \"v1 slot-basis\"}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cross_direction_file_is_skipped_not_disagreement() {
+        // Debate scope-2r2 (A-F3/B-F1): a valid machine-to-solana
+        // attestation copied under a solana-to-machine file name
+        // must be skipped by the s2m collector — it is not evidence
+        // about this direction at all. Pre-fix it manufactured a
+        // Disagreement and blocked a genuine 3-of-5 quorum.
+        let (signers, pubs, msg) = setup();
+        let dir = fresh_dir("crossdir");
+        write_n(&dir, &signers, &msg, 3);
+        let mut m2s = msg.clone();
+        m2s.source_chain = bridge_common::CHAIN_MACHINE;
+        m2s.dest_chain = bridge_common::CHAIN_SOLANA;
+        let alien = AttestationFile::new(
+            Direction::MachineToSolana,
+            &m2s,
+            &signers[3].sign(&m2s),
+        );
+        let name = format!("solana-to-machine-7-{}.json", signers[3].pubkey());
+        write_raw(&dir, &name, serde_json::to_string_pretty(&alien).unwrap().as_bytes());
+        let c = Collector { relayers: pubs, quorum: 3 };
+        let (m, sigs) = c.collect(&dir, Direction::SolanaToMachine, 7, 500).unwrap();
+        assert_eq!(m, msg);
+        assert_eq!(sigs.len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_to_quarantines_a_second_stale_file() {
+        // Debate scope-2r2 (B-F3): the quarantine must not be
+        // one-shot — if a .stale file already exists, a second
+        // unparseable file at the same path is quarantined under a
+        // fresh name, not an error that bricks signing.
+        let (signers, _pubs, msg) = setup();
+        let dir = fresh_dir("stale2");
+        let f = AttestationFile::new(Direction::SolanaToMachine, &msg, &signers[0].sign(&msg));
+        write_raw(&dir, &f.file_name(), b"{\"format\": \"v1 slot-basis\"}");
+        f.write_to(&dir).unwrap();
+        // A second stale file lands at the same path (another
+        // not-yet-upgraded peer re-syncs it, or a second upgrade).
+        write_raw(&dir, &f.file_name(), b"{\"format\": \"v1 again\"}");
+        f.write_to(&dir).unwrap();
+        let on_disk = AttestationFile::read_from(&dir.join(f.file_name())).unwrap();
+        assert_eq!(on_disk, f);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
