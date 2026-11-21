@@ -7,6 +7,18 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-21 — `683767d`** RugCall judge-page fixture
+  review close. The fixture bundle's PDA-truth is now pinned
+  cross-language: golden vectors generated from the Rust
+  program's own seed constructions under the deployed program
+  id are compared against the bundle from both Rust and JS, so
+  the JS derivation no longer grades itself; the golden config
+  vector is the known on-chain config account. The judge page
+  discloses that repeated mints are recorded snapshots at
+  different states, not simultaneous markets, and the fixture
+  config label is documented as a placeholder distinct from
+  the derived config PDA. On-chain program unchanged; SBF
+  untouched. Devnet only.
 - **2026-11-21 — `bd02459`** RugCall judge-page fixture
   integrity fix. The shipped page's pre-seeded fixture
   markets carried readable label addresses that decode to

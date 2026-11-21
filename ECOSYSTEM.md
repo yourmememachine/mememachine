@@ -26,9 +26,9 @@ Repositories / locations:
 | Solana OS (browser interface) | Hosted browser artifact (slug `solana-os`), source at `~/workspace/ts-spaces/solana-os/index.html` — not a GitHub repo |
 
 Verified totals at this date (`make verify`, 2026-11-21, against
-commit `bd02459`): **777 passed, 0 failed** — bridge workspace 222,
-LaunchGuard 68, PQ Vault 17, registry export 11, RugCall 127, fork
-suite 49, resolver JS 114, app JS 169.
+commit `683767d`): **785 passed, 0 failed** — bridge workspace 222,
+LaunchGuard 68, PQ Vault 17, registry export 11, RugCall 130, fork
+suite 49, resolver JS 114, app JS 174.
 
 ---
 
@@ -139,8 +139,8 @@ native Rust style, all tested locally and none deployed to Machine:
   `rugcall/`) — a parimutuel prediction market over rug evidence:
   six instructions (InitializeConfig, CreateMarket, BuyPosition,
   ResolveMarket, Claim, CancelMarket) with a per-mint lock that
-  enforces one live market per mint. **127 passed, 0 failed**, plus
-  114 resolver JS tests and 169 app JS tests. **RugCall is the one
+  enforces one live market per mint. **130 passed, 0 failed**, plus
+  114 resolver JS tests and 174 app JS tests. **RugCall is the one
   deployed program in the ecosystem — on Solana devnet only** (not
   Machine, not mainnet), program
   `DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ`, custoding only

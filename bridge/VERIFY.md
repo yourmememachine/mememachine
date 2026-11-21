@@ -17,9 +17,9 @@ the current state and supersedes their numbers.
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
   `programs/PQ-VERIFY.md`); fork suite 49 OK.
-  Full `make verify` 2026-11-21: **777 passed, 0 failed**.
-  This run verifies commit `bd02459` (the RugCall judge-page
-  fixture fix; the bridge side also carries the cap-accounting
+  Full `make verify` 2026-11-21: **785 passed, 0 failed**.
+  This run verifies commit `683767d` (the RugCall judge-page
+  fixture review close; the bridge side also carries the cap-accounting
   property tests from `e9a5dca` and the
   A-F1 external-seat positivity guard from `68fa4b6`). The SBF rebuild is
   byte-identical to the previous pin (solana_lock.so
