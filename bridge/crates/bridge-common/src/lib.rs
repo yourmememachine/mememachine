@@ -291,6 +291,18 @@ pub struct RelayerSignature {
 /// BRIDGE.md section 5 keeps the single-node net from being a
 /// bridge endpoint.
 ///
+/// A positivity pre-check runs before the four checks: neither
+/// the signed `source_timestamp` nor the destination clock reading
+/// may be <= 0. Every check below bounds a *difference* of
+/// timestamps, so a triple sitting entirely in a non-positive
+/// range — or a destination clock that is not reporting time at
+/// all — satisfied all four while naming no real time; the
+/// relayer already vetoes non-positive block times when it builds
+/// a message, and the shared validator holds the same invariant
+/// (external seats 2026-11-21). With the pre-check and check 1,
+/// `expiry_timestamp` is necessarily positive as well, so it
+/// needs no condition of its own.
+///
 /// Four checks, all against the signed fields plus the destination
 /// clock (`current_timestamp`):
 /// 1. Lifetime bound: `expiry_timestamp - source_timestamp` must
@@ -322,6 +334,12 @@ pub fn validate_message(
     }
     if message.dest_chain != expected_dest {
         return Err(BridgeError::WrongDestChain);
+    }
+    // Positivity pre-check (see the doc comment): the four checks
+    // below bound differences only, so without this a non-positive
+    // timestamp range validates.
+    if message.source_timestamp <= 0 || current_timestamp <= 0 {
+        return Err(BridgeError::ExpiredAttestation);
     }
     match message.expiry_timestamp.checked_sub(message.source_timestamp) {
         Some(lifetime) if lifetime > 0 && lifetime <= MAX_ATTESTATION_LIFETIME_SECS => {}
@@ -1475,6 +1493,93 @@ mod tests {
         assert_eq!(
             validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, msg.source_timestamp),
             Err(BridgeError::ExpiredAttestation)
+        );
+    }
+
+    #[test]
+    fn af1_nonpositive_source_timestamp_rejected() {
+        // External seats 2026-11-21 (ChatGPT + Gemini), reconciled:
+        // validate_message had no positivity guard. A source
+        // timestamp of 0 passes all four checks when the whole
+        // triple sits in a small epoch-relative frame (lifetime
+        // 40_000 in (0, MAX]; current 20_000 not past expiry; the
+        // expiry only 20_000 ahead of the destination clock; the
+        // source behind the clock, which check 4 allows) — the
+        // guard is the only rejection.
+        let mut msg = test_message();
+        msg.source_timestamp = 0;
+        msg.expiry_timestamp = 40_000;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, 20_000),
+            Err(BridgeError::ExpiredAttestation)
+        );
+    }
+
+    #[test]
+    fn af1_negative_timestamp_range_rejected() {
+        // External seats 2026-11-21, reconciled: a fully negative
+        // timestamp range satisfies every difference-based check
+        // (lifetime 50; destination clock not past expiry; expiry
+        // 25 ahead of the clock; source 25 behind it) and validated
+        // before the positivity guard.
+        let mut msg = test_message();
+        msg.source_timestamp = -100;
+        msg.expiry_timestamp = -50;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, -75),
+            Err(BridgeError::ExpiredAttestation)
+        );
+    }
+
+    #[test]
+    fn af1_nonpositive_current_timestamp_rejected() {
+        // External seats 2026-11-21, reconciled: the destination
+        // clock reading itself must be positive — a clock at or
+        // below 0 is not reporting time, and no freshness decision
+        // may rest on it. With a small positive source the four
+        // checks all pass at current 0 and -5 (lifetime 40_000;
+        // clock not past expiry; expiry ~41_000 ahead, within the
+        // ceiling; source ~1_000 ahead, within the skew), so the
+        // guard is the only rejection.
+        let mut msg = test_message();
+        msg.source_timestamp = 1_000;
+        msg.expiry_timestamp = 41_000;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, 0),
+            Err(BridgeError::ExpiredAttestation)
+        );
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, -5),
+            Err(BridgeError::ExpiredAttestation)
+        );
+        // Pinning only (already rejected before the guard, by the
+        // destination ceiling): a non-positive clock against an
+        // epoch-scale message puts the expiry more than
+        // MAX_ATTESTATION_LIFETIME_SECS ahead of the clock.
+        let mut msg = test_message();
+        msg.expiry_timestamp = msg.source_timestamp + 40_000;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, 0),
+            Err(BridgeError::ExpiredAttestation)
+        );
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, -5),
+            Err(BridgeError::ExpiredAttestation)
+        );
+    }
+
+    #[test]
+    fn af1_smallest_positive_timestamps_still_validate() {
+        // Boundary sanity for the positivity guard: it is a
+        // `<= 0` rejection, not a minimum-age or epoch floor — the
+        // smallest positive source and destination readings, with
+        // a lifetime of 40_000, still validate.
+        let mut msg = test_message();
+        msg.source_timestamp = 1;
+        msg.expiry_timestamp = 40_001;
+        assert_eq!(
+            validate_message(&msg, CHAIN_SOLANA, CHAIN_MACHINE, 1),
+            Ok(())
         );
     }
 
