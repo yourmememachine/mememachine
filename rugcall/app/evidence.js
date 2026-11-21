@@ -289,6 +289,41 @@ function alertSentenceFor(e, hard, fam){
 
 /* ================= helpers ================= */
 
+/* Presence-level definiteness of each hard trigger, shared by the
+   resolver-side completeness computation below and (later) the app.
+   families = { bundle, funders, history, sells, liquidity,
+   missingCore }: each family is the family's data object (or a
+   truthy presence marker), history is the combined history the
+   verdict read. This is exactly the resolver's definite[]
+   computation, no more and no less:
+   - H1 needs a history whose strikes is a number;
+   - H2 needs both the bundle and the funder read -- the bundle's
+     own values (even a null pct) do not matter, only presence;
+   - H3 needs the sells check to have run;
+   - H4 needs a liquidity state string other than "unknown";
+   - H5 needs the funder read.
+   missingCore deliberately does NOT feed this: in the resolver it
+   drives `partial`, which gates completeness separately. That is
+   why a combined history with numeric strikes counts H1 definite
+   even when missingCore still lists "history" (the creator's own
+   history missing, the merged funder history present). */
+function triggerDefiniteStates(families){
+  var f = families || {};
+  var hist = f.history;
+  var sells = f.sells;
+  var liq = f.liquidity;
+  return {
+    H1: !!(hist && (hist === true || typeof hist.strikes === "number")),
+    H2: !!f.bundle && !!f.funders,
+    H3: !!(sells && (sells === true || !!sells.checked)),
+    H4: !!(liq && (liq === true ||
+      (typeof liq === "string" ? liq !== "unknown"
+        : typeof liq.state === "string" && liq.state !== "unknown"))),
+    H5: !!f.funders
+  };
+}
+
+
 function cloneData(v){
   if (v === null || typeof v !== "object"){
     return (typeof v === "function") ? undefined : v;
@@ -555,12 +590,13 @@ function evaluateEvidence(evidence, crewStoreIn){
 
   /* A trigger's fired value is definite only when the data it reads
      was actually checked. */
+  var definiteStates = triggerDefiniteStates({
+    bundle: D.bundle, funders: D.funders, history: hist,
+    sells: D.sells, liquidity: D.liquidity, missingCore: missingCore
+  });
   var definite = [
-    !!(hist && typeof hist.strikes === "number"),
-    !!(D.bundle && D.funders),
-    !!(D.sells && D.sells.checked),
-    !!(D.liquidity && typeof D.liquidity.state === "string" && D.liquidity.state !== "unknown"),
-    !!D.funders
+    definiteStates.H1, definiteStates.H2, definiteStates.H3,
+    definiteStates.H4, definiteStates.H5
   ];
   var complete = !partial && resolutionBlockers.length === 0 && hardTriggers.every(function(t, i){
     return definite[i] && (!t.fired || t.eventTimestamp !== null);
@@ -961,9 +997,30 @@ async function deepCheckPort(ctx, mint, light){
       D.creatorHoldingPct = (ownerMap[D.creator] / total) * 100;
     var buyers = Object.keys(bought).filter(function(w){ return w !== D.creator; }).slice(0, 6);
     var traces = {};
-    for (var bi = 0; bi < buyers.length; bi++){
-      await sleepPort(120);
-      traces[buyers[bi]] = await traceFunderPort(ctx, buyers[bi]);
+    try {
+      for (var bi = 0; bi < buyers.length; bi++){
+        await sleepPort(120);
+        traces[buyers[bi]] = await traceFunderPort(ctx, buyers[bi]);
+      }
+    } catch (ferr){
+      /* The funder step failed outright: surface it on the stepErr
+         channel fetchEvidence copies into fetchErrors.funders, so
+         the evaluation reads PARTIAL (fail-closed) instead of
+         silently treating the funder family as merely empty. */
+      stepErr.funders = ferr;
+      D.fundersError = rateNotePort(ferr) + " while tracing early-buyer funders";
+      throw ferr;
+    }
+    /* A trace that came back untraced with a reason is also a funder
+       step failure for that wallet (the trace port absorbs RPC
+       errors into the reason instead of throwing): surface the
+       first one on the same channel, fail-closed. */
+    for (var ti2 = 0; ti2 < buyers.length; ti2++){
+      var tr2 = traces[buyers[ti2]];
+      if (tr2 && !tr2.traced && tr2.reason){
+        stepErr.funders = new Error(tr2.reason);
+        break;
+      }
     }
     var byFunder = {};
     buyers.forEach(function(w){
@@ -1259,7 +1316,8 @@ function hashBundle(bundle){
 }
 
 function verifyBundle(bundle, expectedHex){
-  var out = { hashOk:false, verdictOk:false, result:null };
+  var out = { hashOk:false, verdictOk:false, result:null,
+    checks:null, checksOk:false, qualifyingTriggers:[], excludedTriggers:[] };
   if (!bundle || typeof bundle !== "object") return out;
   try {
     var h = hashBundle(bundle);
@@ -1282,12 +1340,64 @@ function verifyBundle(bundle, expectedHex){
     bres.hardTriggers.every(function(t, i){ return !!t.fired === !!re.hardTriggers[i].fired; });
   out.verdictOk = !!(bres && bres.primaryHardTrigger === re.primaryHardTrigger && firedAgree &&
     canonNum(bres.softScore) === canonNum(re.softScore));
+
+  /* Extended consistency checks, all recomputed from the bundle's
+     own evidence. The bundle format is unchanged, so a field the
+     result block does not record is reported as "not recorded in
+     bundle" rather than failed: buildBundle records partial and
+     resolutionBlockers but not complete, for example. */
+  var NOT_RECORDED = "not recorded in bundle";
+  function stringArrayEq(a, b){
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++){ if (String(a[i]) !== String(b[i])) return false; }
+    return true;
+  }
+  var checks = {};
+  checks.partial = (bres.partial === null || typeof bres.partial === "undefined")
+    ? NOT_RECORDED : bres.partial === re.partial;
+  checks.resolutionBlockers = (bres.resolutionBlockers === null || typeof bres.resolutionBlockers === "undefined")
+    ? NOT_RECORDED : stringArrayEq(bres.resolutionBlockers, re.resolutionBlockers);
+  checks.complete = (bres.complete === null || typeof bres.complete === "undefined")
+    ? NOT_RECORDED : bres.complete === re.complete;
+
+  /* The qualifying/excluded split, recomputed against the bundle's
+     own expirySec: a fired trigger qualifies only when its event
+     time is at or before expiry. The claimed primary trigger must
+     be a qualifying one (or 0, claiming none, when nothing
+     qualifies) for the split to check out -- a bundle whose only
+     fired trigger happened after expiry is NOT qualifying-verified. */
+  var expirySec = (typeof bundle.expirySec === "number" && isFinite(bundle.expirySec))
+    ? bundle.expirySec : null;
+  re.hardTriggers.forEach(function(t){
+    if (!t.fired) return;
+    if (expirySec !== null && typeof t.eventTimestamp === "number" && t.eventTimestamp <= expirySec){
+      out.qualifyingTriggers.push(t.id);
+    } else if (expirySec !== null && typeof t.eventTimestamp === "number" && t.eventTimestamp > expirySec){
+      out.excludedTriggers.push({ id:t.id, eventTimestamp:t.eventTimestamp });
+    }
+  });
+  if (bres.primaryHardTrigger === null || typeof bres.primaryHardTrigger === "undefined" || expirySec === null){
+    checks.qualifyingSplit = NOT_RECORDED;
+  } else if (bres.primaryHardTrigger === 0){
+    checks.qualifyingSplit = out.qualifyingTriggers.length === 0;
+  } else {
+    checks.qualifyingSplit = out.qualifyingTriggers.indexOf(bres.primaryHardTrigger) !== -1;
+  }
+  out.checks = checks;
+  out.partialOk = checks.partial;
+  out.resolutionBlockersOk = checks.resolutionBlockers;
+  out.completeOk = checks.complete;
+  out.qualifyingOk = checks.qualifyingSplit;
+  out.checksOk = Object.keys(checks).every(function(k){
+    return checks[k] === true || checks[k] === NOT_RECORDED;
+  });
   return out;
 }
 
 if (typeof module !== "undefined") module.exports = {
   emptyCrewStore: emptyCrewStore,
   evaluateEvidence: evaluateEvidence,
+  triggerDefiniteStates: triggerDefiniteStates,
   fetchEvidence: fetchEvidence,
   buildBundle: buildBundle,
   canonicalizeBundle: canonicalizeBundle,

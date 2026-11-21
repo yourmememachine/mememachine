@@ -88,6 +88,21 @@ function configBytes(resolverPubkeyBytes, mutate) {
   return data;
 }
 
+// A readable on-chain Market account (142-byte layout) matching
+// liveMarketsObj below: the live preflight now reads market
+// accounts back from the chain, so the stub chain must serve one.
+function marketAccountInfo(mutate) {
+  const data = Buffer.alloc(142);
+  data[0] = 2;
+  Buffer.alloc(32, 25).copy(data, 1); // subject_mint = enc(25)
+  Buffer.alloc(32, 23).copy(data, 33); // creator = enc(23)
+  data.writeBigInt64LE(1799913600n, 65); // created_at
+  data.writeBigInt64LE(1800000000n, 73); // expiry
+  data[97] = 1; // state Open
+  if (mutate) mutate(data);
+  return { executable: false, owner: PROGRAM_ID, lamports: 1000000, data };
+}
+
 function makeChain(overrides) {
   const o = overrides || {};
   const chain = {
@@ -129,6 +144,9 @@ function makeChain(overrides) {
       }
       if (pubkey === CONFIG_ID) {
         return o.configInfo !== undefined ? o.configInfo : null;
+      }
+      if (pubkey === enc(21)) {
+        return o.marketInfo !== undefined ? o.marketInfo : marketAccountInfo();
       }
       return null;
     },
@@ -172,6 +190,9 @@ function liveMarketsObj(signerPubkey) {
     address: enc(21),
     live_market: enc(22),
     creator: enc(23),
+    // A real 32-byte mint key: the fixture display mint does not
+    // decode to 32 bytes, so it cannot match an on-chain account.
+    subject_mint: enc(25),
   };
   return {
     ...markets,

@@ -101,11 +101,17 @@ test("judge page: deployed treatment follows program_id", () => {
     html.includes("Program " + DEPLOYED_PROGRAM_ID + " · Devnet"),
     "program status chip carries the deployed treatment"
   );
-  const expectedLinks = 1 +
-    (replay.market && (typeof replay.market === "string" || replay.market.address) ? 1 : 0) +
-    (replay.record && replay.record.resolver ? 1 : 0);
+  // War-room fix (X3): only the program links to the explorer. The
+  // replay market and the resolver are fixture (replay record)
+  // values, rendered as labelled plain text — linking them asserted
+  // on-chain accounts that do not exist.
+  const expectedLinks = 1;
   const hrefs = explorerHrefs(html);
   assert.equal(hrefs.length, expectedLinks, "exactly the expected devnet explorer links appear");
+  assert.ok(
+    programSection(html).includes("fixture (replay record) value, not an on-chain account"),
+    "fixture market/resolver values are labelled as fixture, not linked"
+  );
   for (const h of hrefs) {
     assert.ok(h.endsWith('?cluster=devnet"'), "explorer link is pinned to devnet: " + h);
   }
@@ -122,9 +128,7 @@ test("judge page: deployed treatment follows program_id", () => {
     stdio: "pipe",
   });
   const stub = fs.readFileSync(tmpOut, "utf8");
-  const expected = 1 +
-    (replay.market && (typeof replay.market === "string" || replay.market.address) ? 1 : 0) +
-    (replay.record && replay.record.resolver ? 1 : 0);
+  const expected = 1;
   const stubHrefs = explorerHrefs(stub);
   assert.equal(stubHrefs.length, expected, "exactly the expected devnet explorer links appear");
   for (const h of stubHrefs) {
@@ -160,11 +164,13 @@ test("judge page: frozen honesty copy is present, without overclaims", () => {
     flat.includes("Soft scores never resolve a market"),
     "soft scores never resolve a market"
   );
+  // War-room fix (X4): the standalone page serves recorded
+  // snapshots; the frozen wording must say so, not claim live reads.
   assert.ok(
-    flat.includes("The money is devnet. The evidence is mainnet."),
-    "devnet/mainnet split is stated in the frozen wording"
+    flat.includes("The money is devnet. The evidence shown on this page is recorded snapshots, not live reads."),
+    "devnet/recorded-snapshot split is stated in the frozen wording"
   );
-  assert.ok(/Evidence: Mainnet/.test(flat) && /Markets: Devnet/.test(flat), "dual-cluster header copy is present");
+  assert.ok(/Evidence shown: recorded snapshots/.test(flat) && /Markets: Devnet/.test(flat), "dual-cluster header copy is present");
   assert.ok(!/one code path/i.test(flat), "no shared-code-path claim");
   assert.ok(
     !/Solana OS (now )?(uses|consumes|loads) evidence\.js/i.test(flat),

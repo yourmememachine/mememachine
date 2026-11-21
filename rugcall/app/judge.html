@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="rugcall-source-hashes" content='{"evidence.js":"2790a8ed83b27bded2e3a394d71f5ec42be8514d8c6bbe62458c9278317a58e7","predict.js":"7faa32e70a5c2bae6c7c4696fcdebf5df14beed7c218c3fd10fe10af7ab9e210","predict-tx.js":"52680475e6d3e816a1fdb4b777b8b896b77cbd35f5ef6be69d25b2c4fb389f47","predict-wallet.js":"635e6fd7f2c092a0296560e1a484d762fe9c5ca7cda03f5f6e2ac4a64b7952ac","predict-ui.js":"21fb4fba407523951be5588fe3b4069503710db4afae21addf235517779e5c4d","app-markets.json":"87d1acdafe51800d627de244c1d4b0745fd9b6453d8ca9f0293e7d548e5ad08d","evidenceFixture":"6e03f4cb16ec54150a0c5225a79793bd2825777e34d177c3eb278edf5d1da042"}'>
+<meta name="rugcall-source-hashes" content='{"evidence.js":"44ed91c531dcd013a30232a602579815eb1a230c2efa73945c4f53cdcd4c8fd0","predict.js":"82df1ac0a8cbf38bcff8e13a2f3ddcc28fdceb7a6334618c2c70762f41fe5ea6","predict-tx.js":"52680475e6d3e816a1fdb4b777b8b896b77cbd35f5ef6be69d25b2c4fb389f47","predict-wallet.js":"635e6fd7f2c092a0296560e1a484d762fe9c5ca7cda03f5f6e2ac4a64b7952ac","predict-ui.js":"3a0b206c999a1d551cffe7a16a6fd701e341dd92eafd85adbb3c9dcddfa3ddef","app-markets.json":"87d1acdafe51800d627de244c1d4b0745fd9b6453d8ca9f0293e7d548e5ad08d","evidenceFixture":"6e03f4cb16ec54150a0c5225a79793bd2825777e34d177c3eb278edf5d1da042"}'>
 <title>RugCall - will it get flagged?</title>
 <style>
   body { font-family: system-ui, -apple-system, sans-serif; margin: 0; color: #1c2330; background: #f6f7f9; }
@@ -46,15 +46,15 @@
 <!-- S0: honesty banner + program status -->
 <section id="s0">
   <h1>RugCall</h1>
-  <div id="fixture-banner" class="rc-banner rc-banner-fixture">Devnet demo - play money (dUSDC), evidence read live from Solana mainnet. The money is devnet. The evidence is mainnet.</div>
+  <div id="fixture-banner" class="rc-banner rc-banner-fixture">Devnet demo - play money (dUSDC). The money is devnet. The evidence shown on this page is recorded snapshots, not live reads.</div>
   <p><span id="program-status-chip" class="rc-chip">Program DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ · Devnet</span></p>
   <div id="wallet-bar">
     <button type="button" class="rc-btn rc-btn-primary" id="connect-demo">Connect demo wallet</button>
     <label>Wallet provider
       <select id="provider-select"><option value="">Detecting providers...</option></select>
     </label>
-    <button type="button" class="rc-btn" id="connect-provider">Connect provider</button>
-    <span id="wallet-status" class="rc-note">No wallet connected. The demo wallet is simulated in fixture mode.</span>
+    <button type="button" class="rc-btn" id="connect-provider" disabled>Connect provider (demo-wallet-only in this build)</button>
+    <span id="wallet-status" class="rc-note">No wallet connected. This build is demo-wallet-only: the demo wallet is simulated in fixture mode and no provider wallet is connected.</span>
   </div>
   <div id="network-banner"></div>
 </section>
@@ -62,10 +62,10 @@
 <!-- S1: what RugCall is -->
 <section id="s1">
   <h2>What RugCall is</h2>
-  <p>RugCall turns rug evidence into a market: bet on whether a freshly launched Solana token gets hard-flagged by the evidence engine within 24 hours, with markets that open, trade, resolve, and pay out on Solana devnet while the evidence is read live from mainnet.</p>
+  <p>RugCall turns rug evidence into a market: bet on whether a freshly launched Solana token gets hard-flagged by the evidence engine within 24 hours, with markets that open, trade, resolve, and pay out on Solana devnet. The evidence shown on this page is recorded snapshots of mainnet evidence, not live mainnet reads.</p>
   <p><strong>Resolution rule:</strong> markets resolve on hard triggers H1–H5 only. Soft scores never resolve a market. Trigger event timestamps — not detection times — decide boundary cases.</p>
   <p><strong>Fail-closed:</strong> if evidence cannot be obtained at expiry, the market is not resolved on a guess. Resolution defers to a 24h grace window, and after the grace window anyone can cancel the market so every stake is refunded in full.</p>
-  <p>Collateral is dUSDC, a devnet play stablecoin with no real value. Evidence: Mainnet · Markets: Devnet.</p>
+  <p>Collateral is dUSDC, a devnet play stablecoin with no real value. Evidence shown: recorded snapshots · Markets: Devnet.</p>
 </section>
 
 <!-- S2: the market list (the app itself) -->
@@ -94,6 +94,7 @@
   <p>The canonical bundle for the replayed resolution. Its sha256 is the hash the resolver record carries.</p>
   <pre id="bundle-canonical">Bundle not loaded yet.</pre>
   <p>Sha256: <code id="bundle-sha">not loaded</code></p>
+  <p id="bundle-recompute">In-page recomputed sha256 (hash only): not computed yet.</p>
   <p id="bundle-verify">Verify result: not loaded.</p>
   <p class="rc-note">Verification ran in the test suite and can be repeated by hashing the canonical bundle and comparing the result with the recorded hash, then re-running the verdict logic over the bundle contents.</p>
 </section>
@@ -101,7 +102,7 @@
 <!-- S5: program and explorer -->
 <section id="s5">
   <h2>Program and explorer</h2>
-  <div id="s5-program-body"><p>Program ID: <code>DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ</code> (devnet)</p><ul><li><a href="https://explorer.solana.com/address/DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ?cluster=devnet" rel="noopener">Program DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ</a></li><li><a href="https://explorer.solana.com/address/MarketH2Bund1e111111111111111111111111111111?cluster=devnet" rel="noopener">Market MarketH2Bund1e111111111111111111111111111111</a></li><li><a href="https://explorer.solana.com/address/Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH?cluster=devnet" rel="noopener">Resolver Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH</a></li></ul></div>
+  <div id="s5-program-body"><p>Program ID: <code>DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ</code> (devnet)</p><ul><li><a href="https://explorer.solana.com/address/DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ?cluster=devnet" rel="noopener">Program DcwvEDi4yCk16wQ2HVzc3dQiBFccj8VxzboGUYdUXseZ</a></li><li>Market MarketH2Bund1e111111111111111111111111111111 — fixture (replay record) value, not an on-chain account</li><li>Resolver Dm95oxQp8YghEsCads1SXWkGwy4BaYLjCYv4fieG7GtH — fixture (replay record) value, not an on-chain account</li></ul></div>
 </section>
 
 <!-- S6: footer -->
@@ -411,6 +412,41 @@ function alertSentenceFor(e, hard, fam){
 
 /* ================= helpers ================= */
 
+/* Presence-level definiteness of each hard trigger, shared by the
+   resolver-side completeness computation below and (later) the app.
+   families = { bundle, funders, history, sells, liquidity,
+   missingCore }: each family is the family's data object (or a
+   truthy presence marker), history is the combined history the
+   verdict read. This is exactly the resolver's definite[]
+   computation, no more and no less:
+   - H1 needs a history whose strikes is a number;
+   - H2 needs both the bundle and the funder read -- the bundle's
+     own values (even a null pct) do not matter, only presence;
+   - H3 needs the sells check to have run;
+   - H4 needs a liquidity state string other than "unknown";
+   - H5 needs the funder read.
+   missingCore deliberately does NOT feed this: in the resolver it
+   drives `partial`, which gates completeness separately. That is
+   why a combined history with numeric strikes counts H1 definite
+   even when missingCore still lists "history" (the creator's own
+   history missing, the merged funder history present). */
+function triggerDefiniteStates(families){
+  var f = families || {};
+  var hist = f.history;
+  var sells = f.sells;
+  var liq = f.liquidity;
+  return {
+    H1: !!(hist && (hist === true || typeof hist.strikes === "number")),
+    H2: !!f.bundle && !!f.funders,
+    H3: !!(sells && (sells === true || !!sells.checked)),
+    H4: !!(liq && (liq === true ||
+      (typeof liq === "string" ? liq !== "unknown"
+        : typeof liq.state === "string" && liq.state !== "unknown"))),
+    H5: !!f.funders
+  };
+}
+
+
 function cloneData(v){
   if (v === null || typeof v !== "object"){
     return (typeof v === "function") ? undefined : v;
@@ -677,12 +713,13 @@ function evaluateEvidence(evidence, crewStoreIn){
 
   /* A trigger's fired value is definite only when the data it reads
      was actually checked. */
+  var definiteStates = triggerDefiniteStates({
+    bundle: D.bundle, funders: D.funders, history: hist,
+    sells: D.sells, liquidity: D.liquidity, missingCore: missingCore
+  });
   var definite = [
-    !!(hist && typeof hist.strikes === "number"),
-    !!(D.bundle && D.funders),
-    !!(D.sells && D.sells.checked),
-    !!(D.liquidity && typeof D.liquidity.state === "string" && D.liquidity.state !== "unknown"),
-    !!D.funders
+    definiteStates.H1, definiteStates.H2, definiteStates.H3,
+    definiteStates.H4, definiteStates.H5
   ];
   var complete = !partial && resolutionBlockers.length === 0 && hardTriggers.every(function(t, i){
     return definite[i] && (!t.fired || t.eventTimestamp !== null);
@@ -1083,9 +1120,30 @@ async function deepCheckPort(ctx, mint, light){
       D.creatorHoldingPct = (ownerMap[D.creator] / total) * 100;
     var buyers = Object.keys(bought).filter(function(w){ return w !== D.creator; }).slice(0, 6);
     var traces = {};
-    for (var bi = 0; bi < buyers.length; bi++){
-      await sleepPort(120);
-      traces[buyers[bi]] = await traceFunderPort(ctx, buyers[bi]);
+    try {
+      for (var bi = 0; bi < buyers.length; bi++){
+        await sleepPort(120);
+        traces[buyers[bi]] = await traceFunderPort(ctx, buyers[bi]);
+      }
+    } catch (ferr){
+      /* The funder step failed outright: surface it on the stepErr
+         channel fetchEvidence copies into fetchErrors.funders, so
+         the evaluation reads PARTIAL (fail-closed) instead of
+         silently treating the funder family as merely empty. */
+      stepErr.funders = ferr;
+      D.fundersError = rateNotePort(ferr) + " while tracing early-buyer funders";
+      throw ferr;
+    }
+    /* A trace that came back untraced with a reason is also a funder
+       step failure for that wallet (the trace port absorbs RPC
+       errors into the reason instead of throwing): surface the
+       first one on the same channel, fail-closed. */
+    for (var ti2 = 0; ti2 < buyers.length; ti2++){
+      var tr2 = traces[buyers[ti2]];
+      if (tr2 && !tr2.traced && tr2.reason){
+        stepErr.funders = new Error(tr2.reason);
+        break;
+      }
     }
     var byFunder = {};
     buyers.forEach(function(w){
@@ -1381,7 +1439,8 @@ function hashBundle(bundle){
 }
 
 function verifyBundle(bundle, expectedHex){
-  var out = { hashOk:false, verdictOk:false, result:null };
+  var out = { hashOk:false, verdictOk:false, result:null,
+    checks:null, checksOk:false, qualifyingTriggers:[], excludedTriggers:[] };
   if (!bundle || typeof bundle !== "object") return out;
   try {
     var h = hashBundle(bundle);
@@ -1404,12 +1463,64 @@ function verifyBundle(bundle, expectedHex){
     bres.hardTriggers.every(function(t, i){ return !!t.fired === !!re.hardTriggers[i].fired; });
   out.verdictOk = !!(bres && bres.primaryHardTrigger === re.primaryHardTrigger && firedAgree &&
     canonNum(bres.softScore) === canonNum(re.softScore));
+
+  /* Extended consistency checks, all recomputed from the bundle's
+     own evidence. The bundle format is unchanged, so a field the
+     result block does not record is reported as "not recorded in
+     bundle" rather than failed: buildBundle records partial and
+     resolutionBlockers but not complete, for example. */
+  var NOT_RECORDED = "not recorded in bundle";
+  function stringArrayEq(a, b){
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++){ if (String(a[i]) !== String(b[i])) return false; }
+    return true;
+  }
+  var checks = {};
+  checks.partial = (bres.partial === null || typeof bres.partial === "undefined")
+    ? NOT_RECORDED : bres.partial === re.partial;
+  checks.resolutionBlockers = (bres.resolutionBlockers === null || typeof bres.resolutionBlockers === "undefined")
+    ? NOT_RECORDED : stringArrayEq(bres.resolutionBlockers, re.resolutionBlockers);
+  checks.complete = (bres.complete === null || typeof bres.complete === "undefined")
+    ? NOT_RECORDED : bres.complete === re.complete;
+
+  /* The qualifying/excluded split, recomputed against the bundle's
+     own expirySec: a fired trigger qualifies only when its event
+     time is at or before expiry. The claimed primary trigger must
+     be a qualifying one (or 0, claiming none, when nothing
+     qualifies) for the split to check out -- a bundle whose only
+     fired trigger happened after expiry is NOT qualifying-verified. */
+  var expirySec = (typeof bundle.expirySec === "number" && isFinite(bundle.expirySec))
+    ? bundle.expirySec : null;
+  re.hardTriggers.forEach(function(t){
+    if (!t.fired) return;
+    if (expirySec !== null && typeof t.eventTimestamp === "number" && t.eventTimestamp <= expirySec){
+      out.qualifyingTriggers.push(t.id);
+    } else if (expirySec !== null && typeof t.eventTimestamp === "number" && t.eventTimestamp > expirySec){
+      out.excludedTriggers.push({ id:t.id, eventTimestamp:t.eventTimestamp });
+    }
+  });
+  if (bres.primaryHardTrigger === null || typeof bres.primaryHardTrigger === "undefined" || expirySec === null){
+    checks.qualifyingSplit = NOT_RECORDED;
+  } else if (bres.primaryHardTrigger === 0){
+    checks.qualifyingSplit = out.qualifyingTriggers.length === 0;
+  } else {
+    checks.qualifyingSplit = out.qualifyingTriggers.indexOf(bres.primaryHardTrigger) !== -1;
+  }
+  out.checks = checks;
+  out.partialOk = checks.partial;
+  out.resolutionBlockersOk = checks.resolutionBlockers;
+  out.completeOk = checks.complete;
+  out.qualifyingOk = checks.qualifyingSplit;
+  out.checksOk = Object.keys(checks).every(function(k){
+    return checks[k] === true || checks[k] === NOT_RECORDED;
+  });
   return out;
 }
 
 if (typeof module !== "undefined") module.exports = {
   emptyCrewStore: emptyCrewStore,
   evaluateEvidence: evaluateEvidence,
+  triggerDefiniteStates: triggerDefiniteStates,
   fetchEvidence: fetchEvidence,
   buildBundle: buildBundle,
   canonicalizeBundle: canonicalizeBundle,
@@ -2948,7 +3059,8 @@ if (typeof globalThis !== "undefined") {
  * module:
  *   FIXTURE_BANNER     -- the demo banner for the seeded board.
  *   FIXTURE_DATA_LABEL -- shown while the board is served from
- *                         fixtures because no program id is set.
+ *                         recorded fixture data (explicit fixture
+ *                         mode; the bound program id is unaffected).
  * Amounts are decimal strings at every boundary of this module;
  * BigInt appears only inside the math. Base58 encoding and the
  * parimutuel payout come from predict-tx.js (the RugCallTx
@@ -2956,8 +3068,17 @@ if (typeof globalThis !== "undefined") {
  */
 "use strict";
 
-var FIXTURE_BANNER = "Devnet demo — play money (dUSDC), evidence read live from Solana mainnet";
-var FIXTURE_DATA_LABEL = "Fixture data — devnet program not deployed yet (program_id null)";
+var FIXTURE_BANNER = "Devnet demo — play money (dUSDC); the evidence shown on this page is recorded snapshots, not live reads";
+var FIXTURE_DATA_LABEL = "Fixture data — recorded markets and evidence snapshots (the program is deployed on devnet; this page serves the recorded fixture data, not live chain reads)";
+
+/* Fixture epoch: the pinned clock for fixture mode. The recorded
+   fixture markets were created at 1799913600 with 24h terms
+   (expiry 1800000000), so the fixture clock sits inside that
+   window — cards show hours left, not the ~55 days a wall clock
+   in 2026 would compute against the 2027 fixture timestamps, and
+   never 1970. Fixture/replay timestamps themselves are recorded
+   provenance and are never rewritten. */
+var FIXTURE_NOW_SEC = 1799950000;
 
 /* Account lengths and discriminators, mirroring state.rs. */
 var MARKET_LEN = 142;
@@ -3229,18 +3350,20 @@ function totalStakeOf(position) {
 }
 
 /*
- * Claim preview with the frozen branch precedence: no position,
- * then already claimed, then market still open, then the
- * cancelled refund, then the resolved branches (inconsistent
- * outcome, zero winning pool refund, no winning stake, payout).
- * The total pool is built with checked addition inside the
- * payout branch only, so an overflowing pool can never block a
- * refund whose amount does not depend on the pools.
+ * Claim preview with the program's frozen branch precedence —
+ * the same order predict-tx's preflightClaim and the program
+ * handler use: market still open FIRST, then position existence,
+ * then already claimed, then the cancelled refund, then the
+ * resolved branches (inconsistent outcome, zero winning pool
+ * refund, no winning stake, payout). The total pool is built
+ * with checked addition inside the payout branch only, so an
+ * overflowing pool can never block a refund whose amount does
+ * not depend on the pools.
  */
 function computeClaimPreview(market, position) {
+  if (!market || market.state === STATE_OPEN) return { kind: "none", reason: "market-open" };
   if (!position) return { kind: "none", reason: "no-position" };
   if (position.claimed) return { kind: "none", reason: "already-claimed" };
-  if (!market || market.state === STATE_OPEN) return { kind: "none", reason: "market-open" };
   var totalStake = totalStakeOf(position);
   if (market.state === STATE_CANCELLED) {
     if (BigInt(totalStake) > 0n) return { kind: "refund", amountRaw: totalStake, reason: "cancelled" };
@@ -3329,13 +3452,38 @@ function parseDusdcToRaw(str) {
   return raw.toString();
 }
 
+/* ------------------------------------------------------------------ */
+/* evidence.js access (the resolver's definiteness rules live there)   */
+/* ------------------------------------------------------------------ */
+
+var evidenceCache = null;
+function loadEvidenceModule() {
+  if (evidenceCache) return evidenceCache;
+  var m = null;
+  if (typeof require === "function") {
+    try { m = require("./evidence.js"); } catch (err) { m = null; }
+  }
+  if (!m && typeof globalThis !== "undefined" && typeof globalThis.triggerDefiniteStates === "function") {
+    m = { triggerDefiniteStates: globalThis.triggerDefiniteStates };
+  }
+  if (!m && typeof window !== "undefined" && typeof window.triggerDefiniteStates === "function") {
+    m = { triggerDefiniteStates: window.triggerDefiniteStates };
+  }
+  if (m) evidenceCache = m;
+  return m;
+}
+
 /*
  * Per-trigger display states from an evaluateEvidence result.
- * A trigger reads as unknown whenever the data it depends on was
- * never checked: H1 needs a history with a numeric strike count,
- * H2 needs both the bundle and the funder read, H3 needs the
- * sells check to have run, H4 needs a liquidity state other than
- * unknown, and H5 needs the funder read. A definite trigger is
+ * Definiteness is SINGLE-SOURCED from the resolver: this module
+ * builds the presence-level families object and consumes
+ * triggerDefiniteStates(families) from evidence.js — it does not
+ * apply its own values-level rules. Presence is what counts: a
+ * bundle that is present with pct:null still makes H2 definite,
+ * and a history with a numeric strike count makes H1 definite
+ * even when missingCore still names "history" (the resolver's
+ * H1 reads the combined history, which can be present while the
+ * creator-history core input is missing). A definite trigger is
  * then fired or not-fired on its recorded flag.
  */
 function evidenceTriggerStates(evalResult) {
@@ -3350,15 +3498,36 @@ function evidenceTriggerStates(evalResult) {
   }
   function vals(t) { return (t && t.values && typeof t.values === "object") ? t.values : {}; }
   var t1 = trig(1), t2 = trig(2), t3 = trig(3), t4 = trig(4), t5 = trig(5);
-  var v1 = vals(t1), v2 = vals(t2), v3 = vals(t3), v4 = vals(t4);
-  var definite = [
-    typeof v1.strikes === "number" && (!missing || missing.indexOf("history") === -1),
-    typeof v2.pct === "number" && typeof v2.sharedFunderInWindow === "boolean" &&
-      (!missing || (missing.indexOf("bundle") === -1 && missing.indexOf("funders") === -1)),
-    v3.checked === true,
-    typeof v4.state === "string" && v4.state !== "unknown",
-    !missing || missing.indexOf("funders") === -1
-  ];
+  var v1 = vals(t1), v3 = vals(t3), v4 = vals(t4);
+  function present(name) {
+    return !missing || missing.indexOf(name) === -1;
+  }
+  var families = {
+    bundle: present("bundle") ? true : null,
+    funders: present("funders") ? true : null,
+    history: t1 ? { strikes: typeof v1.strikes === "number" ? v1.strikes : null } : null,
+    sells: t3 ? { checked: v3.checked === true } : null,
+    liquidity: t4 ? { state: typeof v4.state === "string" ? v4.state : null } : null,
+    missingCore: missing ? missing.slice() : []
+  };
+  var ev = loadEvidenceModule();
+  var definiteMap = null;
+  if (ev && typeof ev.triggerDefiniteStates === "function") {
+    try { definiteMap = ev.triggerDefiniteStates(families); } catch (err) { definiteMap = null; }
+  }
+  if (!definiteMap) {
+    /* Fallback mirror of the resolver's presence-level semantics,
+       used only until the evidence.js export is present in the
+       same load; it must agree with triggerDefiniteStates. */
+    definiteMap = {
+      H1: !!(families.history && typeof families.history.strikes === "number"),
+      H2: !!(families.bundle && families.funders),
+      H3: !!(families.sells && families.sells.checked === true),
+      H4: !!(families.liquidity && typeof families.liquidity.state === "string" && families.liquidity.state !== "unknown"),
+      H5: !!families.funders
+    };
+  }
+  var definite = [definiteMap.H1, definiteMap.H2, definiteMap.H3, definiteMap.H4, definiteMap.H5];
   var list = [t1, t2, t3, t4, t5];
   return list.map(function (t, i) {
     if (!t || !definite[i]) return "unknown";
@@ -3553,7 +3722,7 @@ function createFixtureSource(programId, fixtureBundle, nowSec) {
   return {
     kind: "fixture",
     programId: programId,
-    nowSec: typeof nowSec === "number" ? nowSec : null,
+    nowSec: typeof nowSec === "number" ? nowSec : FIXTURE_NOW_SEC,
     getConfig: async function () { return normFixtureConfig(bundle()); },
     listMarkets: async function () { return sortMarkets(markets()); },
     getMarket: async function (address) {
@@ -3698,9 +3867,22 @@ function createDevnetSource(programId, transport, nowSec) {
   return source;
 }
 
+/*
+ * Source selection is EXPLICIT, never keyed off the program id:
+ * the program id is a display/PDA binding, not a source selector.
+ *   mode: "fixture" -> the recorded fixture source, whatever
+ *     program id is bound (the embedded/standalone judge path
+ *     uses this: the real deployed id stays bound and displayed
+ *     while the board is served from the recorded bundle);
+ *   mode: "devnet"  -> the transport-backed devnet source;
+ *   no mode         -> the legacy default (fixture only when no
+ *     program id is set, devnet otherwise).
+ */
 function createDataSource(opts) {
   var o = opts || {};
   var programId = typeof o.programId === "undefined" ? null : o.programId;
+  if (o.mode === "fixture") return createFixtureSource(programId, o.fixtureBundle, o.nowSec);
+  if (o.mode === "devnet") return createDevnetSource(programId, o.transport, o.nowSec);
   if (programId === null) return createFixtureSource(null, o.fixtureBundle, o.nowSec);
   return createDevnetSource(programId, o.transport, o.nowSec);
 }
@@ -3712,6 +3894,7 @@ function createDataSource(opts) {
 var RugCallPredict = {
   FIXTURE_BANNER: FIXTURE_BANNER,
   FIXTURE_DATA_LABEL: FIXTURE_DATA_LABEL,
+  FIXTURE_NOW_SEC: FIXTURE_NOW_SEC,
   MARKET_LEN: MARKET_LEN,
   POSITION_LEN: POSITION_LEN,
   CONFIG_LEN: CONFIG_LEN,
@@ -4250,8 +4433,10 @@ function fallbackComputeOdds(market) {
   if (total === 0n) {
     return { flaggedBps: null, survivesBps: null, flaggedPct: null, survivesPct: null, oneSided: false, totalPool: "0" };
   }
+  /* Canonical floored bps pair, like predict.js computeOdds:
+     each side is floored independently (they can sum to 9999). */
   var fBps = Number((flagged * 10000n) / total);
-  var sBps = 10000 - fBps;
+  var sBps = Number((survives * 10000n) / total);
   return {
     flaggedBps: fBps,
     survivesBps: sBps,
@@ -4292,10 +4477,18 @@ function fallbackClaimPreview(market, position) {
   if (!flaggedWon && !survivesWon) return { kind: "error", reason: "inconsistent-state" };
   var winStake = flaggedWon ? flagged : survives;
   var winPool = flaggedWon ? toBig(market.flaggedPool) : toBig(market.survivesPool);
-  if (winStake === 0n) return { kind: "no-claim", reason: "no-winning-stake" };
-  if (winPool === 0n || winPool === totalPool) {
-    return { kind: "refund", amountRaw: totalStake.toString(), reason: "one-sided-pool" };
+  /* Mirror the program (and predict.js): the zero-winning-pool
+     refund is checked BEFORE the winning-stake check — a holder
+     with no winning-side stake is still refunded in full when
+     the winning pool is zero. A one-sided pool where the winning
+     side IS the whole pool is not a refund: it pays through the
+     payout branch below (winStake * totalPool / winPool, which
+     is exactly the winning-side stake). */
+  if (winPool === 0n) {
+    if (totalStake > 0n) return { kind: "refund", amountRaw: totalStake.toString(), reason: "zero-winning-pool" };
+    return { kind: "no-claim", reason: "zero-total-stake" };
   }
+  if (winStake === 0n) return { kind: "no-claim", reason: "no-winning-stake" };
   var payout = (winStake * totalPool) / winPool;
   return { kind: "payout", amountRaw: payout.toString() };
 }
@@ -5241,9 +5434,13 @@ if (typeof window !== "undefined") {
       var market = replay && replay.market ? field(replay.market, ["address", "market", "id"]) : null;
       if (typeof (replay && replay.market) === "string") market = replay.market;
       var resolver = replay && replay.record ? field(replay.record, ["resolver"]) : null;
+      /* Only the program id is a real on-chain account: it alone
+         links to the devnet explorer. The replay market and the
+         fixture-config resolver are fixture (replay record)
+         values and render as plain text, never as explorer links. */
       var items = "<li>" + explorerLink(programId, "Program " + shortAddr(programId)) + "</li>";
-      if (market) items += "<li>" + explorerLink(market, "Market " + shortAddr(market)) + "</li>";
-      if (resolver) items += "<li>" + explorerLink(resolver, "Resolver " + shortAddr(resolver)) + "</li>";
+      if (market) items += "<li>Market " + market + " — fixture (replay record) value, not an on-chain account</li>";
+      if (resolver) items += "<li>Resolver " + resolver + " — fixture (replay record) value, not an on-chain account</li>";
       body.innerHTML = "<p>Program ID: <code>" + programId + "</code> (devnet)</p><ul>" + items + "</ul>";
     }
   }
@@ -5340,7 +5537,7 @@ if (typeof window !== "undefined") {
     var notes = replay.notes || null;
     steps.push({
       title: "6. Settled summary",
-      body: "<p>The market is settled: the winning side split the full pool pro-rata, the losing side has no claim, and the rounding dust stays in the vault.</p>" +
+      body: "<p>The market is settled in the program-test lifecycle this replay is drawn from; the record itself is an unsigned dry-run record (the replayed market record above is state:1 / outcome:0). In that lifecycle the winning side split the full pool pro-rata, the losing side has no claim, and the rounding dust stays in the vault.</p>" +
         (summaries ? "<pre>" + JSON.stringify(summaries, null, 2).replace(/</g, "&lt;") + "</pre>" : "") +
         (notes ? "<p>" + (Array.isArray(notes) ? notes.join(" ") : String(notes)).replace(/</g, "&lt;") + "</p>" : ""),
       raw: { summaries: summaries, notes: notes }
@@ -5378,7 +5575,23 @@ if (typeof window !== "undefined") {
     var bundle = replay.bundle;
     var canonical = typeof bundle.canonical === "string" ? bundle.canonical : JSON.stringify(bundle.canonical || bundle, null, 2);
     text(el("bundle-canonical"), canonical);
-    text(el("bundle-sha"), field(bundle, ["sha256", "hash"]) || "");
+    var recordedSha = field(bundle, ["sha256", "hash"]) || "";
+    text(el("bundle-sha"), recordedSha);
+    /* In-page recompute of the bundle hash only, using the SHA-256
+       shipped in predict-tx.js. hashOk/verdictOk below stay exactly
+       as recorded in the replay artifacts; this recompute is the
+       hash only and is labelled exactly that. */
+    var recomputeEl = el("bundle-recompute");
+    if (recomputeEl) {
+      var Tx = window.RugCallTx;
+      if (Tx && typeof Tx.sha256Hex === "function" && typeof bundle.canonical === "string") {
+        var recomputed = Tx.sha256Hex(bundle.canonical);
+        text(recomputeEl, "In-page recomputed sha256 (hash only): " + recomputed +
+          " — matches the recorded hash: " + (recomputed === recordedSha ? "yes" : "no") + ".");
+      } else {
+        text(recomputeEl, "In-page recomputed sha256 (hash only): unavailable (no canonical bundle string or no SHA-256 in this build).");
+      }
+    }
     var verify = replay.verify || {};
     text(el("bundle-verify"), "Verify result: hashOk " + String(field(verify, ["hashOk"])) +
       " · verdictOk " + String(field(verify, ["verdictOk"])) + " (from the recorded replay artifacts).");
@@ -5394,8 +5607,22 @@ if (typeof window !== "undefined") {
     }
     var programId = (replay && replay.config && replay.config.programId) ||
       (fixtureBundle && fixtureBundle.program_id) || null;
-    var nowSec = Math.floor(Date.now() / 1000);
-    var source = RugCall.createDataSource({ programId: programId, fixtureBundle: fixtureBundle, nowSec: nowSec });
+    /* Embedded/standalone path: when a fixture bundle is present the
+       board is served from the fixture source in EXPLICIT fixture
+       mode, whatever program id is bound — the program id is a
+       display/PDA binding, not a source selector, and the real
+       deployed id stays bound and displayed. The fixture-mode
+       clock is pinned to the fixture epoch (RugCall.FIXTURE_NOW_SEC)
+       so fixture cards show sane countdowns; the wall clock is used
+       only on the non-fixture path. */
+    var fixtureMode = !!fixtureBundle;
+    var nowSec = fixtureMode
+      ? (typeof RugCall.FIXTURE_NOW_SEC === "number" ? RugCall.FIXTURE_NOW_SEC : 1799950000)
+      : Math.floor(Date.now() / 1000);
+    var source = RugCall.createDataSource({
+      programId: programId, fixtureBundle: fixtureBundle, nowSec: nowSec,
+      mode: fixtureMode ? "fixture" : undefined
+    });
     var users = (fixtureBundle && fixtureBundle.users) || {};
     var demoUser = users.demo;
     var demoAddress = typeof demoUser === "string" ? demoUser : field(demoUser || {}, ["address", "publicKey", "pubkey"]);
@@ -5421,13 +5648,43 @@ if (typeof window !== "undefined") {
     configPromise.then(function (decodedConfig) {
       var client = null;
       if (typeof Tx.createPredictClient === "function") {
+        var clientConfig = decodedConfig || (fixtureBundle ? fixtureBundle.config : null);
+        var clientData = source;
+        if (source.kind === "fixture" && fixtureBundle) {
+          /* Fixture client: bundle-shaped data (the fixture bundle
+             itself, shared with the fixture source so simulated
+             creates/buys stay visible to the board) — never the
+             data-source object. The recorded bundle carries no
+             collateral mint (collateral_mint: null) and no token
+             accounts, so fixture mode uses labelled fixture
+             placeholder addresses for those two descriptor-only
+             fields; every envelope in this mode is simulated and
+             nothing is submitted. */
+          clientData = fixtureBundle;
+          if (clientConfig && !clientConfig.collateralMint) {
+            var cfgCopy = {};
+            Object.keys(clientConfig).forEach(function (k) { cfgCopy[k] = clientConfig[k]; });
+            cfgCopy.collateralMint = "FixtureCo11ateralMint1111111111111111111111";
+            clientConfig = cfgCopy;
+          }
+          if (!Array.isArray(clientData.tokens)) {
+            clientData.tokens = [{
+              address: "FixtureDemoTokenAccount111111111111111111",
+              owner: demoAddress,
+              mint: clientConfig ? clientConfig.collateralMint : null,
+              amount: "1000000000000"
+            }];
+          }
+        }
         client = Tx.createPredictClient({
           programId: programId,
-          config: decodedConfig || (fixtureBundle ? fixtureBundle.config : null),
+          config: clientConfig,
           wallet: demoWallet,
           mode: source.kind === "fixture" ? "fixture" : "live",
-          now: nowSec,
-          data: source
+          /* predict-tx treats a numeric now as MILLISECONDS; the
+             shell works in seconds, so convert at this boundary. */
+          now: nowSec * 1000,
+          data: clientData
         });
       } else {
         text(status, "Read-only board: the transaction module has not landed yet, so buy, claim and create are disabled.");
@@ -5463,15 +5720,19 @@ if (typeof window !== "undefined") {
     });
     var banner = el("fixture-banner");
     if (banner && RugCall.FIXTURE_BANNER && source.kind === "fixture") {
-      banner.textContent = RugCall.FIXTURE_BANNER + " The money is devnet. The evidence is mainnet.";
+      banner.textContent = RugCall.FIXTURE_BANNER;
     }
-    /* Wallet bar: provider chooser from the wallet module. */
+    /* Wallet bar: this build is demo-wallet-only. The provider
+       select lists detected providers by their LABEL for display;
+       the Connect provider button stays disabled (see the static
+       markup) because no provider connection is wired in this
+       build. */
     var select = el("provider-select");
     if (select && Wallet && typeof Wallet.detectProviders === "function") {
       var providers = Wallet.detectProviders() || [];
       select.innerHTML = providers.length
         ? providers.map(function (p, i) {
-            var name = field(p, ["name", "id", "provider"]) || ("Provider " + (i + 1));
+            var name = field(p, ["label", "name", "id"]) || ("Provider " + (i + 1));
             return '<option value="' + i + '">' + String(name).replace(/</g, "&lt;") + "</option>";
           }).join("")
         : '<option value="">No wallet provider detected</option>';
@@ -5481,11 +5742,10 @@ if (typeof window !== "undefined") {
       text(el("wallet-status"), "Demo wallet connected (simulated in fixture mode): " + (demoAddress || "unknown"));
     });
     var provBtn = el("connect-provider");
-    if (provBtn) provBtn.addEventListener("click", function () {
-      text(el("wallet-status"), "Provider connection runs through the wallet adapter; in fixture mode nothing is sent.");
-      var nb = el("network-banner");
-      if (nb && UI) nb.innerHTML = UI.renderBanner({ sourceKind: source.kind, walletConnected: true, network: "unknown" });
-    });
+    if (provBtn) {
+      provBtn.disabled = true;
+      provBtn.textContent = "Connect provider (demo-wallet-only in this build)";
+    }
   }
 
   /* ---------- Boot ---------------------------------------------------- */

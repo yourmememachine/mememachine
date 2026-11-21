@@ -82,10 +82,12 @@ function explorerHref(id) {
   return "https://explorer.solana.com/address/" + id + "?cluster=devnet";
 }
 
-/* Statically rendered program section. Exactly one link per known
-   account: the program, plus the replay market and the resolver when
-   the replay record names them. No nested div elements, so the dev
-   shell markup can be replaced with a simple span. */
+/* Statically rendered program section. ONLY the program id links
+   to the devnet explorer: it is the one real on-chain account here.
+   The replay market and the fixture-config resolver are fixture
+   (replay record) values, so they render as plain text labelled as
+   such — never as explorer links. No nested div elements, so the
+   dev shell markup can be replaced with a simple span. */
 function renderProgramSection(programId, replay) {
   if (!programId) {
     return '<p class="program-placeholder">' + PLACEHOLDER_TEXT + "</p>" +
@@ -99,8 +101,8 @@ function renderProgramSection(programId, replay) {
     : null;
   const resolver = replay && replay.record ? fieldOf(replay.record, ["resolver"]) : null;
   let items = '<li><a href="' + explorerHref(programId) + '" rel="noopener">Program ' + programId + "</a></li>";
-  if (market) items += '<li><a href="' + explorerHref(market) + '" rel="noopener">Market ' + market + "</a></li>";
-  if (resolver) items += '<li><a href="' + explorerHref(resolver) + '" rel="noopener">Resolver ' + resolver + "</a></li>";
+  if (market) items += "<li>Market " + market + " — fixture (replay record) value, not an on-chain account</li>";
+  if (resolver) items += "<li>Resolver " + resolver + " — fixture (replay record) value, not an on-chain account</li>";
   return "<p>Program ID: <code>" + programId + "</code> (devnet)</p><ul>" + items + "</ul>";
 }
 

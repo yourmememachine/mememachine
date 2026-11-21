@@ -116,11 +116,36 @@ function loadLedger(ledgerPath) {
   return parsed;
 }
 
-function ledgerEntryIsFinal(entry) {
+// Ledger entries are tagged with the mode that wrote them. Entries
+// written before the tag existed carry no mode and are treated as
+// dry-run entries: the safe direction, because a live pass must
+// never mistake an untagged (possibly dry-run) decision for its own
+// confirmed work, while a dry-run pass is separately barred below
+// from overwriting any submitted entry.
+function ledgerEntryMode(entry) {
+  return entry && typeof entry.mode === "string" ? entry.mode : "dry-run";
+}
+
+function ledgerEntryIsFinal(entry, mode) {
+  if (!entry || typeof entry !== "object") return false;
+  if (ledgerEntryMode(entry) !== (mode || "dry-run")) return false;
   return (
-    entry &&
+    entry.action === "WOULD_RESOLVE" ||
+    entry.action === "WOULD_CANCEL" ||
+    entry.action === "SUBMIT_FAILED_FINAL"
+  );
+}
+
+// An entry that records an actual broadcast. Only the live re-poll
+// path that owns the signature may ever replace one of these; every
+// decision pass (either mode) leaves it untouched.
+function isSubmittedLedgerEntry(entry) {
+  return (
+    !!entry &&
     typeof entry === "object" &&
-    (entry.action === "WOULD_RESOLVE" || entry.action === "WOULD_CANCEL")
+    (entry.submitted === true ||
+      entry.action === "SUBMITTED_UNCONFIRMED" ||
+      entry.action === "SUBMIT_FAILED_FINAL")
   );
 }
 
@@ -145,6 +170,9 @@ function createResolver(options) {
   // fixture pass share the exact same decision code.
   const evidenceByMarket = opts.evidenceByMarket || null;
   const evidenceProvider = opts.evidenceProvider || null;
+  // Which mode's ledger this pass owns: "dry-run" for the fixture
+  // resolver, "live" for the decision pass inside the live runner.
+  const ledgerMode = opts.mode || "dry-run";
 
   let crewStore =
     opts.crewStore !== undefined ? opts.crewStore : ev.emptyCrewStore();
@@ -237,8 +265,15 @@ function createResolver(options) {
       // market is skipped only until that time is reached.
       const prior = ledger[market.address];
       if (prior && typeof prior === "object") {
-        if (ledgerEntryIsFinal(prior)) {
+        if (ledgerEntryIsFinal(prior, ledgerMode)) {
           emit(baseRecord(market, "SKIP_LEDGER", "already-in-ledger"));
+          continue;
+        }
+        if (isSubmittedLedgerEntry(prior)) {
+          // A broadcast already happened for this market. No decision
+          // pass may overwrite that entry or decide the market again;
+          // the live re-poll path owns its outcome.
+          emit(baseRecord(market, "SKIP_LEDGER", "submitted-entry-owned-by-live-repoll"));
           continue;
         }
         if (
@@ -316,6 +351,7 @@ function createResolver(options) {
           record.next_retry_at = passNow + RETRY_SEC;
           ledger[market.address] = {
             ...(ledger[market.address] || {}),
+            mode: ledgerMode,
             next_retry_at: passNow + RETRY_SEC,
           };
           ledgerDirty = true;
@@ -350,6 +386,7 @@ function createResolver(options) {
         record.bundle_sha256 = null;
         ledger[mkt.address] = {
           action: "WOULD_CANCEL",
+          mode: ledgerMode,
           outcome: null,
           hard_trigger: 0,
           evidence_hash: null,
@@ -487,6 +524,7 @@ function createResolver(options) {
         record.bundle_sha256 = bundleSha256;
         ledger[mkt.address] = {
           action: "WOULD_RESOLVE",
+          mode: ledgerMode,
           outcome,
           hard_trigger: triggerId,
           evidence_hash: hashHex,
@@ -615,6 +653,37 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer);
   });
+}
+
+// Bound for re-polling a submitted-but-unconfirmed signature: 5
+// re-polls. Re-polls run on the RETRY_SEC (1h) cadence, so 5 spans
+// ~5 hours, while a Solana transaction's recent blockhash stays
+// valid for ~150 blocks (roughly a minute) -- a signature still
+// unlanded after 5 hourly re-polls cannot land later, so the entry
+// goes terminal instead of deferring (and risking a blind
+// resubmission) forever. The signature stays on the terminal entry
+// for manual reconciliation.
+const UNCONFIRMED_MAX_REPOLLS = 5;
+
+// Market account layout, mirroring programs/crates/rug-call
+// state.rs byte for byte (142 bytes, discriminator 2): subject_mint
+// at 1, creator at 33, created_at i64 LE at 65, expiry i64 LE at
+// 73, state at 97.
+const MARKET_ACCOUNT_LEN = 142;
+const MARKET_DISCRIMINATOR = 2;
+
+function decodeMarketAccount(data) {
+  const bytes = Buffer.from(data || []);
+  if (bytes.length !== MARKET_ACCOUNT_LEN || bytes[0] !== MARKET_DISCRIMINATOR) {
+    return null;
+  }
+  return {
+    subject_mint: submitLib.base58Encode(bytes.subarray(1, 33)),
+    creator: submitLib.base58Encode(bytes.subarray(33, 65)),
+    created_at: Number(bytes.readBigInt64LE(65)),
+    expiry: Number(bytes.readBigInt64LE(73)),
+    state: bytes[97],
+  };
 }
 
 function signatureStatusConfirmed(status) {
@@ -924,6 +993,58 @@ function createLiveRunner(options) {
       );
     }
 
+    // (11) Every market in the file is read back on-chain. The
+    // resolver-only rules (the F5 timestamp gate, the grace clock)
+    // have no on-chain backstop, so the file's state/expiry/creator/
+    // subject_mint must match the chain exactly -- a file expiry
+    // later than the chain's would misclassify qualifying triggers
+    // and pollute the bundle's expirySec.
+    for (const market of marketsObj.markets || []) {
+      let marketInfo;
+      try {
+        marketInfo = await chain.getAccountInfo(market.address);
+      } catch (err) {
+        return refusal("rpc-unreachable", err.message);
+      }
+      if (!marketInfo) {
+        return refusal(
+          "market-missing",
+          `no account found for market ${market.address}`,
+          { market: market.address }
+        );
+      }
+      const decoded = decodeMarketAccount(marketInfo.data);
+      if (marketInfo.owner !== effectiveProgramId || !decoded) {
+        return refusal(
+          "market-chain-mismatch",
+          `market ${market.address} is not a readable RugCall market account owned by ${effectiveProgramId} (owner ${marketInfo.owner})`,
+          { market: market.address, field: "owner" }
+        );
+      }
+      const mismatches = [];
+      if (decoded.state !== market.state) {
+        mismatches.push(`state file ${market.state} vs chain ${decoded.state}`);
+      }
+      if (decoded.expiry !== market.expiry) {
+        mismatches.push(`expiry file ${market.expiry} vs chain ${decoded.expiry}`);
+      }
+      if (decoded.creator !== market.creator) {
+        mismatches.push(`creator file ${market.creator} vs chain ${decoded.creator}`);
+      }
+      if (decoded.subject_mint !== market.subject_mint) {
+        mismatches.push(
+          `subject_mint file ${market.subject_mint} vs chain ${decoded.subject_mint}`
+        );
+      }
+      if (mismatches.length > 0) {
+        return refusal(
+          "market-chain-mismatch",
+          `market ${market.address} differs from the chain: ${mismatches.join("; ")}`,
+          { market: market.address }
+        );
+      }
+    }
+
     if (!submitter) {
       submitter = submitLib.createSubmitter({ chain, signer });
     }
@@ -931,7 +1052,7 @@ function createLiveRunner(options) {
     const persistLiveEntry = (address, entry) => {
       if (!ledgerPath) return;
       const ledger = loadLedger(ledgerPath);
-      ledger[address] = entry;
+      ledger[address] = { ...entry, mode: "live" };
       writeFileAtomic(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
     };
 
@@ -959,6 +1080,7 @@ function createLiveRunner(options) {
         if (signatureStatusConfirmed(status)) {
           ledger[address] = {
             action: entry.pending_action || "WOULD_RESOLVE",
+            mode: "live",
             outcome: entry.outcome !== undefined ? entry.outcome : null,
             hard_trigger:
               entry.hard_trigger !== undefined ? entry.hard_trigger : 0,
@@ -987,8 +1109,66 @@ function createLiveRunner(options) {
             submitted: true,
             signature: entry.signature,
           });
+        } else if (
+          (status && status.err) ||
+          (typeof entry.repoll_count === "number"
+            ? entry.repoll_count
+            : 0) + 1 >= UNCONFIRMED_MAX_REPOLLS
+        ) {
+          // Terminal handling (see UNCONFIRMED_MAX_REPOLLS): an
+          // on-chain error is definitive, and a signature still
+          // unlanded at the re-poll bound cannot land later. The
+          // entry goes final as FAILED -- automatic resubmission
+          // stops, and the signature stays on record.
+          const repolls =
+            (typeof entry.repoll_count === "number" ? entry.repoll_count : 0) + 1;
+          ledger[address] = {
+            action: "SUBMIT_FAILED_FINAL",
+            mode: "live",
+            pending_action: entry.pending_action || "WOULD_RESOLVE",
+            outcome: entry.outcome !== undefined ? entry.outcome : null,
+            hard_trigger:
+              entry.hard_trigger !== undefined ? entry.hard_trigger : 0,
+            evidence_hash:
+              entry.evidence_hash !== undefined ? entry.evidence_hash : null,
+            bundle_path:
+              entry.bundle_path !== undefined ? entry.bundle_path : null,
+            submitted: true,
+            signature: entry.signature,
+            decided_at: entry.decided_at || passNow,
+            failed_at: passNow,
+            repoll_count: repolls,
+            reason:
+              status && status.err
+                ? `transaction failed on chain: ${JSON.stringify(status.err)}`
+                : `signature still unconfirmed after ${repolls} re-polls`,
+          };
+          changed = true;
+          emit({
+            ts: passNow,
+            action: "SUBMIT_FAILED",
+            market: address,
+            subject_mint: null,
+            creator: null,
+            resolver: signer.pubkey,
+            program_id: effectiveProgramId,
+            expiry: null,
+            decision_reason: "submitted-unconfirmed-terminal",
+            qualifying_triggers: [],
+            excluded_triggers: [],
+            signed: true,
+            submitted: true,
+            signature: entry.signature,
+            reason: ledger[address].reason,
+          });
         } else {
-          ledger[address] = { ...entry, next_retry_at: passNow + RETRY_SEC };
+          ledger[address] = {
+            ...entry,
+            mode: "live",
+            repoll_count:
+              (typeof entry.repoll_count === "number" ? entry.repoll_count : 0) + 1,
+            next_retry_at: passNow + RETRY_SEC,
+          };
           changed = true;
         }
       }
@@ -1002,6 +1182,7 @@ function createLiveRunner(options) {
     // submissions that actually happen).
     const resolver = createResolver({
       resolverPubkey: signer.pubkey,
+      mode: "live",
       now: passNow,
       outDir,
       ledgerPath,
@@ -1037,6 +1218,7 @@ function createLiveRunner(options) {
         if (record.action === "DEFERRED_PARTIAL") {
           ledger[record.market] = {
             ...(ledger[record.market] || {}),
+            mode: "live",
             next_retry_at: record.next_retry_at,
           };
           deferralChanged = true;
@@ -1062,6 +1244,51 @@ function createLiveRunner(options) {
           },
         });
       } catch (err) {
+        // A throw that carries a signature means the transaction was
+        // broadcast and may have landed: persist it as unconfirmed
+        // (the re-poll path owns it from here) instead of recording
+        // a signature-less failure the next pass would resubmit.
+        const thrownSignature =
+          err && typeof err.signature === "string" ? err.signature : null;
+        if (thrownSignature) {
+          const nextRetryAt = passNow + RETRY_SEC;
+          emit({
+            ts: passNow,
+            action: "SUBMITTED_UNCONFIRMED",
+            market: record.market,
+            subject_mint: record.subject_mint,
+            creator: record.creator,
+            resolver: signer.pubkey,
+            program_id: effectiveProgramId,
+            expiry: record.expiry,
+            decision_reason: "submitted-unconfirmed",
+            qualifying_triggers: record.qualifying_triggers,
+            excluded_triggers: record.excluded_triggers,
+            signed: true,
+            submitted: true,
+            signature: thrownSignature,
+            next_retry_at: nextRetryAt,
+            reason: err.message,
+          });
+          persistLiveEntry(record.market, {
+            action: "SUBMITTED_UNCONFIRMED",
+            pending_action: record.action,
+            outcome: record.outcome !== undefined ? record.outcome : null,
+            hard_trigger:
+              record.hard_trigger !== undefined ? record.hard_trigger : 0,
+            evidence_hash:
+              record.evidence_hash !== undefined ? record.evidence_hash : null,
+            bundle_path:
+              record.bundle_path !== undefined ? record.bundle_path : null,
+            submitted: true,
+            signature: thrownSignature,
+            decided_at: passNow,
+            next_retry_at: nextRetryAt,
+            repoll_count: 0,
+          });
+          exitCode = 4;
+          continue;
+        }
         emit({
           ts: passNow,
           action: "SUBMIT_FAILED",
@@ -1133,6 +1360,7 @@ function createLiveRunner(options) {
           signature: signature || null,
           decided_at: passNow,
           next_retry_at: nextRetryAt,
+          repoll_count: 0,
         });
         exitCode = 4;
       }
@@ -1644,6 +1872,9 @@ module.exports = {
   buildChainDeps,
   buildLiveDeps,
   validateMarkets,
+  ledgerEntryIsFinal,
+  decodeMarketAccount,
+  UNCONFIRMED_MAX_REPOLLS,
   DEFAULT_RESOLVER_PUBKEY,
   DEVNET_RPC_URL,
   MAINNET_RPC_URL,

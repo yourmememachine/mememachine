@@ -121,6 +121,19 @@ function signerFromBytes(keypairBytes) {
     format: "der",
     type: "pkcs8",
   });
+  // The stored second half is a claim, not a fact: derive the public
+  // key from the seed and refuse a file whose halves do not belong
+  // together -- signing with the seed while reporting the stored
+  // pubkey would build transactions for the wrong account.
+  const derivedJwk = crypto
+    .createPublicKey(privateKey)
+    .export({ format: "jwk" });
+  const derivedPubkeyBytes = Buffer.from(derivedJwk.x, "base64url");
+  if (!derivedPubkeyBytes.equals(pubkeyBytes)) {
+    throw new Error(
+      "keypair public key does not match the public key derived from its seed"
+    );
+  }
   return {
     pubkey: base58Encode(pubkeyBytes),
     pubkeyBytes,
@@ -310,18 +323,30 @@ function createSubmitter(options) {
     if (!signature || typeof signature !== "string") {
       throw new Error("chain did not return a signature for the transaction");
     }
+    // From here on the transaction may already have landed, so the
+    // signature must never be lost to a throw: any polling error or
+    // on-chain failure is rethrown with the signature attached, and
+    // the caller persists it as an unconfirmed submission instead of
+    // recording a signature-less failure that would resubmit blind.
     if (typeof chain.getSignatureStatus === "function") {
-      for (let attempt = 0; attempt < pollAttempts; attempt += 1) {
-        const status = await chain.getSignatureStatus(signature);
-        if (status && status.err) {
-          throw new Error(
-            `transaction ${signature} failed on chain: ${JSON.stringify(status.err)}`
-          );
+      try {
+        for (let attempt = 0; attempt < pollAttempts; attempt += 1) {
+          const status = await chain.getSignatureStatus(signature);
+          if (status && status.err) {
+            throw new Error(
+              `transaction ${signature} failed on chain: ${JSON.stringify(status.err)}`
+            );
+          }
+          if (statusIsConfirmed(status)) {
+            return { signature, confirmed: true };
+          }
+          if (attempt + 1 < pollAttempts) await sleep(pollIntervalMs);
         }
-        if (statusIsConfirmed(status)) {
-          return { signature, confirmed: true };
+      } catch (err) {
+        if (err && typeof err === "object" && !err.signature) {
+          err.signature = signature;
         }
-        if (attempt + 1 < pollAttempts) await sleep(pollIntervalMs);
+        throw err;
       }
       return { signature, confirmed: false };
     }

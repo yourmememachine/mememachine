@@ -224,6 +224,41 @@ test("primitives: sha256 of abc matches the published digest", () => {
     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 });
 
+/* isOnCurve adversarial encodings, expected per Solana's curve
+   rules (ed25519 decompression): y is read little-endian from the
+   low 255 bits, the top bit is the sign of x, x^2 = (y^2-1)/(d y^2+1);
+   an encoding is on-curve iff y < p and x^2 is a quadratic residue,
+   or x^2 is zero with the sign bit CLEAR (a zero x with the sign
+   bit set is rejected by decompression). */
+function curveEncoding(y, signBit) {
+  const bytes = new Uint8Array(32);
+  let v = y;
+  for (let i = 0; i < 32; i++) { bytes[i] = Number(v & 0xffn); v >>= 8n; }
+  if (signBit) bytes[31] |= 0x80;
+  return bytes;
+}
+const FIELD_P = (1n << 255n) - 19n;
+
+test("curve: the identity point (y=1, x=0, sign clear) is on-curve", () => {
+  assert.equal(tx.isOnCurve(curveEncoding(1n, 0)), true);
+});
+
+test("curve: the identity encoding with the sign bit set is rejected (zero x, negative sign)", () => {
+  assert.equal(tx.isOnCurve(curveEncoding(1n, 1)), false);
+});
+
+test("curve: (0, -1) is on-curve with sign clear and rejected with the sign bit set", () => {
+  assert.equal(tx.isOnCurve(curveEncoding(FIELD_P - 1n, 0)), true);
+  assert.equal(tx.isOnCurve(curveEncoding(FIELD_P - 1n, 1)), false);
+});
+
+test("curve: y >= p encodings are not on-curve", () => {
+  assert.equal(tx.isOnCurve(curveEncoding(FIELD_P, 0)), false);
+  assert.equal(tx.isOnCurve(curveEncoding(FIELD_P + 1n, 0)), false);
+  assert.equal(tx.isOnCurve(curveEncoding((1n << 255n) - 1n, 0)), false);
+  assert.equal(tx.isOnCurve(curveEncoding((1n << 255n) - 1n, 1)), false);
+});
+
 test("primitives: sha256 of one million a bytes matches the published digest", () => {
   const input = new Uint8Array(1000000).fill(0x61);
   assert.equal(tx.sha256Hex(input),

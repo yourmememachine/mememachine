@@ -13,7 +13,8 @@
  * module:
  *   FIXTURE_BANNER     -- the demo banner for the seeded board.
  *   FIXTURE_DATA_LABEL -- shown while the board is served from
- *                         fixtures because no program id is set.
+ *                         recorded fixture data (explicit fixture
+ *                         mode; the bound program id is unaffected).
  * Amounts are decimal strings at every boundary of this module;
  * BigInt appears only inside the math. Base58 encoding and the
  * parimutuel payout come from predict-tx.js (the RugCallTx
@@ -21,8 +22,17 @@
  */
 "use strict";
 
-var FIXTURE_BANNER = "Devnet demo — play money (dUSDC), evidence read live from Solana mainnet";
-var FIXTURE_DATA_LABEL = "Fixture data — devnet program not deployed yet (program_id null)";
+var FIXTURE_BANNER = "Devnet demo — play money (dUSDC); the evidence shown on this page is recorded snapshots, not live reads";
+var FIXTURE_DATA_LABEL = "Fixture data — recorded markets and evidence snapshots (the program is deployed on devnet; this page serves the recorded fixture data, not live chain reads)";
+
+/* Fixture epoch: the pinned clock for fixture mode. The recorded
+   fixture markets were created at 1799913600 with 24h terms
+   (expiry 1800000000), so the fixture clock sits inside that
+   window — cards show hours left, not the ~55 days a wall clock
+   in 2026 would compute against the 2027 fixture timestamps, and
+   never 1970. Fixture/replay timestamps themselves are recorded
+   provenance and are never rewritten. */
+var FIXTURE_NOW_SEC = 1799950000;
 
 /* Account lengths and discriminators, mirroring state.rs. */
 var MARKET_LEN = 142;
@@ -294,18 +304,20 @@ function totalStakeOf(position) {
 }
 
 /*
- * Claim preview with the frozen branch precedence: no position,
- * then already claimed, then market still open, then the
- * cancelled refund, then the resolved branches (inconsistent
- * outcome, zero winning pool refund, no winning stake, payout).
- * The total pool is built with checked addition inside the
- * payout branch only, so an overflowing pool can never block a
- * refund whose amount does not depend on the pools.
+ * Claim preview with the program's frozen branch precedence —
+ * the same order predict-tx's preflightClaim and the program
+ * handler use: market still open FIRST, then position existence,
+ * then already claimed, then the cancelled refund, then the
+ * resolved branches (inconsistent outcome, zero winning pool
+ * refund, no winning stake, payout). The total pool is built
+ * with checked addition inside the payout branch only, so an
+ * overflowing pool can never block a refund whose amount does
+ * not depend on the pools.
  */
 function computeClaimPreview(market, position) {
+  if (!market || market.state === STATE_OPEN) return { kind: "none", reason: "market-open" };
   if (!position) return { kind: "none", reason: "no-position" };
   if (position.claimed) return { kind: "none", reason: "already-claimed" };
-  if (!market || market.state === STATE_OPEN) return { kind: "none", reason: "market-open" };
   var totalStake = totalStakeOf(position);
   if (market.state === STATE_CANCELLED) {
     if (BigInt(totalStake) > 0n) return { kind: "refund", amountRaw: totalStake, reason: "cancelled" };
@@ -394,13 +406,38 @@ function parseDusdcToRaw(str) {
   return raw.toString();
 }
 
+/* ------------------------------------------------------------------ */
+/* evidence.js access (the resolver's definiteness rules live there)   */
+/* ------------------------------------------------------------------ */
+
+var evidenceCache = null;
+function loadEvidenceModule() {
+  if (evidenceCache) return evidenceCache;
+  var m = null;
+  if (typeof require === "function") {
+    try { m = require("./evidence.js"); } catch (err) { m = null; }
+  }
+  if (!m && typeof globalThis !== "undefined" && typeof globalThis.triggerDefiniteStates === "function") {
+    m = { triggerDefiniteStates: globalThis.triggerDefiniteStates };
+  }
+  if (!m && typeof window !== "undefined" && typeof window.triggerDefiniteStates === "function") {
+    m = { triggerDefiniteStates: window.triggerDefiniteStates };
+  }
+  if (m) evidenceCache = m;
+  return m;
+}
+
 /*
  * Per-trigger display states from an evaluateEvidence result.
- * A trigger reads as unknown whenever the data it depends on was
- * never checked: H1 needs a history with a numeric strike count,
- * H2 needs both the bundle and the funder read, H3 needs the
- * sells check to have run, H4 needs a liquidity state other than
- * unknown, and H5 needs the funder read. A definite trigger is
+ * Definiteness is SINGLE-SOURCED from the resolver: this module
+ * builds the presence-level families object and consumes
+ * triggerDefiniteStates(families) from evidence.js — it does not
+ * apply its own values-level rules. Presence is what counts: a
+ * bundle that is present with pct:null still makes H2 definite,
+ * and a history with a numeric strike count makes H1 definite
+ * even when missingCore still names "history" (the resolver's
+ * H1 reads the combined history, which can be present while the
+ * creator-history core input is missing). A definite trigger is
  * then fired or not-fired on its recorded flag.
  */
 function evidenceTriggerStates(evalResult) {
@@ -415,15 +452,36 @@ function evidenceTriggerStates(evalResult) {
   }
   function vals(t) { return (t && t.values && typeof t.values === "object") ? t.values : {}; }
   var t1 = trig(1), t2 = trig(2), t3 = trig(3), t4 = trig(4), t5 = trig(5);
-  var v1 = vals(t1), v2 = vals(t2), v3 = vals(t3), v4 = vals(t4);
-  var definite = [
-    typeof v1.strikes === "number" && (!missing || missing.indexOf("history") === -1),
-    typeof v2.pct === "number" && typeof v2.sharedFunderInWindow === "boolean" &&
-      (!missing || (missing.indexOf("bundle") === -1 && missing.indexOf("funders") === -1)),
-    v3.checked === true,
-    typeof v4.state === "string" && v4.state !== "unknown",
-    !missing || missing.indexOf("funders") === -1
-  ];
+  var v1 = vals(t1), v3 = vals(t3), v4 = vals(t4);
+  function present(name) {
+    return !missing || missing.indexOf(name) === -1;
+  }
+  var families = {
+    bundle: present("bundle") ? true : null,
+    funders: present("funders") ? true : null,
+    history: t1 ? { strikes: typeof v1.strikes === "number" ? v1.strikes : null } : null,
+    sells: t3 ? { checked: v3.checked === true } : null,
+    liquidity: t4 ? { state: typeof v4.state === "string" ? v4.state : null } : null,
+    missingCore: missing ? missing.slice() : []
+  };
+  var ev = loadEvidenceModule();
+  var definiteMap = null;
+  if (ev && typeof ev.triggerDefiniteStates === "function") {
+    try { definiteMap = ev.triggerDefiniteStates(families); } catch (err) { definiteMap = null; }
+  }
+  if (!definiteMap) {
+    /* Fallback mirror of the resolver's presence-level semantics,
+       used only until the evidence.js export is present in the
+       same load; it must agree with triggerDefiniteStates. */
+    definiteMap = {
+      H1: !!(families.history && typeof families.history.strikes === "number"),
+      H2: !!(families.bundle && families.funders),
+      H3: !!(families.sells && families.sells.checked === true),
+      H4: !!(families.liquidity && typeof families.liquidity.state === "string" && families.liquidity.state !== "unknown"),
+      H5: !!families.funders
+    };
+  }
+  var definite = [definiteMap.H1, definiteMap.H2, definiteMap.H3, definiteMap.H4, definiteMap.H5];
   var list = [t1, t2, t3, t4, t5];
   return list.map(function (t, i) {
     if (!t || !definite[i]) return "unknown";
@@ -618,7 +676,7 @@ function createFixtureSource(programId, fixtureBundle, nowSec) {
   return {
     kind: "fixture",
     programId: programId,
-    nowSec: typeof nowSec === "number" ? nowSec : null,
+    nowSec: typeof nowSec === "number" ? nowSec : FIXTURE_NOW_SEC,
     getConfig: async function () { return normFixtureConfig(bundle()); },
     listMarkets: async function () { return sortMarkets(markets()); },
     getMarket: async function (address) {
@@ -763,9 +821,22 @@ function createDevnetSource(programId, transport, nowSec) {
   return source;
 }
 
+/*
+ * Source selection is EXPLICIT, never keyed off the program id:
+ * the program id is a display/PDA binding, not a source selector.
+ *   mode: "fixture" -> the recorded fixture source, whatever
+ *     program id is bound (the embedded/standalone judge path
+ *     uses this: the real deployed id stays bound and displayed
+ *     while the board is served from the recorded bundle);
+ *   mode: "devnet"  -> the transport-backed devnet source;
+ *   no mode         -> the legacy default (fixture only when no
+ *     program id is set, devnet otherwise).
+ */
 function createDataSource(opts) {
   var o = opts || {};
   var programId = typeof o.programId === "undefined" ? null : o.programId;
+  if (o.mode === "fixture") return createFixtureSource(programId, o.fixtureBundle, o.nowSec);
+  if (o.mode === "devnet") return createDevnetSource(programId, o.transport, o.nowSec);
   if (programId === null) return createFixtureSource(null, o.fixtureBundle, o.nowSec);
   return createDevnetSource(programId, o.transport, o.nowSec);
 }
@@ -777,6 +848,7 @@ function createDataSource(opts) {
 var RugCallPredict = {
   FIXTURE_BANNER: FIXTURE_BANNER,
   FIXTURE_DATA_LABEL: FIXTURE_DATA_LABEL,
+  FIXTURE_NOW_SEC: FIXTURE_NOW_SEC,
   MARKET_LEN: MARKET_LEN,
   POSITION_LEN: POSITION_LEN,
   CONFIG_LEN: CONFIG_LEN,

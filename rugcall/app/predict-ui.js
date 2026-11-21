@@ -215,8 +215,10 @@ function fallbackComputeOdds(market) {
   if (total === 0n) {
     return { flaggedBps: null, survivesBps: null, flaggedPct: null, survivesPct: null, oneSided: false, totalPool: "0" };
   }
+  /* Canonical floored bps pair, like predict.js computeOdds:
+     each side is floored independently (they can sum to 9999). */
   var fBps = Number((flagged * 10000n) / total);
-  var sBps = 10000 - fBps;
+  var sBps = Number((survives * 10000n) / total);
   return {
     flaggedBps: fBps,
     survivesBps: sBps,
@@ -257,10 +259,18 @@ function fallbackClaimPreview(market, position) {
   if (!flaggedWon && !survivesWon) return { kind: "error", reason: "inconsistent-state" };
   var winStake = flaggedWon ? flagged : survives;
   var winPool = flaggedWon ? toBig(market.flaggedPool) : toBig(market.survivesPool);
-  if (winStake === 0n) return { kind: "no-claim", reason: "no-winning-stake" };
-  if (winPool === 0n || winPool === totalPool) {
-    return { kind: "refund", amountRaw: totalStake.toString(), reason: "one-sided-pool" };
+  /* Mirror the program (and predict.js): the zero-winning-pool
+     refund is checked BEFORE the winning-stake check — a holder
+     with no winning-side stake is still refunded in full when
+     the winning pool is zero. A one-sided pool where the winning
+     side IS the whole pool is not a refund: it pays through the
+     payout branch below (winStake * totalPool / winPool, which
+     is exactly the winning-side stake). */
+  if (winPool === 0n) {
+    if (totalStake > 0n) return { kind: "refund", amountRaw: totalStake.toString(), reason: "zero-winning-pool" };
+    return { kind: "no-claim", reason: "zero-total-stake" };
   }
+  if (winStake === 0n) return { kind: "no-claim", reason: "no-winning-stake" };
   var payout = (winStake * totalPool) / winPool;
   return { kind: "payout", amountRaw: payout.toString() };
 }
