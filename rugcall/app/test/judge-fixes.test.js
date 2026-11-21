@@ -21,6 +21,7 @@ const predict = require("../predict.js");
 const tx = require("../predict-tx.js");
 const ui = require("../predict-ui.js");
 const ev = require("../evidence.js");
+const walletModule = require("../predict-wallet.js");
 const judgePage = require("../build-judge-page.js");
 
 const APP_DIR = path.join(__dirname, "..");
@@ -231,4 +232,104 @@ test("fix13: absent families still read unknown through predict.evidenceTriggerS
   r.hardTriggers[3].values = { state: "unknown" };
   assert.deepEqual(predict.evidenceTriggerStates(r),
     ["unknown", "unknown", "unknown", "unknown", "unknown"]);
+});
+
+/* ---------------- shipped page: the embedded bundle itself ----------------
+ * The shipped-bundle flow tests in predict-tx.test.js load the
+ * SOURCE fixture bundle (test/fixtures/app-markets.json). The page
+ * a judge opens is judge.html, whose embedded copy is produced by
+ * build-judge-page.js — a forgotten regeneration would leave the
+ * source tests green while the shipped page kept stale data. These
+ * tests pin the built page: its embedded fixtures and replay must
+ * equal the source files, its source-hash stamp must recompute,
+ * and a buy on the embedded H2 market must succeed through the
+ * shell's own construction, with the shell literals read out of
+ * the built page rather than the source shell. */
+
+const JUDGE_HTML = fs.readFileSync(path.join(APP_DIR, "judge.html"), "utf8");
+
+function embeddedJson(id) {
+  const m = JUDGE_HTML.match(new RegExp(
+    '<script type="application/json" id="' + id + '">([\\s\\S]*?)</script>'));
+  assert.ok(m, "judge.html embeds " + id);
+  return JSON.parse(m[1]);
+}
+
+function judgeShellLiteral(prefix) {
+  const m = JUDGE_HTML.match(new RegExp('"(Fixture' + prefix + '[1-9A-HJ-NP-Za-km-z]+)"'));
+  assert.ok(m, "judge.html carries a " + prefix + " fixture literal");
+  return m[1];
+}
+
+test("shipped page: judge.html's embedded fixtures and replay equal the source files", () => {
+  assert.deepEqual(embeddedJson("rugcall-embedded-fixtures"), BUNDLE);
+  assert.deepEqual(embeddedJson("rugcall-embedded-replay"), REPLAY);
+});
+
+test("shipped page: judge.html's source-hash stamp recomputes from the source files", () => {
+  const m = JUDGE_HTML.match(/<meta name="rugcall-source-hashes" content='([^']*)'>/);
+  assert.ok(m, "judge.html carries the source-hash stamp");
+  const hashes = JSON.parse(m[1]);
+  assert.equal(hashes["app-markets.json"],
+    judgePage.sha256Hex(fs.readFileSync(path.join(__dirname, "fixtures", "app-markets.json"))));
+  assert.equal(hashes["predict-tx.js"],
+    judgePage.sha256Hex(fs.readFileSync(path.join(APP_DIR, "predict-tx.js"))));
+});
+
+test("shipped page: a buy on the embedded H2 market uses the page's derivation path", async () => {
+  const embeddedReplay = embeddedJson("rugcall-embedded-replay");
+  const data = embeddedJson("rugcall-embedded-fixtures");
+  // Mirror of the shell construction in index.html, run against the
+  // BUILT page's embedded data: replay-first program id, decoded
+  // config from the fixture source, the shell's collateral-mint
+  // substitution (literal read from judge.html), the demo wallet,
+  // the injected demo token record, the pinned fixture clock.
+  const programId = (embeddedReplay.config && embeddedReplay.config.programId) ||
+    data.program_id;
+  assert.equal(programId, REAL_PROGRAM_ID);
+  const source = predict.createDataSource({
+    programId: programId, fixtureBundle: data,
+    nowSec: predict.FIXTURE_NOW_SEC, mode: "fixture",
+  });
+  const decodedConfig = await source.getConfig().catch(() => null);
+  let clientConfig = decodedConfig || data.config;
+  if (clientConfig && !clientConfig.collateralMint) {
+    const cfgCopy = {};
+    Object.keys(clientConfig).forEach((k) => { cfgCopy[k] = clientConfig[k]; });
+    cfgCopy.collateralMint = judgeShellLiteral("Co");
+    clientConfig = cfgCopy;
+  }
+  const demoWallet = walletModule.createDemoWallet(data);
+  const demoAddress = String(demoWallet.publicKey);
+  if (!Array.isArray(data.tokens)) {
+    data.tokens = [{
+      address: judgeShellLiteral("Demo"),
+      owner: demoAddress,
+      mint: clientConfig ? clientConfig.collateralMint : null,
+      amount: "1000000000000",
+    }];
+  }
+  const client = tx.createPredictClient({
+    programId: programId,
+    config: clientConfig,
+    wallet: demoWallet,
+    mode: "fixture",
+    now: predict.FIXTURE_NOW_SEC * 1000,
+    data,
+  });
+  const h2 = data.markets.find((mk) => mk.address === embeddedReplay.market.address);
+  assert.ok(h2, "the embedded bundle carries the replay (H2) market");
+  assert.equal(h2.state, 1);
+  const res = client.buyPosition(h2.address, "flagged", "5000000");
+  assert.equal(res.ok, true);
+  assert.equal(res.status, "simulated");
+  assert.equal(res.instruction.name, "BuyPosition");
+  assert.equal(res.instruction.keys[3].pubkey,
+    tx.deriveVault(programId, h2.address).address);
+  assert.equal(res.instruction.keys[5].pubkey,
+    tx.derivePosition(programId, h2.address, demoAddress).address);
+  assert.equal(res.instruction.keys[4].pubkey, judgeShellLiteral("Demo"));
+  const html = ui.renderResultEnvelope(res, { fixture: true });
+  assert.ok(html.includes("Simulated (fixture mode)"), "result panel marks the simulation");
+  assert.ok(html.includes("BuyPosition"), "result panel names the instruction");
 });

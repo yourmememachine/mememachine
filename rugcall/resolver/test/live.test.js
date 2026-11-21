@@ -179,9 +179,10 @@ function loadMarkets() {
   );
 }
 
-// A single H2 market whose account addresses are real 32-byte keys
-// (the fixture display addresses do not decode to 32 bytes, so the
-// submitting path needs these), with the test signer as resolver.
+// A single H2 market whose account addresses are the stub chain's
+// synthetic 32-byte keys (the submitting path must match the stub's
+// marketAccountInfo bytes, so the template's stored addresses are
+// overridden with them), with the test signer as resolver.
 function liveMarketsObj(signerPubkey) {
   const markets = loadMarkets();
   const template = markets.markets.find((m) => m.state === 1 && m.evidence_file === "h2-bundle.json");
@@ -190,8 +191,7 @@ function liveMarketsObj(signerPubkey) {
     address: enc(21),
     live_market: enc(22),
     creator: enc(23),
-    // A real 32-byte mint key: the fixture display mint does not
-    // decode to 32 bytes, so it cannot match an on-chain account.
+    // The stub chain's synthetic mint key, matching its account bytes.
     subject_mint: enc(25),
   };
   return {

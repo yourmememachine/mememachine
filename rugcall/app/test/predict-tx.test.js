@@ -693,3 +693,178 @@ test("flows: live mode refuses fixture-sourced state with MODE_MISMATCH", () => 
   assert.equal(result.code, "MODE_MISMATCH");
   assert.equal(result.instruction, null);
 });
+
+// -------------------------------------------------------------------
+// Shipped fixture bundle flows
+//
+// Buys and claims on the PRE-SEEDED markets of
+// test/fixtures/app-markets.json, through the same client
+// construction the judge page shell (index.html) uses. The buy and
+// claim tests are the regression coverage for the fixture-address
+// break: the bundle's readable label addresses decoded to 33 bytes,
+// so deriveVault / derivePosition threw "expected exactly 32 bytes,
+// got 33" on every pre-seeded market, while the flow tests above —
+// which create their markets in-test — never touched the seeded
+// records. The seeded addresses are now the derived PDAs and the
+// seeded mints and users are labels that decode to exactly 32
+// bytes. The expired-market test between them is not part of that
+// regression: expiry refusal precedes derivation in the client's
+// phase logic, so it pins the BuyAfterExpiry phase behaviour on a
+// seeded record instead.
+// -------------------------------------------------------------------
+
+const predict = require("../predict.js");
+const ui = require("../predict-ui.js");
+const walletModule = require("../predict-wallet.js");
+
+const SHIPPED_BUNDLE = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "fixtures", "app-markets.json"), "utf8"));
+const SHIPPED_REPLAY = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "..", "replay.json"), "utf8"));
+const SHELL_HTML = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+
+// The two fixture address literals the shell itself constructs in
+// fixture mode (index.html): the substitute collateral mint and the
+// demo token account. Extracted, not copied, so the test pins the
+// strings the page actually carries.
+function shellFixtureLiteral(prefix) {
+  const m = SHELL_HTML.match(new RegExp('"(Fixture' + prefix + '[1-9A-HJ-NP-Za-km-z]+)"'));
+  assert.ok(m, "index.html carries a " + prefix + " fixture literal");
+  return m[1];
+}
+
+// Mirror of index.html's fixture-mode client construction: the
+// decoded config from the fixture data source, the shell's
+// collateral-mint substitution on a copy, the demo wallet, the
+// injected demo token record, the pinned fixture clock (predict-tx
+// takes milliseconds), and the bundle itself as the client data so
+// simulated buys stay visible in the shared records.
+async function pageFixtureClient(data) {
+  // The shell sources the program id replay-first (index.html:
+  // replay.config.programId, falling back to the bundle's), and the
+  // mirror does the same rather than reading the bundle alone.
+  const programId = (SHIPPED_REPLAY.config && SHIPPED_REPLAY.config.programId) ||
+    data.program_id;
+  const source = predict.createDataSource({
+    programId: programId, fixtureBundle: data,
+    nowSec: predict.FIXTURE_NOW_SEC, mode: "fixture",
+  });
+  const decodedConfig = await source.getConfig().catch(() => null);
+  let clientConfig = decodedConfig || data.config;
+  if (clientConfig && !clientConfig.collateralMint) {
+    const cfgCopy = {};
+    Object.keys(clientConfig).forEach((k) => { cfgCopy[k] = clientConfig[k]; });
+    cfgCopy.collateralMint = shellFixtureLiteral("Co");
+    clientConfig = cfgCopy;
+  }
+  const demoWallet = walletModule.createDemoWallet(data);
+  const demoAddress = String(demoWallet.publicKey);
+  if (!Array.isArray(data.tokens)) {
+    data.tokens = [{
+      address: shellFixtureLiteral("Demo"),
+      owner: demoAddress,
+      mint: clientConfig ? clientConfig.collateralMint : null,
+      amount: "1000000000000",
+    }];
+  }
+  const client = tx.createPredictClient({
+    programId: programId,
+    config: clientConfig,
+    wallet: demoWallet,
+    mode: "fixture",
+    now: predict.FIXTURE_NOW_SEC * 1000,
+    data,
+  });
+  return { client, demoAddress, programId };
+}
+
+function cloneBundle() {
+  return JSON.parse(JSON.stringify(SHIPPED_BUNDLE));
+}
+
+test("shipped bundle: buys on every open live pre-seeded market use the page's derivation path", async () => {
+  const open = SHIPPED_BUNDLE.markets.filter(
+    (m) => m.state === 1 && m.expiry > predict.FIXTURE_NOW_SEC);
+  assert.equal(open.length, 3);
+  for (const seeded of open) {
+    const data = cloneBundle();
+    const market = data.markets.find((m) => m.address === seeded.address);
+    const { client, demoAddress, programId } = await pageFixtureClient(data);
+    const before = SHIPPED_BUNDLE.markets.find((m) => m.address === seeded.address);
+    const posBefore = SHIPPED_BUNDLE.positions.find(
+      (p) => p.market === seeded.address && p.user === demoAddress);
+    const res = client.buyPosition(market.address, "flagged", "5000000");
+    assert.equal(res.ok, true, seeded.evidence_file);
+    assert.equal(res.status, "simulated");
+    assert.equal(res.signed, false);
+    assert.equal(res.submitted, false);
+    assert.equal(res.signature, null);
+    assert.equal(res.explorerUrl, null);
+    assert.equal(res.instruction.name, "BuyPosition");
+    assert.equal(res.instruction.keys[3].pubkey,
+      tx.deriveVault(programId, market.address).address);
+    assert.equal(res.instruction.keys[5].pubkey,
+      tx.derivePosition(programId, market.address, demoAddress).address);
+    assert.equal(res.instruction.keys[4].pubkey, shellFixtureLiteral("Demo"));
+    assert.equal(res.stateDelta.flaggedPool,
+      (BigInt(before.flagged_pool) + 5000000n).toString());
+    assert.equal(res.stateDelta.survivesPool, before.survives_pool);
+    const posAfter = data.positions.find(
+      (p) => p.market === market.address && p.user === demoAddress);
+    assert.ok(posAfter, "position record exists after the buy");
+    assert.equal(posAfter.flagged_amount,
+      ((posBefore ? BigInt(posBefore.flagged_amount) : 0n) + 5000000n).toString());
+    assert.equal(data.tokens[0].amount, (1000000000000n - 5000000n).toString());
+    const html = ui.renderResultEnvelope(res, { fixture: true });
+    assert.ok(html.includes("Simulated (fixture mode)"), "result panel marks the simulation");
+    assert.ok(html.includes("BuyPosition"), "result panel names the instruction");
+  }
+});
+
+test("shipped bundle: the expired pre-seeded market refuses buys with BuyAfterExpiry", async () => {
+  const expired = SHIPPED_BUNDLE.markets.find(
+    (m) => m.state === 1 && m.expiry <= predict.FIXTURE_NOW_SEC);
+  assert.ok(expired, "the bundle seeds an expired open market");
+  const data = cloneBundle();
+  const { client } = await pageFixtureClient(data);
+  const res = client.buyPosition(expired.address, "flagged", "5000000");
+  assert.equal(res.ok, false);
+  assert.equal(res.code, "BuyAfterExpiry");
+});
+
+test("shipped bundle: claims on every settled pre-seeded market use the page's derivation path", async () => {
+  const settled = SHIPPED_BUNDLE.markets.filter((m) => m.state === 2 || m.state === 3);
+  assert.equal(settled.length, 4);
+  const branchByFile = {
+    "h2-bundle.json": "payout",
+    "clean.json": null, // resolved (payout) and cancelled (refund) share this file; keyed below by state
+    "evidence-h3-zerowin.json": "refund",
+  };
+  for (const seeded of settled) {
+    const data = cloneBundle();
+    const market = data.markets.find((m) => m.address === seeded.address);
+    const { client, demoAddress, programId } = await pageFixtureClient(data);
+    const res = client.claim(market.address);
+    assert.equal(res.ok, true, seeded.evidence_file + " state " + seeded.state);
+    assert.equal(res.status, "simulated");
+    assert.equal(res.instruction.name, "Claim");
+    assert.equal(res.instruction.keys[3].pubkey,
+      tx.deriveVault(programId, market.address).address);
+    assert.equal(res.instruction.keys[5].pubkey,
+      tx.derivePosition(programId, market.address, demoAddress).address);
+    assert.equal(res.instruction.keys[4].pubkey, shellFixtureLiteral("Demo"));
+    const expected = seeded.state === 3 ? "refund" : (branchByFile[seeded.evidence_file] || "payout");
+    assert.equal(res.stateDelta.branch, expected, seeded.evidence_file);
+    // The claim moves a positive amount to the demo token account
+    // and marks the position claimed in the shared records.
+    assert.equal(res.stateDelta.amount, res.amount);
+    assert.ok(BigInt(res.stateDelta.amount) > 0n, seeded.evidence_file);
+    assert.equal(data.tokens[0].amount,
+      (1000000000000n + BigInt(res.stateDelta.amount)).toString());
+    const posAfter = data.positions.find(
+      (p) => p.market === market.address && p.user === demoAddress);
+    assert.ok(posAfter, "position record exists for the claim");
+    assert.equal(posAfter.claimed, true);
+    assert.equal(res.stateDelta.position.claimed, true);
+  }
+});

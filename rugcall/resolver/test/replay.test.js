@@ -135,3 +135,24 @@ test("replay: record honesty end to end", () => {
     assert.match(replay.generatedFrom[key], /^[0-9a-f]{64}$/);
   }
 });
+
+// The resolver fixture addresses feed the shipped judge page (via
+// the replay and the app bundle built from the same fixture set).
+// The readable label addresses used here originally decoded to 33
+// bytes and broke the app client's PDA derivation on the shipped
+// page; every address slot in this file must decode to exactly 32
+// bytes, and each market's evidence fixture must name the market's
+// subject mint (which must itself decode to 32 bytes).
+test("fixture market addresses decode to exactly 32 bytes and match their evidence mints", () => {
+  const tx = require("../../app/predict-tx.js");
+  const marketsObj = JSON.parse(fs.readFileSync(MARKETS_PATH, "utf8"));
+  for (const m of marketsObj.markets) {
+    for (const field of ["address", "live_market", "subject_mint", "creator"]) {
+      assert.equal(tx.base58Decode(m[field]).length, 32, `${m.evidence_file} ${field}`);
+    }
+    const evidence = JSON.parse(
+      fs.readFileSync(path.join(EVIDENCE_DIR, m.evidence_file), "utf8"));
+    assert.equal(evidence.mint, m.subject_mint, m.evidence_file);
+    assert.equal(tx.base58Decode(evidence.mint).length, 32, m.evidence_file);
+  }
+});

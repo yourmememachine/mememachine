@@ -20,7 +20,7 @@ const crypto = require("crypto");
 const ev = require("../app/evidence.js");
 const { createResolver, DEFAULT_RESOLVER_PUBKEY } = require("./resolver.js");
 
-const H2_MARKET_ADDRESS = "MarketH2Bund1e111111111111111111111111111111";
+const H2_MARKET_ADDRESS = "5z1WF2nXLdx9UGJTnQy7VGZqAzLoeha5m2SNQUxXHG2B";
 const FIXED_NOW = 1799920800;
 const EXPECTED_TRIGGER_EVENT_TS = 1799913660;
 const STD3_FLAGGED_POOL = "3000000";

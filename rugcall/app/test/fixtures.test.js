@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const predict = require("../predict.js");
+const tx = require("../predict-tx.js");
 const ev = require("../evidence.js");
 
 const HERE = __dirname;
@@ -83,7 +84,7 @@ test("every required market state is present with its cast", () => {
   assert.equal(markets.filter((m) => m.state === 1).length, 4);
   assert.equal(markets.filter((m) => m.state === 2).length, 3);
   assert.equal(markets.filter((m) => m.state === 3).length, 1);
-  const oneSided = markets.find((m) => m.subject_mint === "MintSoftF1ag11111111111111111111111111111111");
+  const oneSided = markets.find((m) => m.subject_mint === "MintSoftF1ag1111111111111111111111111111111");
   assert.equal(oneSided.flagged_pool, "50000000");
   assert.equal(oneSided.survives_pool, "0");
   const expired = markets.find((m) => m.evidence_file === "late-trigger.json");
@@ -252,4 +253,83 @@ test("enrichment marks a soft-only flag and passes evidence and metadata through
   const cleanView = predict.enrichMarket(softMarket, { position: null, evidenceResult: cleanResult, dexMeta: bundle.token_meta[softMarket.subjectMint], nowSec: 1799950000 });
   assert.equal(cleanView.softFlagOnly, false);
   assert.equal(cleanView.dexMeta.symbol, "SOFT");
+});
+
+/* ---------------- fixture address integrity ----------------
+ * The shipped-page break this guards: the bundle's readable label
+ * addresses decoded to 33 bytes, so the client's PDA derivation
+ * threw on every pre-seeded market. Market, live-market and
+ * position addresses are now the derived PDAs under the deployed
+ * program id; mints, users and creators are labels that decode to
+ * exactly 32 bytes. Snapshot markets that share one mint share
+ * one live-market PDA by construction (the live-market PDA is
+ * seeded by the mint alone); their market PDAs differ because
+ * the snapshot records carry created_at values a second apart. */
+
+test("every address in the fixture bundle decodes to exactly 32 bytes", () => {
+  const slots = [];
+  slots.push(["program_id", bundle.program_id]);
+  slots.push(["config.address", bundle.config.address]);
+  slots.push(["config.resolver", bundle.config.resolver]);
+  for (const [k, v] of Object.entries(bundle.users)) slots.push(["users." + k, v]);
+  for (const m of markets) {
+    slots.push(["market.address", m.address]);
+    slots.push(["market.live_market", m.live_market]);
+    slots.push(["market.subject_mint", m.subject_mint]);
+    slots.push(["market.creator", m.creator]);
+  }
+  for (const p of positions) {
+    slots.push(["position.address", p.address]);
+    slots.push(["position.market", p.market]);
+    slots.push(["position.user", p.user]);
+  }
+  for (const k of Object.keys(bundle.token_meta)) slots.push(["token_meta key", k]);
+  for (const k of Object.keys(bundle.evidence_by_market || {})) slots.push(["evidence_by_market key", k]);
+  for (const [label, addr] of slots) {
+    assert.equal(tx.base58Decode(addr).length, 32, label + " " + addr);
+  }
+  assert.equal(new Set(markets.map((m) => m.address)).size, markets.length, "market addresses are distinct");
+  assert.equal(new Set(positions.map((p) => p.address)).size, positions.length, "position addresses are distinct");
+});
+
+test("fixture market, live-market and position addresses are the derived PDAs", () => {
+  const pid = bundle.program_id;
+  for (const m of markets) {
+    const dm = tx.deriveMarket(pid, m.subject_mint, m.created_at);
+    assert.equal(m.address, dm.address, m.evidence_file);
+    assert.equal(m.bump, dm.bump, m.evidence_file);
+    assert.equal(m.live_market, tx.deriveLiveMarket(pid, m.subject_mint).address, m.evidence_file);
+    assert.equal(m.vault_bump, tx.deriveVault(pid, m.address).bump, m.evidence_file);
+  }
+  for (const p of positions) {
+    const dp = tx.derivePosition(pid, p.market, p.user);
+    assert.equal(p.address, dp.address, p.market);
+    assert.equal(p.bump, dp.bump, p.market);
+  }
+});
+
+test("the shell's own fixture address literals decode to exactly 32 bytes", () => {
+  const index = fs.readFileSync(path.join(HERE, "..", "index.html"), "utf8");
+  const literals = index.match(/"(Fixture[1-9A-HJ-NP-Za-km-z]+)"/g) || [];
+  assert.equal(literals.length, 2, "the shell constructs two fixture address literals");
+  for (const lit of literals) {
+    const s = lit.slice(1, -1);
+    assert.equal(tx.base58Decode(s).length, 32, s);
+  }
+});
+
+/* ---------------- embedded evidence snapshots ---------------- */
+
+test("the soft-flag market carries its recorded evidence snapshot, identical to the resolver fixture", () => {
+  const soft = markets.find((m) => m.evidence_file === "soft-flagged.json");
+  assert.ok(soft, "the bundle seeds the soft-flag market");
+  assert.ok(bundle.evidence_by_market, "the bundle embeds evidence snapshots by market");
+  assert.deepEqual(Object.keys(bundle.evidence_by_market), [soft.address]);
+  const resolverFixture = JSON.parse(
+    fs.readFileSync(path.join(RESOLVER_EVIDENCE_DIR, "soft-flagged.json"), "utf8"));
+  assert.deepEqual(bundle.evidence_by_market[soft.address], resolverFixture);
+  const result = ev.evaluateEvidence(bundle.evidence_by_market[soft.address], ev.emptyCrewStore());
+  assert.equal(result.displayVerdict, "FLAGGED");
+  assert.equal(result.primaryHardTrigger, 0);
+  assert.equal(result.partial, false);
 });

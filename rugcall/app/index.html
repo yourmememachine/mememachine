@@ -400,12 +400,12 @@
           if (clientConfig && !clientConfig.collateralMint) {
             var cfgCopy = {};
             Object.keys(clientConfig).forEach(function (k) { cfgCopy[k] = clientConfig[k]; });
-            cfgCopy.collateralMint = "FixtureCo11ateralMint1111111111111111111111";
+            cfgCopy.collateralMint = "FixtureCo11atera1Mint1111111111111111111111";
             clientConfig = cfgCopy;
           }
           if (!Array.isArray(clientData.tokens)) {
             clientData.tokens = [{
-              address: "FixtureDemoTokenAccount111111111111111111",
+              address: "FixtureDemoTokenAccount11111111111111111111",
               owner: demoAddress,
               mint: clientConfig ? clientConfig.collateralMint : null,
               amount: "1000000000000"
