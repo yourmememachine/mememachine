@@ -29,9 +29,12 @@ make verify
 ```
 
 `make verify` runs the full local suite: bridge workspace tests,
-LaunchGuard tests (integration + adversarial + the demo launch),
-and the fork checks. It must be green before and after your
-change. Current totals and what is proven live in `STATUS.md`;
+programs workspace tests (LaunchGuard, PQ vault, registry export,
+RugCall), the fork/ops checks, and the RugCall JS suites. It must
+be green before and after your change. The step-by-step
+walkthrough — prerequisites, what each target proves, expected
+totals, and what the run does not prove — is `VERIFY.md` at the
+repo root. Current totals and what is proven live in `STATUS.md`;
 `bridge/VERIFY.md` and `programs/` carry the per-area records.
 
 ## Where help is wanted
