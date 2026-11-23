@@ -647,6 +647,13 @@ starts from what is already known:
   canonicality of arbitrary-byte decodes. Bounded session
   (`-max_total_time=300`): 2,405,767 executions in 301 s, no
   findings.
+  **Standing control (2026-11-23):** `.github/workflows/fuzz.yml`
+  runs all four targets weekly (Mondays 06:00 UTC, 300 s bound
+  each, manually dispatchable), so the bounded session repeats
+  instead of being a one-off event; a crash fails the run and
+  uploads the reproducing artifact. The workflow's commands were
+  exercised locally before landing (crossing_receipt, 60 s bound:
+  445,634 executions, no findings).
 
 - **`cargo audit` (RustSec DB) on both workspaces: 10 known
   vulnerabilities, all in transitive dependencies; none in

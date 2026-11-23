@@ -1,0 +1,62 @@
+name: Fuzz (weekly)
+
+# Bounded cargo-fuzz session over bridge-common's parsers, run on a
+# schedule so fuzzing is a standing control and not a one-off event
+# (backlog #9). The targets are the ones an attacker can influence:
+# the ed25519 precompile / instructions-sysvar parser (AUDIT.md
+# Scope A's priority target), BridgeMessage decoding, the
+# DailyUsage cap arithmetic, and the CrossingReceipt serialization /
+# receipt PDA derivation.
+#
+# Each target gets the same 300-second bound as the recorded local
+# sessions (bridge/VERIFY.md). A crash fails the job and uploads the
+# reproducing artifact; per repo practice a crash then becomes a
+# unit test in bridge-common, not a committed corpus entry.
+#
+# This workflow is deliberately NOT part of the per-push CI: the
+# fuzz crate needs a nightly toolchain and its own workspace, and
+# twenty minutes of fuzzing does not belong on every push.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@cargo-fuzz
+
+      - name: Fuzz precompile_parser (bounded, 300s)
+        working-directory: bridge/fuzz
+        run: cargo +nightly fuzz run precompile_parser -- -max_total_time=300 -max_len=4096
+
+      - name: Fuzz message_decode (bounded, 300s)
+        working-directory: bridge/fuzz
+        run: cargo +nightly fuzz run message_decode -- -max_total_time=300 -max_len=4096
+
+      - name: Fuzz daily_usage (bounded, 300s)
+        working-directory: bridge/fuzz
+        run: cargo +nightly fuzz run daily_usage -- -max_total_time=300 -max_len=4096
+
+      - name: Fuzz crossing_receipt (bounded, 300s)
+        working-directory: bridge/fuzz
+        run: cargo +nightly fuzz run crossing_receipt -- -max_total_time=300 -max_len=4096
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: bridge/fuzz/artifacts/
+          if-no-files-found: ignore
