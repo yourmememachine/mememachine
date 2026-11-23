@@ -91,27 +91,44 @@ def main() -> None:
     pq_verify = read("programs/PQ-VERIFY.md")
 
     # --- Verification totals and pin, from the STATUS.md header ---
+    # The header is prose and line-wraps freely; flatten whitespace
+    # so the patterns below match the words, not the wrapping.
+    header = re.sub(r"\s+", " ", status)
     totals = need(
-        r"bridge workspace (\d+) passed, LaunchGuard (\d+) passed, PQ vault\s+"
-        r"(\d+) passed, registry export (\d+) passed, fork suite (\d+) OK — total\s+"
-        r"(\d+), 0 failed",
-        status,
+        r"bridge workspace (\d+) passed, LaunchGuard (\d+) passed, PQ vault "
+        r"(\d+) passed, registry export (\d+) passed, RugCall (\d+) passed, "
+        r"fork suite (\d+) OK, resolver JS suite (\d+) passed, app JS suite "
+        r"(\d+) passed — total (\d+), 0 failed",
+        header,
         "test totals in STATUS.md header",
     )
-    bridge_t, launchguard_t, pq_t, registry_t, fork_t, total_t = (
-        int(g) for g in totals.groups()
-    )
-    # The five suites and the total are parsed independently;
+    (
+        bridge_t,
+        launchguard_t,
+        pq_t,
+        registry_t,
+        rugcall_t,
+        fork_t,
+        resolver_t,
+        app_t,
+        total_t,
+    ) = (int(g) for g in totals.groups())
+    # The suites and the total are parsed independently;
     # refuse to publish a page whose own numbers do not add up.
-    if bridge_t + launchguard_t + pq_t + registry_t + fork_t != total_t:
+    suite_sum = (
+        bridge_t + launchguard_t + pq_t + registry_t + rugcall_t
+        + fork_t + resolver_t + app_t
+    )
+    if suite_sum != total_t:
         fail(
             "STATUS.md suite counts "
-            f"({bridge_t}+{launchguard_t}+{pq_t}+{registry_t}+{fork_t}) "
+            f"({bridge_t}+{launchguard_t}+{pq_t}+{registry_t}+{rugcall_t}"
+            f"+{fork_t}+{resolver_t}+{app_t}) "
             f"do not sum to the stated total ({total_t})"
         )
     pin = need(
         r"run on (\d{4}-\d{2}-\d{2}) against commit `([0-9a-f]+)`",
-        status,
+        header,
         "verification date / commit pin in STATUS.md header",
     )
     verify_date, verify_commit = pin.group(1), pin.group(2)
@@ -220,7 +237,10 @@ Regenerate with <code>python3 status/generate.py</code>.</p>
     <tr><td>LaunchGuard</td><td>{launchguard_t}</td></tr>
     <tr><td>PQ vault</td><td>{pq_t}</td></tr>
     <tr><td>Registry export</td><td>{registry_t}</td></tr>
+    <tr><td>RugCall</td><td>{rugcall_t}</td></tr>
     <tr><td>Fork suite</td><td>{fork_t}</td></tr>
+    <tr><td>Resolver JS suite</td><td>{resolver_t}</td></tr>
+    <tr><td>App JS suite</td><td>{app_t}</td></tr>
   </table>
   <p class="small">Program-test results prove the programs behave as
   designed locally. They prove nothing about a live deployment, which
