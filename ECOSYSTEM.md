@@ -26,9 +26,9 @@ Repositories / locations:
 | Solana OS (browser interface) | Hosted browser artifact (slug `solana-os`), source at `~/workspace/ts-spaces/solana-os/index.html` — not a GitHub repo |
 
 Verified totals at this date (`make verify`, 2026-11-23, against
-commit `4782cbc`): **799 passed, 0 failed** — bridge workspace 236,
+commit `5bd40d7`): **816 passed, 0 failed** — bridge workspace 236,
 LaunchGuard 68, PQ Vault 17, registry export 11, RugCall 130, fork
-suite 49, resolver JS 114, app JS 174.
+suite 66, resolver JS 114, app JS 174.
 
 ---
 

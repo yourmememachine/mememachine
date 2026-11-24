@@ -5,9 +5,9 @@
 # Machine
 Website: https://machinechain.netlify.app/
 
-**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 799 tests, localnet, built in public.**
+**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 816 tests, localnet, built in public.**
 
-![Tests: 799 passing](https://img.shields.io/badge/tests-799%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
+![Tests: 816 passing](https://img.shields.io/badge/tests-816%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
 
 A Solana-derived L1 with its own token, its own culture, and apps
 running on it — built to be one of the best Solana forks, not just a

@@ -69,13 +69,13 @@ while iterating; run the full `make verify` before opening a PR.
 ## 4. Expected totals
 
 At the time this walkthrough was written and tested end to end
-(2026-11-22, from a fresh clone of commit `b98b5d0`), a green run
-reported **799 passed, 0 failed**:
+(2026-11-22, from a fresh clone of commit `b98b5d0`; totals updated 2026-11-24 for commit `5bd40d7`), a green run
+reported **816 passed, 0 failed**:
 
 - bridge workspace 236
 - programs workspace 226 (LaunchGuard 68, PQ vault 17, registry
   export 11, RugCall program 130)
-- fork/ops suite 49
+- fork/ops suite 66
 - RugCall resolver JS suite 114
 - RugCall app JS suite 174
 
