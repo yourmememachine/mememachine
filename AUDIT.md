@@ -6,8 +6,8 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `8efaa66` (2026-11-21; `make verify` green —
-bridge workspace 230 passed, LaunchGuard 68 passed, PQ vault 17
+Last verified commit: `4782cbc` (2026-11-23; `make verify` green —
+bridge workspace 236 passed, LaunchGuard 68 passed, PQ vault 17
 passed, registry export 11 passed, RugCall 130 passed, fork suite 49 OK, resolver JS suite 114 passed, app JS suite 174 passed). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
@@ -591,6 +591,27 @@ chain configuration gates any public chain launch. Both scopes:
 > panicked instead of failing closed) and streams its
 > reads. Off-chain relayer only: no program change, no
 > SBF rebuild; the relayer was already in Scope A.
+
+> **Scope update 2026-11-23 (commit `4782cbc`) — debate
+> round 10, scope 4 second rotation (bridge-common +
+> proof-bundle).** Two independent reviewers audited the
+> scope cold, debated each other's findings, and the
+> surviving findings were fixed, each reproduced by a
+> failing test first: bridge-common's shared member-set
+> validator (`validate_member_set`, the one validator
+> serving `Initialize` and `SetRelayers` in both bridge
+> programs) now rejects an off-curve member key instead
+> of accepting it into a relayer set; and the
+> proof-bundle CLI (`crossing-proof`) reads input files
+> through a capped reader, so a special file such as
+> /dev/zero can no longer be read without bound. One
+> further finding was settled in debate as deliberate
+> strictness and documented with no code change. 6 new
+> tests. Shared-crate validation + off-chain tooling:
+> no program instruction change, no SBF rebuild in this
+> commit; bridge-common and proof-bundle were already
+> in Scope A. Auditors should still quote against the
+> current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |

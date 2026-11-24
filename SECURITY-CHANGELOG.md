@@ -7,6 +7,18 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-23 — `4782cbc`** Bridge review round 10
+  hardening (scope 4, second rotation; two reviewers,
+  debate reconciled, every fix reproduced failing-first).
+  bridge-common's shared member-set validator now rejects
+  an off-curve member key instead of accepting it into a
+  relayer set; the proof-bundle CLI (`crossing-proof`)
+  reads input files through a capped reader, so a special
+  file such as /dev/zero can no longer be read without
+  bound. 6 new tests. Shared-crate validation and
+  off-chain tooling only; no program instruction change,
+  no SBF rebuild in this commit. Local only.
+
 - **2026-11-21 — `8efaa66`** Relayer debate-round
   hardening (scope 2, second rotation; two reviewers,
   debate reconciled, every fix reproduced failing-first).

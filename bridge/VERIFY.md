@@ -9,7 +9,7 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **230 passed, 0 failed** (49
+- **Tests:** bridge workspace **236 passed, 0 failed** (50
   bridge-common unit + 4 cap-accounting property tests + 35 machine-bridge
   + 30 solana-lock (29 + 1 precompile-cost) + 66 relayer + 23 proof bundle + 15 receipt
   indexer, including the
