@@ -14,12 +14,20 @@
 //!      Unlock on the Solana side.
 //!   D. Third deposit -> relayers disagree on the message -> the
 //!      collector refuses quorum -> nothing mints.
+//!
+//! Every completed crossing is also checked for the receipt
+//! hash-binding (backlog #10): the CrossingReceipt the destination
+//! program wrote must store exactly the message hash the relayers'
+//! attestations signed — the same hash bridge-common's
+//! `hash_binding_every_message_field_is_covered` unit test pins to
+//! every message field — and a blocked crossing must leave no
+//! receipt at all.
 
 use borsh::BorshDeserialize;
 use bridge_common::{
-    authority_pda, config_pda, nonce_pda, BridgeError, BridgeMessage, EventRecord,
-    LockInstruction, MachineInstruction, DIR_MACHINE_TO_SOLANA,
-    DIR_SOLANA_TO_MACHINE, QUORUM,
+    authority_pda, config_pda, nonce_pda, receipt_pda, BridgeError, BridgeMessage,
+    CrossingReceipt, EventRecord, LockInstruction, MachineInstruction,
+    DIR_MACHINE_TO_SOLANA, DIR_SOLANA_TO_MACHINE, DISCRIMINATOR_RECEIPT, QUORUM,
 };
 use relayer::attestation::{AttestationFile, Collector};
 use relayer::message::{build_message, Direction, ObservedEvent};
@@ -210,6 +218,28 @@ async fn read_event(
         .unwrap()
         .expect("event record PDA must exist");
     EventRecord::try_from_slice(&acc.data).unwrap()
+}
+
+/// Read the CrossingReceipt a completed crossing left on its
+/// destination chain, asserting the account is exactly the
+/// receipt's declared length. The binding itself — the stored
+/// `message_hash` against the hash the attestations signed — is
+/// asserted by the callers, which hold the collected message.
+async fn read_receipt(
+    ctx: &mut ProgramTestContext,
+    program_id: &Pubkey,
+    direction: u8,
+    nonce: u64,
+) -> CrossingReceipt {
+    let (pda, _) = receipt_pda(program_id, direction, nonce);
+    let acc = ctx
+        .banks_client
+        .get_account(pda)
+        .await
+        .unwrap()
+        .expect("receipt PDA must exist after a completed crossing");
+    assert_eq!(acc.data.len(), CrossingReceipt::LEN);
+    CrossingReceipt::try_from_slice(&acc.data).unwrap()
 }
 
 fn to_sdk(ixs: &[solana_program::instruction::Instruction]) -> Vec<Instruction> {
@@ -544,6 +574,10 @@ async fn full_local_drill() {
         .collect(&dir_a, Direction::SolanaToMachine, 1, DEST_NOW)
         .unwrap();
     assert_eq!(collected, message);
+    // The hash the quorum's signatures actually cover: each signer
+    // signed `message.hash()`, and the collector only formed a
+    // quorum over files carrying this hash.
+    let attested_hash_a = collected.hash();
     let mint_ixs = build_mint_instructions(
         &machine_pid,
         &collected,
@@ -557,6 +591,24 @@ async fn full_local_drill() {
         token_balance(&mut chains.machine, &chains.recipient_token_account).await,
         5_000_000
     );
+    // Receipt hash-binding: the receipt the mint wrote stores
+    // exactly the attested hash — not a hash of any other message,
+    // and not a hash recomputed from different fields.
+    let receipt = read_receipt(
+        &mut chains.machine,
+        &machine_pid,
+        DIR_SOLANA_TO_MACHINE,
+        1,
+    )
+    .await;
+    assert_eq!(receipt.discriminator, DISCRIMINATOR_RECEIPT);
+    assert_eq!(receipt.direction, DIR_SOLANA_TO_MACHINE);
+    assert_eq!(receipt.nonce, 1);
+    assert_eq!(receipt.message_hash, attested_hash_a);
+    assert_eq!(receipt.message_hash, message.hash());
+    assert_eq!(receipt.source_tx, message.source_tx);
+    assert_eq!(receipt.amount, 5_000_000);
+    assert_eq!(receipt.recipient, recipient_pub);
     println!("drill A ok: deposit 5,000,000 -> minted 5,000,000 wrapped");
 
     // ---------------- Phase B: pause mid-flow ---------------------
@@ -581,6 +633,11 @@ async fn full_local_drill() {
         .collector
         .collect(&dir_b, Direction::SolanaToMachine, 2, DEST_NOW)
         .unwrap();
+    let attested_hash_b = collected.hash();
+    assert_ne!(
+        attested_hash_b, attested_hash_a,
+        "a different crossing must carry a different attested hash"
+    );
     let mint_ixs = build_mint_instructions(
         &machine_pid,
         &collected,
@@ -651,6 +708,18 @@ async fn full_local_drill() {
         token_balance(&mut chains.machine, &chains.recipient_token_account).await,
         7_000_000
     );
+    // The delayed crossing's receipt binds to its own attested
+    // hash — the pause and resubmission changed nothing about
+    // which message the receipt vouches for.
+    let receipt = read_receipt(
+        &mut chains.machine,
+        &machine_pid,
+        DIR_SOLANA_TO_MACHINE,
+        2,
+    )
+    .await;
+    assert_eq!(receipt.message_hash, attested_hash_b);
+    assert_eq!(receipt.amount, 2_000_000);
     println!("drill B ok: pause blocked the mint (BridgePaused), unpause released it");
 
     // ---------------- Phase C: burn -> attest -> unlock -----------
@@ -707,6 +776,7 @@ async fn full_local_drill() {
         .collector
         .collect(&dir_c, Direction::MachineToSolana, 1, DEST_NOW)
         .unwrap();
+    let attested_hash_c = collected.hash();
     let unlock_ixs = build_unlock_instructions(
         &lock_pid,
         &collected,
@@ -721,6 +791,15 @@ async fn full_local_drill() {
         13_050_000
     );
     assert_eq!(token_balance(&mut chains.sol, &chains.vault).await, 6_950_000);
+    // The unlock direction binds the same way: the receipt on the
+    // Solana side stores the hash the burn's attestations signed.
+    let receipt = read_receipt(&mut chains.sol, &lock_pid, DIR_MACHINE_TO_SOLANA, 1).await;
+    assert_eq!(receipt.discriminator, DISCRIMINATOR_RECEIPT);
+    assert_eq!(receipt.direction, DIR_MACHINE_TO_SOLANA);
+    assert_eq!(receipt.nonce, 1);
+    assert_eq!(receipt.message_hash, attested_hash_c);
+    assert_eq!(receipt.amount, 50_000);
+    assert_eq!(receipt.recipient, chains.user.pubkey());
     println!("drill C ok: burn 50,000 -> unlocked 50,000 (within the dynamic caps)");
 
     // ---------------- Phase D: relayer disagreement ---------------
@@ -769,6 +848,19 @@ async fn full_local_drill() {
         token_balance(&mut chains.machine, &chains.recipient_token_account).await,
         6_950_000
     );
+    // A blocked crossing leaves no receipt: there is no account at
+    // nonce 3's receipt PDA claiming either side's hash.
+    let (receipt3_pda, _) = receipt_pda(&machine_pid, DIR_SOLANA_TO_MACHINE, 3);
+    let receipt3 = chains
+        .machine
+        .banks_client
+        .get_account(receipt3_pda)
+        .await
+        .unwrap();
+    assert!(
+        receipt3.is_none(),
+        "no receipt may exist for a crossing that never completed"
+    );
     println!("drill D ok: disagreement blocked quorum; nothing minted");
 
     write_drill_result(
@@ -777,6 +869,7 @@ async fn full_local_drill() {
             "crossings succeeded: 3 (deposit->mint x2, burn->unlock x1)".to_string(),
             "crossings blocked as designed: 2 (mint while paused, relayer disagreement)".to_string(),
             "crossings failed unexpectedly: 0".to_string(),
+            "receipt hash-binding verified: every completed crossing's receipt stores the attested message hash; the blocked crossing left no receipt".to_string(),
             "final state: vault 6,950,000 locked == 6,950,000 wrapped outstanding".to_string(),
         ],
     );
@@ -835,6 +928,7 @@ async fn cross_to_machine(chains: &mut Chains, nonce: u64, amount: u64) {
         .collector
         .collect(&dir, Direction::SolanaToMachine, nonce, DEST_NOW)
         .unwrap();
+    let attested_hash = collected.hash();
     let mint_ixs = build_mint_instructions(
         &machine_pid,
         &collected,
@@ -844,6 +938,16 @@ async fn cross_to_machine(chains: &mut Chains, nonce: u64, amount: u64) {
         &machine_payer,
     );
     submit(&mut chains.machine, &mint_ixs).await.unwrap();
+    // Receipt hash-binding, every crossing (backlog #10).
+    let receipt = read_receipt(
+        &mut chains.machine,
+        &machine_pid,
+        DIR_SOLANA_TO_MACHINE,
+        nonce,
+    )
+    .await;
+    assert_eq!(receipt.message_hash, attested_hash);
+    assert_eq!(receipt.amount, amount);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -901,6 +1005,7 @@ async fn cross_to_solana(chains: &mut Chains, nonce: u64, amount: u64) {
         .collector
         .collect(&dir, Direction::MachineToSolana, nonce, DEST_NOW)
         .unwrap();
+    let attested_hash = collected.hash();
     let unlock_ixs = build_unlock_instructions(
         &lock_pid,
         &collected,
@@ -910,6 +1015,10 @@ async fn cross_to_solana(chains: &mut Chains, nonce: u64, amount: u64) {
         &sol_payer,
     );
     submit(&mut chains.sol, &unlock_ixs).await.unwrap();
+    // Receipt hash-binding, every crossing (backlog #10).
+    let receipt = read_receipt(&mut chains.sol, &lock_pid, DIR_MACHINE_TO_SOLANA, nonce).await;
+    assert_eq!(receipt.message_hash, attested_hash);
+    assert_eq!(receipt.amount, amount);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -959,6 +1068,7 @@ async fn volume_drill_many_crossings_reconcile() {
         &[
             format!("crossings succeeded: {} ({} in, {} back)", DEPOSITS + UNLOCKS, DEPOSITS, UNLOCKS),
             "crossings failed unexpectedly: 0".to_string(),
+            "receipt hash-binding verified on every crossing".to_string(),
             format!("final state: vault {vault_final} locked == {wrapped_final} wrapped outstanding"),
         ],
     );
