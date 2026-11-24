@@ -11,6 +11,7 @@
 # This only fakes the CONFIG CHECK — consensus, voting and ledger behaviour
 # are untouched (local testnet traffic fits in the real 4MB buffers).
 set -e
+[ $# -ge 1 ] || { echo "Usage: $0 <command> [args...]" >&2; exit 1; }
 FAKE_DIR="${SYSCTL_FAKE_DIR:-/tmp/sysctl-fake}"
 for k in rmem_max wmem_max rmem_default wmem_default; do
     [ -f "$FAKE_DIR/$k" ] || { echo "missing fake sysctl file: $FAKE_DIR/$k" >&2; exit 1; }
@@ -26,6 +27,7 @@ for k in rmem_max wmem_max rmem_default wmem_default; do
     [ "$v" -gt 0 ] || { echo "fake sysctl file $FAKE_DIR/$k does not contain a positive integer (got: '$v')" >&2; exit 1; }
 done
 exec unshare --user --mount --map-root-user bash -c '
+set -e
 mount --bind "$1/rmem_max" /proc/sys/net/core/rmem_max
 mount --bind "$1/wmem_max" /proc/sys/net/core/wmem_max
 mount --bind "$1/rmem_default" /proc/sys/net/core/rmem_default

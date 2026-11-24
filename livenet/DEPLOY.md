@@ -141,17 +141,26 @@ MACHINE in it is gone forever. The founder (150,000,000), ecosystem
 if lost. Lose a validator identity key and that validator cannot
 restart. Do not commit `keys/` to git.
 
-For option B, copy the whole `livenet/` directory to the other two
-hosts (keys, ledger, genesis-info.env included) — e.g.:
+For option B, copy to each other host ONLY what that host's validator
+actually needs: the ledger, genesis-info.env, validators.conf, and
+THAT validator's own identity and vote keypairs. `start-validator.sh`
+reads nothing else from keys/. Never copy the whole `livenet/`
+directory: it contains all 15 keypairs, including the treasury
+(243,999,000), founder, ecosystem, community and validator-rewards
+keys — one validator-host compromise would then hand over the entire
+genesis allocation. The allocation/bucket keys (treasury, founder,
+ecosystem, community, validator-rewards, faucet, and the stake keys)
+never leave validator 1's host except into the offline backup above.
 
 ```bash
-# On validator 1 host, after generating:
-scp -r /opt/mememachine/livenet mememachine@<V2_IP>:/opt/mememachine/livenet
-scp -r /opt/mememachine/livenet mememachine@<V3_IP>:/opt/mememachine/livenet
+# On validator 1 host, after generating — for validator 2's host
+# (repeat with v3-* for validator 3's host):
+scp -r /opt/mememachine/livenet/ledger /opt/mememachine/livenet/genesis-info.env /opt/mememachine/livenet/validators.conf mememachine@<V2_IP>:/opt/mememachine/livenet/
+scp /opt/mememachine/livenet/keys/v2-identity.json /opt/mememachine/livenet/keys/v2-vote.json mememachine@<V2_IP>:/opt/mememachine/livenet/keys/
 ```
 
 (Each host still needs its own copy of the repo + binaries from step 3
-first.)
+first, and a `livenet/keys/` directory to receive its two keypairs.)
 
 ## 5. Set the public IPs
 

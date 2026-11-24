@@ -80,8 +80,8 @@ for manifest in Path(sys.argv[1]).glob("crates/*/Cargo.toml"):
 PYEOF
 cp "$SCRIPT_DIR/sbf-Cargo.lock" "$SCRATCH/Cargo.lock"
 
-cargo build-sbf --manifest-path "$SCRATCH/crates/solana-lock/Cargo.toml"
-cargo build-sbf --manifest-path "$SCRATCH/crates/machine-bridge/Cargo.toml"
+cargo build-sbf --locked --manifest-path "$SCRATCH/crates/solana-lock/Cargo.toml"
+cargo build-sbf --locked --manifest-path "$SCRATCH/crates/machine-bridge/Cargo.toml"
 
 mkdir -p "$OUT_DIR"
 echo

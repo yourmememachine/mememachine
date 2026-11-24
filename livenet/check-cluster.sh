@@ -62,14 +62,36 @@ for n in 1 2 3; do
     fi
     if SLOT=$("$SOLANA" slot --url "http://$HOST:$PORT" 2>/dev/null); then
         say "validator $n RPC answers (slot $SLOT)" "OK"
+        # Genesis hash is checked on EVERY validator's RPC, not only
+        # validator 1's: a node booted from a stale/wrong ledger is
+        # exactly the split-genesis failure this gate exists to catch,
+        # and it is never validator 1 (the bootstrap node).
+        SEEN=$("$SOLANA" genesis-hash --url "http://$HOST:$PORT" 2>/dev/null || echo "")
+        if [ "$SEEN" = "$GENESIS_HASH" ]; then
+            say "validator $n genesis hash matches" "OK"
+        else
+            say "validator $n genesis hash matches (got ${SEEN:-?})" "FAIL"
+            fail=1
+        fi
     else
         say "validator $n RPC answers" "FAIL"
         fail=1
     fi
 done
 
+# Validator 1's later checks (slot advancing, validators list,
+# transfer) query its public address; apply the same localhost-bind
+# skip there, so a documented localhost rebind (ops/PUBLIC-RPC.md)
+# does not turn them into false FAILs against an unbound address.
+V1_SKIP=0
+if [ "$V1_RPC_BIND" = "127.0.0.1" ] && [ "$V1_HOST" != "127.0.0.1" ]; then
+    V1_SKIP=1
+    say "validator 1 public-RPC checks (localhost-only, skipping)" "SKIP"
+fi
+
 # Slot advancing on the public RPC.
-SLOT1=$("$SOLANA" slot --url "http://$V1_HOST:$V1_RPC_PORT" 2>/dev/null || echo "")
+SLOT1=""
+[ "$V1_SKIP" = 0 ] && SLOT1=$("$SOLANA" slot --url "http://$V1_HOST:$V1_RPC_PORT" 2>/dev/null || echo "")
 if [ -n "$SLOT1" ]; then
     sleep 10
     SLOT2=$("$SOLANA" slot --url "http://$V1_HOST:$V1_RPC_PORT" 2>/dev/null || echo "")
@@ -79,14 +101,6 @@ if [ -n "$SLOT1" ]; then
         say "slot advancing ($SLOT1 -> ${SLOT2:-?})" "FAIL"
         fail=1
     fi
-    # Genesis hash matches.
-    SEEN_HASH=$("$SOLANA" genesis-hash --url "http://$V1_HOST:$V1_RPC_PORT" 2>/dev/null || echo "")
-    if [ "$SEEN_HASH" = "$GENESIS_HASH" ]; then
-        say "genesis hash matches ($SEEN_HASH)" "OK"
-    else
-        say "genesis hash matches (got ${SEEN_HASH:-?})" "FAIL"
-        fail=1
-    fi
 fi
 
 # Three voting validators with stake. Only the Current Validators
@@ -94,7 +108,9 @@ fi
 # voting) validators, and counting lines anywhere in the output would
 # certify a chain whose third validator has stopped voting. Each of
 # the three identities must appear in the current section.
-if VALIDATORS=$("$SOLANA" validators --url "http://$V1_HOST:$V1_RPC_PORT" 2>/dev/null); then
+if [ "$V1_SKIP" = 1 ]; then
+    say "validators list (localhost-only, skipping)" "SKIP"
+elif VALIDATORS=$("$SOLANA" validators --url "http://$V1_HOST:$V1_RPC_PORT" 2>/dev/null); then
     CURRENT=$(printf '%s\n' "$VALIDATORS" | sed -n '/Current Validators/,/Delinquent Validators/p')
     echo "$VALIDATORS" | grep -E "Identity|  $V1_IDENTITY|  $V2_IDENTITY|  $V3_IDENTITY" || true
     COUNT=0
@@ -115,7 +131,9 @@ else
 fi
 
 # Real transfer between two fresh keypairs.
-if [ "$WITH_TRANSFER" = 1 ]; then
+if [ "$WITH_TRANSFER" = 1 ] && [ "$V1_SKIP" = 1 ]; then
+    say "transfer A -> B (localhost-only, skipping)" "SKIP"
+elif [ "$WITH_TRANSFER" = 1 ]; then
     TMPDIR=$(mktemp -d)
     trap 'rm -rf "$TMPDIR"' EXIT
     "$AGAVE_BIN/solana-keygen" new --no-bip39-passphrase -s -o "$TMPDIR/a.json" >/dev/null

@@ -24,17 +24,23 @@ TARBALL_SHA256="c43539ebdf6942472e8b87635d6ea55f428a51e3d0219f7b6f720fc6b19fade0
 
 NEEDED="solana solana-keygen solana-genesis solana-test-validator agave-validator agave-ledger-tool"
 
-# Idempotent: skip only if ALL needed binaries are present and the
-# main one reports the right version.
+# Idempotent: skip only if ALL needed binaries are present and EACH
+# one reports the right version — checking only bin/solana would pass
+# a mixed-version bin/ left by a partial install or manual swap.
 all_present=1
 for b in $NEEDED; do
     [ -x "bin/$b" ] || all_present=0
 done
 if [ "$all_present" = 1 ]; then
-    if bin/solana --version 2>/dev/null | grep -q "${AGAVE_VERSION}"; then
+    all_correct=1
+    for b in $NEEDED; do
+        bin/$b --version 2>/dev/null | grep -q "${AGAVE_VERSION}" || all_correct=0
+    done
+    if [ "$all_correct" = 1 ]; then
         echo "Agave ${AGAVE_VERSION} already installed in ./bin/ — nothing to do."
         exit 0
     fi
+    echo "bin/ holds a mixed or wrong version — reinstalling."
 fi
 
 echo "Downloading Agave ${AGAVE_VERSION} (prebuilt release)..."

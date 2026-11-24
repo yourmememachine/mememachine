@@ -11,7 +11,10 @@ vault's locked supply:
 
 At deployment the locked supply starts at 0, so caps must be set
 against the *planned* initial locked supply for the capped-mainnet
-phase, and revisited by multisig + timelock as it grows. This script
+phase, as it grows. Per-tx/daily caps can later be changed by SetCap
+(2-of-3 admins, immediate — no timelock exists in the programs);
+the vault ceiling cannot: it is set at Initialize with no raise
+path. This script
 does the arithmetic and refuses nonsense (daily < per-tx, zeros,
 percentages above 100, non-finite percentages, and results that do
 not fit the programs' u64 cap fields):
@@ -81,7 +84,7 @@ def main():
     print(f"planned_locked_supply = {args.planned_locked_supply}")
     print(f"per_tx_cap            = {per_tx}  ({args.per_tx_pct}% of planned supply)")
     print(f"daily_cap             = {daily}  ({args.daily_pct}% of planned supply)")
-    print(f"vault_ceiling         = {args.planned_locked_supply}  (raise by multisig + timelock)")
+    print(f"vault_ceiling         = {args.planned_locked_supply}  (Initialize-only: cannot be raised after Initialize)")
     return 0
 
 

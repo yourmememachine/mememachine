@@ -90,9 +90,9 @@ Two details that are load-bearing:
 ## 4. Deploy both programs
 
 ```bash
-solana program deploy target/deploy/solana_lock.so \
+solana program deploy bridge/target/deploy/solana_lock.so \
     --url <solana-rpc> --keypair ~/keys/deployer.json
-solana program deploy target/deploy/machine_bridge.so \
+solana program deploy bridge/target/deploy/machine_bridge.so \
     --url <machine-rpc> --keypair ~/keys/deployer.json
 ```
 

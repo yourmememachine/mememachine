@@ -91,11 +91,14 @@ if [ "$SKIP_DOWNLOAD" -eq 0 ]; then
     mkdir -p "$BUILD_DIR"
     TARBALL="${BUILD_DIR}/agave-${AGAVE_VERSION}.tar.gz"
     echo "==> Downloading Agave ${AGAVE_VERSION} source tarball..."
-    curl -sSL -o "$TARBALL" "$TARBALL_URL"
+    curl --fail -sSL -o "$TARBALL" "$TARBALL_URL"
     echo "==> Verifying SHA-256..."
     echo "${TARBALL_SHA256}  ${TARBALL}" | sha256sum -c -
     echo "==> Extracting to ${BUILD_DIR}..."
-    tar -xzf "$TARBALL" -C "$BUILD_DIR"
+    # Extract into a fresh tree: re-extracting over a patched tree
+    # would leave patch-created files behind in a mixed state.
+    rm -rf "$SRC_DIR"
+    tar --no-same-owner -xzf "$TARBALL" -C "$BUILD_DIR"
 else
     echo "==> --skip-download: reusing existing source tree at ${SRC_DIR}"
 fi
@@ -110,9 +113,17 @@ echo "==> Applying patches from ${PATCHES_DIR}..."
 for patch_file in "$PATCHES_DIR"/*.patch; do
     name="$(basename "$patch_file")"
     echo "--- ${name}: dry-run check"
-    (cd "$SRC_DIR" && patch --dry-run -p1 < "$patch_file")
-    echo "--- ${name}: applying"
-    (cd "$SRC_DIR" && patch -p1 < "$patch_file")
+    if (cd "$SRC_DIR" && patch --dry-run -p1 < "$patch_file") >/dev/null 2>&1; then
+        echo "--- ${name}: applying"
+        (cd "$SRC_DIR" && patch -p1 < "$patch_file")
+    elif (cd "$SRC_DIR" && patch --dry-run -R -p1 < "$patch_file") >/dev/null 2>&1; then
+        # A re-run after an interrupted first run: this patch is
+        # already fully applied, so skipping it is the resume path.
+        echo "--- ${name}: already applied, skipping (resume)"
+    else
+        echo "error: patch $name neither applies nor is already applied" >&2
+        exit 1
+    fi
 done
 echo "==> All patches applied cleanly."
 

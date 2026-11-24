@@ -67,7 +67,13 @@ fi
 # The gossip host is advertised to the whole network; never advertise
 # an unvalidated third-party response (an error page, a CDN address,
 # a hijacked answer) as this validator's identity.
-if ! printf '%s' "$PUBLIC_IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[0-9a-fA-F:]*:[0-9a-fA-F:]+$'; then
+valid_ip=0
+if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "$PUBLIC_IP" 2>/dev/null && valid_ip=1
+elif printf '%s' "$PUBLIC_IP" | grep -Eq '^((25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$'; then
+    valid_ip=1
+fi
+if [ "$valid_ip" != 1 ]; then
     echo "ERROR: public IP '$PUBLIC_IP' is not a valid IP address. Set V${N}_PUBLIC_IP in validators.conf." >&2
     exit 1
 fi

@@ -95,7 +95,10 @@ class FakeRPC:
 
     def __init__(self, vault_mint="SourceMint111", vault_is_token=True,
                  vault_amount="500", vault_decimals=6,
-                 supply_amount="500", supply_decimals=6):
+                 supply_amount="500", supply_decimals=6,
+                 vault_owner="VaultOwner111", mint_authority="BridgeAuthPDA111"):
+        self.vault_owner = vault_owner
+        self.mint_authority = mint_authority
         self.vault_mint = vault_mint
         self.vault_is_token = vault_is_token
         self.vault_amount = vault_amount
@@ -121,10 +124,24 @@ class FakeRPC:
                                         "decimals": outer.supply_decimals,
                                         "uiAmount": 0.0}}
                 elif method == "getAccountInfo":
-                    if outer.vault_is_token:
+                    if body["params"][0] == "Mint111":
+                        parsed = {"info": {
+                            "mintAuthority": outer.mint_authority,
+                            "freezeAuthority": outer.mint_authority,
+                            "supply": outer.supply_amount,
+                            "decimals": outer.supply_decimals,
+                            "isInitialized": True},
+                            "type": "mint"}
+                        result = {"value": {
+                            "data": {"parsed": parsed, "program": "spl-token",
+                                     "space": 82},
+                            "executable": False, "lamports": 1461600,
+                            "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                            "rentEpoch": 0}}
+                    elif outer.vault_is_token:
                         parsed = {"info": {
                             "mint": outer.vault_mint,
-                            "owner": "VaultOwner111",
+                            "owner": outer.vault_owner,
                             "tokenAmount": {
                                 "amount": outer.vault_amount,
                                 "decimals": outer.vault_decimals}},
@@ -210,7 +227,11 @@ case "$cmd" in
   slot)
     n=$(cat "$STATE/slot" 2>/dev/null || echo 100); n=$((n+1))
     echo "$n" > "$STATE/slot"; echo "$n" ;;
-  genesis-hash) echo "FakeGenesisHashXYZ" ;;
+  genesis-hash)
+    if [ "${STUB_V3_BAD_GENESIS:-0}" = "1" ]; then
+      case "$*" in *8901*) echo "DifferentGenesisHash"; exit 0 ;; esac
+    fi
+    echo "FakeGenesisHashXYZ" ;;
   validators)
     echo "Current Validators:"
     echo "  Identity                                      Vote Account"
@@ -328,7 +349,7 @@ touch "$ledger/genesis.bin" "$ledger/genesis.tar.bz2"
     def ledger_tool(self, fail):
         body = "#!/bin/bash\nexit 1\n" if fail else """#!/bin/bash
 for a in "$@"; do
-  if [ "$a" = "genesis-hash" ]; then echo "FakeGenesisHashXYZ"; exit 0; fi
+  if [ "$a" = "genesis-hash" ]; then echo "FakeGenesisHashXYZFakeGenesisHashXYZ"; exit 0; fi
 done
 echo "Shred version: 4242"
 """
@@ -352,7 +373,7 @@ echo "Shred version: 4242"
                 env={"AGAVE_BIN": self.bindir})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         content = open(os.path.join(self.live, "genesis-info.env")).read()
-        self.assertIn("GENESIS_HASH=FakeGenesisHashXYZ", content)
+        self.assertIn("GENESIS_HASH=FakeGenesisHashXYZFakeGenesisHashXYZ", content)
         self.assertIn("SHRED_VERSION=4242", content)
 
 
@@ -550,6 +571,7 @@ manifest=""
 prev=""
 for a in "$@"; do [ "$prev" = "--manifest-path" ] && manifest="$a"; prev="$a"; done
 echo "$manifest" >> "${STUB_CARGO_LOG:?}"
+echo "$@" >> "${STUB_CARGO_LOG:?}.args"
 crate=$(basename "$(dirname "$manifest")")
 ws=$(cd "$(dirname "$manifest")/../.." && pwd)
 mkdir -p "$ws/target/deploy"
@@ -622,6 +644,218 @@ class TestUpShOrdering(unittest.TestCase):
         self.assertLess(proof, enable,
                         "validators are boot-enabled before the proof step")
         self.assertNotIn("enable --now", src)
+
+
+class TestRound11Findings(unittest.TestCase):
+    # --- caps.py false timelock claim (A-F2/B-F5) ---
+    def test_caps_output_has_no_timelock_claim(self):
+        r = run([sys.executable, os.path.join(ROOT, "bridge/deploy/caps.py"),
+                 "--planned-locked-supply", "10000000000"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("timelock", r.stdout.lower())
+        self.assertNotIn("multisig + timelock", r.stdout)
+
+    # --- reconcile binding (A-F4/B-F4) ---
+    def reconcile_args(self, rpc, *extra):
+        return run([sys.executable, os.path.join(ROOT, "ops/reconcile.py"),
+                    "--solana-rpc", rpc.url, "--machine-rpc", rpc.url,
+                    "--vault", "VaultAcct111", "--wrapped-mint", "Mint111"]
+                   + list(extra))
+
+    def test_reconcile_wrong_expected_mint_fails(self):
+        rpc = FakeRPC()
+        try:
+            r = self.reconcile_args(rpc, "--expected-source-mint", "OtherMint999")
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("RECONCILE FAIL", r.stdout)
+        finally:
+            rpc.stop()
+
+    def test_reconcile_wrong_vault_owner_fails(self):
+        rpc = FakeRPC()
+        try:
+            r = self.reconcile_args(rpc, "--expected-vault-owner", "NotThePDA999")
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("RECONCILE FAIL", r.stdout)
+        finally:
+            rpc.stop()
+
+    def test_reconcile_correct_bindings_ok(self):
+        rpc = FakeRPC()
+        try:
+            r = self.reconcile_args(
+                rpc, "--expected-source-mint", "SourceMint111",
+                "--expected-vault-owner", "VaultOwner111",
+                "--expected-mint-authority", "BridgeAuthPDA111")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("RECONCILE OK", r.stdout)
+        finally:
+            rpc.stop()
+
+    def test_reconcile_wrong_mint_authority_fails(self):
+        rpc = FakeRPC()
+        try:
+            r = self.reconcile_args(rpc, "--expected-mint-authority", "AttackerKey999")
+            self.assertEqual(r.returncode, 1, r.stdout)
+        finally:
+            rpc.stop()
+
+    # --- check-cluster per-validator genesis (A-F1) ---
+    def test_check_cluster_split_genesis_fails(self):
+        tc = TestCheckCluster(methodName="test_healthy_cluster_with_transfer_ok")
+        tc.setUp()
+        try:
+            r = tc.check(STUB_V3_BAD_GENESIS="1")
+            self.assertNotEqual(r.returncode, 0, r.stdout)
+            self.assertNotIn("LIVENET OK", r.stdout)
+        finally:
+            shutil.rmtree(tc.tmp, True)
+
+    # --- gossip IP strictness (A-F3/B-F7) ---
+    def test_start_validator_rejects_999_ip(self):
+        tc = TestLivenetStartValidator(methodName="test_identity_mismatch_refused")
+        tc.setUp()
+        try:
+            stubbin = os.path.join(tc.tmp, "stubbin2")
+            os.makedirs(stubbin)
+            write(os.path.join(stubbin, "curl"),
+                  "#!/bin/bash\necho '999.999.999.999'\n", 0o755)
+            r = tc.start(1, env={"PATH": stubbin + ":" + os.environ["PATH"]})
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("not a valid IP", r.stdout + r.stderr)
+        finally:
+            shutil.rmtree(tc.tmp, True)
+
+    # --- genesis distinctness (A-F7/B-F6) ---
+    def test_genesis_duplicate_pubkeys_refused(self):
+        tc = TestGenerateGenesisEmptyHash(methodName="test_happy_path_writes_identity")
+        tc.setUp()
+        try:
+            write(os.path.join(tc.live, "keys/treasury.json"), "PK-founder")
+            tc.ledger_tool(fail=False)
+            r = run(["./generate-genesis.sh"], cwd=tc.live,
+                    env={"AGAVE_BIN": tc.bindir})
+            self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("distinct", (r.stdout + r.stderr).lower())
+        finally:
+            shutil.rmtree(tc.tmp, True)
+
+    # --- run-in-ns (A-F6, B-F9) ---
+    def test_run_in_ns_no_command_fails(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for k in ["rmem_max", "wmem_max", "rmem_default", "wmem_default"]:
+            write(os.path.join(tmp, k), "134217728\n")
+        r = run([os.path.join(ROOT, "run-in-ns.sh")],
+                env={"SYSCTL_FAKE_DIR": tmp})
+        self.assertNotEqual(r.returncode, 0, "no-command run reported success")
+        src = open(os.path.join(ROOT, "run-in-ns.sh")).read()
+        inner = src.split("bash -c '", 1)[1]
+        self.assertTrue(inner.lstrip().startswith("set -e"),
+                        "inner namespace shell does not fail on mount errors")
+
+    # --- install.sh version check all binaries (B-F10) ---
+    def test_install_mixed_versions_not_idempotent(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy(os.path.join(ROOT, "install.sh"), tmp)
+        os.makedirs(os.path.join(tmp, "bin"))
+        for b in ["solana", "solana-keygen", "solana-genesis",
+                  "solana-test-validator", "agave-validator", "agave-ledger-tool"]:
+            ver = "2.3.12" if b == "agave-validator" else "2.3.13"
+            write(os.path.join(tmp, "bin", b),
+                  f'#!/bin/bash\necho "stub  {ver}"\n', 0o755)
+        stubbin = os.path.join(tmp, "stubbin")
+        os.makedirs(stubbin)
+        write(os.path.join(stubbin, "curl"), "#!/bin/bash\nexit 1\n", 0o755)
+        r = run(["./install.sh"], cwd=tmp,
+                env={"PATH": stubbin + ":" + os.environ["PATH"]})
+        self.assertNotIn("already installed", r.stdout)
+
+    def test_install_all_correct_versions_idempotent(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy(os.path.join(ROOT, "install.sh"), tmp)
+        os.makedirs(os.path.join(tmp, "bin"))
+        for b in ["solana", "solana-keygen", "solana-genesis",
+                  "solana-test-validator", "agave-validator", "agave-ledger-tool"]:
+            write(os.path.join(tmp, "bin", b),
+                  '#!/bin/bash\necho "stub 2.3.13"\n', 0o755)
+        r = run(["./install.sh"], cwd=tmp)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("already installed", r.stdout)
+
+    # --- build-sbf --locked (B-F11) ---
+    def test_build_sbf_uses_locked(self):
+        src = open(os.path.join(ROOT, "bridge/deploy/build-sbf.sh")).read()
+        self.assertIn("cargo build-sbf --locked", src)
+
+    # --- build-from-source resumable patches + tar hardening (A-F8/B-F12) ---
+    def test_build_from_source_rerun_after_patch_ok(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy(os.path.join(ROOT, "build-from-source.sh"), tmp)
+        os.makedirs(os.path.join(tmp, "patches"))
+        write(os.path.join(tmp, "patches/0001.patch"),
+              "--- a/hello.txt\n+++ b/hello.txt\n@@ -1 +1 @@\n-old\n+new\n")
+        src = os.path.join(tmp, "build/agave-2.3.13/agave-2.3.13")
+        os.makedirs(src)
+        write(os.path.join(src, "hello.txt"), "old\n")
+        args = ["./build-from-source.sh", "--skip-download", "--skip-build",
+                "--build-dir", os.path.join(tmp, "build/agave-2.3.13")]
+        r1 = run(args, cwd=tmp)
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        r2 = run(args, cwd=tmp)
+        self.assertEqual(r2.returncode, 0,
+                         f"re-run after applied patch failed: {r2.stdout}{r2.stderr}")
+        self.assertEqual(open(os.path.join(src, "hello.txt")).read(), "new\n")
+        script = open(os.path.join(ROOT, "build-from-source.sh")).read()
+        self.assertIn("--no-same-owner", script)
+
+    # --- root start-validator truncated keypair re-seeded (A-F10/B-F13) ---
+    def test_root_start_validator_reseeds_corrupt_keypair(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy(os.path.join(ROOT, "start-validator.sh"), tmp)
+        os.makedirs(os.path.join(tmp, "ledger"))
+        write(os.path.join(tmp, "ledger/genesis.bin"), "genesis")
+        os.makedirs(os.path.join(tmp, "keys"))
+        for k in ["founder", "vote", "stake", "faucet"]:
+            write(os.path.join(tmp, "keys", f"{k}.json"), f"KEY-{k}")
+        os.makedirs(os.path.join(tmp, "bin"))
+        write(os.path.join(tmp, "bin/solana-test-validator"),
+              "#!/bin/bash\necho STUB-TEST-VALIDATOR\n", 0o755)
+        os.makedirs(os.path.join(tmp, "ledger-test"))
+        write(os.path.join(tmp, "ledger-test/genesis.bin"), "genesis")
+        write(os.path.join(tmp, "ledger-test/validator-keypair.json"), "TRUNC")
+        r = run(["./start-validator.sh"], cwd=tmp)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(
+            open(os.path.join(tmp, "ledger-test/validator-keypair.json")).read(),
+            "KEY-founder")
+
+    # --- docs / script-shape fixes ---
+    def test_deploy_docs_do_not_spread_all_keys(self):
+        src = open(os.path.join(ROOT, "livenet/DEPLOY.md")).read()
+        self.assertNotIn("scp -r /opt/mememachine/livenet mememachine@", src)
+        self.assertNotIn("copy the whole `livenet/` directory to the other two", src)
+        self.assertIn("treasury", src.lower())
+
+    def test_deploy_bridge_path_matches_build_sbf(self):
+        src = open(os.path.join(ROOT, "bridge/deploy/DEPLOY-BRIDGE.md")).read()
+        self.assertIn("bridge/target/deploy/solana_lock.so", src)
+
+    def test_testnet_docs_and_up_sh(self):
+        doc = open(os.path.join(ROOT, "testnet/TESTNET.md")).read()
+        self.assertIn("TESTNET=1 ./testnet/up.sh", doc)
+        up = open(os.path.join(ROOT, "testnet/up.sh")).read()
+        # Units must be rewritten to this checkout, not copied verbatim
+        # from the /opt/mememachine-hardcoding livenet units.
+        self.assertIn("ROOT_DIR", up.split("step \"5/7")[1].split("step \"6/7")[0])
+        # Readiness wait before the proof step.
+        self.assertLess(up.index("for attempt in"), up.index("check-cluster.sh --with-transfer"))
+        # Resume: a marker distinguishes a testnet-generated checkout.
+        self.assertIn("testnet", up.lower().split("refusing: this checkout")[0][-2000:])
 
 
 if __name__ == "__main__":

@@ -103,6 +103,17 @@ ECOSYSTEM=$(pubkey ecosystem)
 COMMUNITY=$(pubkey community)
 VALIDATOR_REWARDS=$(pubkey validator-rewards)
 
+# All 15 pubkeys must be pairwise distinct: keys are copied between
+# hosts by design, and a copy error that duplicates one file over
+# another would otherwise silently merge two primordial allocations
+# (duplicate YAML key) or make two bootstrap validators share one
+# identity in an irreversible genesis.
+ALL_KEYS="$V1I $V1V $V1S $V2I $V2V $V2S $V3I $V3V $V3S $FAUCET $TREASURY $FOUNDER $ECOSYSTEM $COMMUNITY $VALIDATOR_REWARDS"
+if [ "$(printf '%s\n' $ALL_KEYS | sort -u | wc -l)" -ne 15 ]; then
+    echo "ERROR: the 15 keypair pubkeys are not pairwise distinct — a keypair file was likely copied over another. Refusing to build a genesis with merged allocations or duplicate validator identities." >&2
+    exit 1
+fi
+
 # Primordial allocation accounts (1 MACHINE = 1,000,000,000 lamports).
 # Subtotal 993,999,000 MACHINE = 993,999,000,000,000,000 lamports.
 PRIMORDIAL="$SCRIPT_DIR/.primordial.yaml"
@@ -169,6 +180,12 @@ SHRED_VERSION=$("$AGAVE_BIN/agave-ledger-tool" --ledger "$LEDGER_DIR" genesis 2>
 # must never be written down as an empty identity with a success
 # message — the pipelines above hide the failure (their exit status
 # is tail's / awk's), so check the values themselves.
+# Format check, not just non-empty: the hash read above is `tail -1`
+# of ledger-tool output, which could capture a warning line instead.
+if ! printf '%s' "$GENESIS_HASH" | grep -Eq '^[1-9A-HJ-NP-Za-km-z]{32,44}$' || ! printf '%s' "$SHRED_VERSION" | grep -Eq '^[0-9]+$'; then
+    echo "ERROR: genesis hash / shred version have unexpected formats (hash='$GENESIS_HASH' shred='$SHRED_VERSION'); refusing to write $INFO_FILE." >&2
+    exit 1
+fi
 if [ -z "$GENESIS_HASH" ] || [ -z "$SHRED_VERSION" ]; then
     echo "ERROR: could not read the genesis hash / shred version back from $LEDGER_DIR (got hash='$GENESIS_HASH' shred='$SHRED_VERSION')." >&2
     echo "The genesis was built but its identity is unknown; refusing to write $INFO_FILE. Investigate agave-ledger-tool before re-running." >&2

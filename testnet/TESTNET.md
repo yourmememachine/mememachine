@@ -35,7 +35,7 @@ On the VPS, in a **dedicated checkout** (`~/mememachine-testnet`,
 never the directory a future livenet will use):
 
 ```bash
-./testnet/up.sh
+TESTNET=1 ./testnet/up.sh
 ```
 
 `up.sh` sequences the existing, tested pieces and stops at the
