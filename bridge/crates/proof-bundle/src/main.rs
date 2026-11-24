@@ -43,7 +43,26 @@ fn read_capped(path: &str) -> Result<String, String> {
             "{path} is {len} bytes, over the {MAX_INPUT_BYTES}-byte input cap"
         ));
     }
-    std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))
+    // The metadata length alone does not bound the read: a special
+    // file whose stated size is 0 (e.g. /dev/zero, a FIFO, a /proc
+    // file) or a file grown between the check and the read would
+    // stream without limit into `read_to_string` and exhaust
+    // memory — the exact outcome the cap exists to prevent
+    // (debate round 2026-11-23, B-F1). Read through a bounded
+    // reader instead and reject if one byte past the cap exists;
+    // that closes the special-file and growth cases together.
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let mut buf = Vec::new();
+    file.take(MAX_INPUT_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("cannot read {path}: {e}"))?;
+    if buf.len() as u64 > MAX_INPUT_BYTES {
+        return Err(format!(
+            "{path} is over the {MAX_INPUT_BYTES}-byte input cap"
+        ));
+    }
+    String::from_utf8(buf).map_err(|e| format!("cannot read {path}: {e}"))
 }
 
 fn usage() -> ! {
@@ -323,4 +342,45 @@ fn cmd_export(args: &[String]) -> ExitCode {
         None => println!("{json}"),
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_file(name: &str, contents: &[u8]) -> String {
+        let path = std::env::temp_dir().join(format!(
+            "crossing-proof-{name}-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, contents).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn read_capped_reads_a_small_file() {
+        let path = temp_file("small", b"{\"ok\":true}");
+        assert_eq!(read_capped(&path).unwrap(), "{\"ok\":true}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn read_capped_rejects_a_file_over_the_cap() {
+        let contents = vec![b'x'; (MAX_INPUT_BYTES + 1) as usize];
+        let path = temp_file("big", &contents);
+        assert!(read_capped(&path).is_err());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_capped_rejects_an_unbounded_special_file() {
+        // Debate round 2026-11-23 (B-F1): /dev/zero reports a
+        // metadata size of 0, so the pre-read length check passed
+        // and the unbounded read grew until memory exhaustion.
+        // The bounded read must reject it at the cap instead.
+        // (Pre-fix this test does not terminate promptly; it is a
+        // regression pin for the fixed behaviour.)
+        assert!(read_capped("/dev/zero").is_err());
+    }
 }

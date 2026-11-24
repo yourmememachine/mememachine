@@ -33,6 +33,20 @@
 //! the crossing completed, which is when the on-chain program
 //! evaluated it too).
 //!
+//! One deliberate strictness (debate round 2026-11-23, B-F2):
+//! bundle verification follows `verify_attestation` (collector)
+//! semantics — every attestation entry must be a valid signature
+//! from a distinct registered relayer, so a bundle carrying an
+//! extra entry past quorum (a duplicate, or a signature from an
+//! unregistered key) is rejected even though the crossing itself
+//! reached quorum. That is stricter than the on-chain precompile
+//! path (`verify_precompile_attestation`), which scans a
+//! transaction-wide instructions sysvar it does not control and
+//! therefore ignores entries it cannot use. A bundle is a closed
+//! proof artifact whose canonical form carries exactly the
+//! attestations it claims; a crossing remains provable by a
+//! bundle containing the quorum entries alone.
+//!
 //! What a valid bundle proves — and only this: a quorum of the
 //! stated relayer set signed this exact message, and the bundle
 //! contains a receipt whose fields match that message. The receipt
@@ -496,8 +510,9 @@ pub fn build_bundle(
 /// does before submitting), pair it with the crossing receipt the
 /// destination program wrote, and verify the assembled bundle.
 ///
-/// The collector's expiry check is evaluated at `receipt.slot` —
-/// the destination slot at which the crossing completed.
+/// The collector's expiry check is evaluated at
+/// `receipt.timestamp` — the destination chain's Clock time at
+/// which the crossing completed.
 pub fn export_bundle(
     attestations_dir: &Path,
     direction: Direction,
@@ -871,9 +886,51 @@ mod tests {
     fn relayer_set_member_swapped_fails() {
         // The stated set is what signatures are checked against:
         // swapping one member makes a real signature "unknown".
+        // The swapped-in key is a real signer's key (on-curve, not
+        // in the set): an arbitrary `Pubkey::new_unique` is
+        // off-curve about half the time and would now be rejected
+        // earlier, as an invalid relayer set (debate round
+        // 2026-11-23, B-F3).
         let fx = fixture();
         let mut bundle = fx.bundle.clone();
-        bundle.relayer_set[2] = Pubkey::new_unique().to_string();
+        bundle.relayer_set[2] = RelayerSigner::from_seed(&[99u8; 32]).pubkey().to_string();
+        assert_eq!(
+            verify_bundle(&bundle),
+            Err(BundleError::Attestation(BridgeError::UnknownRelayer))
+        );
+    }
+
+    #[test]
+    fn debate_extra_duplicate_attestation_past_quorum_fails() {
+        // Debate round 2026-11-23 (B-F2): bundle verification is
+        // deliberately stricter than the on-chain precompile path —
+        // an extra entry past quorum rejects the bundle, even a
+        // duplicate of a valid attestation. The crossing remains
+        // provable by the canonical bundle (the fixture itself).
+        let fx = fixture();
+        let mut bundle = fx.bundle.clone();
+        let dup = bundle.attestations[0].clone();
+        bundle.attestations.push(dup);
+        assert_eq!(
+            verify_bundle(&bundle),
+            Err(BundleError::Attestation(
+                BridgeError::DuplicateRelayerSignature
+            ))
+        );
+    }
+
+    #[test]
+    fn debate_extra_unknown_attestation_past_quorum_fails() {
+        // Debate round 2026-11-23 (B-F2): same strictness for an
+        // extra entry from an unregistered key past quorum.
+        let fx = fixture();
+        let mut bundle = fx.bundle.clone();
+        let outsider = RelayerSigner::from_seed(&[99u8; 32]);
+        let sig = outsider.sign(&fx.message);
+        bundle.attestations.push(SignatureFile {
+            relayer: sig.relayer.to_string(),
+            signature: bs58::encode(sig.signature).into_string(),
+        });
         assert_eq!(
             verify_bundle(&bundle),
             Err(BundleError::Attestation(BridgeError::UnknownRelayer))

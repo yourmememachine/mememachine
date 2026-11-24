@@ -786,16 +786,28 @@ pub fn verify_admins(
 }
 
 /// Validate a member set (relayers or admins) at initialization or
-/// rotation: no default (unset) keys and no duplicates. One shared
-/// validator on purpose — `Initialize` previously checked only for
-/// default keys while `SetRelayers` also rejected duplicates, so a
-/// config could be initialized with a silently weaker set than its
-/// size suggests (self-audit F-3, 2026-11-16). Error mapping matches
-/// the historical `SetRelayers` behavior exactly: a default key is
-/// `InvalidState`, a duplicate is `DuplicateRelayerSignature`.
+/// rotation: no default (unset) keys, no duplicates, and no
+/// off-curve keys. One shared validator on purpose — `Initialize`
+/// previously checked only for default keys while `SetRelayers`
+/// also rejected duplicates, so a config could be initialized with
+/// a silently weaker set than its size suggests (self-audit F-3,
+/// 2026-11-16). Error mapping matches the historical `SetRelayers`
+/// behavior exactly: a default key is `InvalidState`, a duplicate
+/// is `DuplicateRelayerSignature`.
+///
+/// An off-curve key (e.g. a PDA-style address pasted in by mistake)
+/// is rejected for the same reason as a duplicate: every member
+/// must be able to sign — relayers sign ed25519 attestations and
+/// admins sign transactions — and an off-curve point has no private
+/// key, so it can never be counted by `verify_attestation`,
+/// `verify_precompile_attestation`, or a transaction signature
+/// check. Accepting one would leave the set silently weaker than
+/// its size suggests: a 3-of-5 set with one off-curve member is
+/// really 3-of-4 (debate round 2026-11-23, B-F3). Mapped to
+/// `InvalidState`, like the default key.
 pub fn validate_member_set(members: &[Pubkey]) -> Result<(), BridgeError> {
     for (i, m) in members.iter().enumerate() {
-        if m == &Pubkey::default() {
+        if m == &Pubkey::default() || !m.is_on_curve() {
             return Err(BridgeError::InvalidState);
         }
         if members[..i].contains(m) {
@@ -2437,11 +2449,25 @@ mod init_gate_tests {
         }
     }
 
+    /// Distinct on-curve keys derived from ed25519 signing keys —
+    /// the shape every real member key has. (`Pubkey::new_unique`
+    /// is off-curve about half the time, so it cannot stand in for
+    /// a member key now that off-curve members are rejected,
+    /// debate round 2026-11-23, B-F3.)
+    fn on_curve_keys(base: u8, n: usize) -> Vec<Pubkey> {
+        (0..n)
+            .map(|i| {
+                let sk = ed25519_dalek::SigningKey::from_bytes(&[base + i as u8; 32]);
+                Pubkey::new_from_array(sk.verifying_key().to_bytes())
+            })
+            .collect()
+    }
+
     #[test]
     fn member_set_validation_accepts_distinct_non_default_keys() {
-        let set: [Pubkey; 5] = std::array::from_fn(|_| Pubkey::new_unique());
+        let set: [Pubkey; 5] = on_curve_keys(31, 5).try_into().unwrap();
         assert_eq!(validate_member_set(&set), Ok(()));
-        let admins: [Pubkey; 3] = std::array::from_fn(|_| Pubkey::new_unique());
+        let admins: [Pubkey; 3] = on_curve_keys(41, 3).try_into().unwrap();
         assert_eq!(validate_member_set(&admins), Ok(()));
     }
 
@@ -2449,18 +2475,35 @@ mod init_gate_tests {
     fn member_set_validation_rejects_default_and_duplicate_keys() {
         // Self-audit F-3: Initialize must apply the same validation
         // SetRelayers always had.
-        let mut with_default: [Pubkey; 5] = std::array::from_fn(|_| Pubkey::new_unique());
+        let mut with_default = on_curve_keys(31, 5);
         with_default[3] = Pubkey::default();
         assert_eq!(
             validate_member_set(&with_default),
             Err(BridgeError::InvalidState)
         );
-        let mut with_dup: [Pubkey; 5] = std::array::from_fn(|_| Pubkey::new_unique());
+        let mut with_dup = on_curve_keys(31, 5);
         with_dup[2] = with_dup[0];
         with_dup[4] = with_dup[0];
         assert_eq!(
             validate_member_set(&with_dup),
             Err(BridgeError::DuplicateRelayerSignature)
+        );
+    }
+
+    #[test]
+    fn member_set_validation_rejects_off_curve_keys() {
+        // Debate round 2026-11-23 (B-F3): an off-curve (PDA-style)
+        // member can never produce a countable signature — no
+        // private key exists for it — so the set must be rejected
+        // at validation instead of silently running one member
+        // short of its stated size.
+        let (pda, _) = Pubkey::find_program_address(&[b"member"], &Pubkey::new_unique());
+        assert!(!pda.is_on_curve());
+        let mut set = on_curve_keys(51, 5);
+        set[2] = pda;
+        assert_eq!(
+            validate_member_set(&set),
+            Err(BridgeError::InvalidState)
         );
     }
 
