@@ -91,8 +91,8 @@ no asset has crossed, nothing here holds real funds.
 
 **Proven.** Built and tested locally only. Re-verified 2026-11-25:
 `cargo test --release` in `bridge/` — **237 passed, 0 failed**
-(50 bridge-common, 35 machine-bridge, 31 solana-lock
-including the precompile-cost test, 66 relayer including the
+(54 bridge-common (50 unit + 4 cap-accounting property tests), 35 machine-bridge, 31 solana-lock
+including the precompile-cost test, 74 relayer including the
 full end-to-end drill, 28 proof bundle, 15 receipt indexer).
 Full output in `bridge/VERIFY.md`.
 
@@ -249,7 +249,7 @@ What does **not** connect today:
   chain they belong to is a local testnet whose validator is
   currently stalled at slot 29,100.
 - Saying "the bridge is built" is true of the **programs and their
-  tests** (197/197 locally, including 60/60 relayer, 23/23 proof
+  tests** (237/237 in the bridge workspace locally, including 74/74 relayer, 28/28 proof
   bundle, and 15/15 receipt indexer). It is not a claim
   that bridging works — nothing is deployed, nothing has crossed,
   and no relayer has run live.

@@ -108,7 +108,7 @@ What the log does not do:
 
 ## Tests
 
-13 unit tests in `audit_log.rs`: chain construction and reopen
+14 unit tests in `audit_log.rs`: chain construction and reopen
 continuation; edited, deleted, reordered, and hash-forged entries
 detected; truncation and wholesale rewrite detected *only* by the
 checkpoint (both pinned as passing internal verification first);

@@ -4,22 +4,22 @@ Real commands and their real output. Nothing here is claimed without a
 run behind it. Verified 2026-11-14 ~11:07 UTC, in the bridge workspace
 directory.
 
-## Current state (2026-11-21, latest commits — read this first)
+## Current state (2026-11-25, latest commits — read this first)
 
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **236 passed, 0 failed** (50
+- **Tests:** bridge workspace **237 passed, 0 failed** (50
   bridge-common unit + 4 cap-accounting property tests + 35 machine-bridge
-  + 30 solana-lock (29 + 1 precompile-cost) + 66 relayer + 23 proof bundle + 15 receipt
+  + 31 solana-lock (30 + 1 precompile-cost) + 74 relayer + 28 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
-  `programs/PQ-VERIFY.md`); fork suite 49 OK.
-  Full `make verify` 2026-11-21: **793 passed, 0 failed**.
-  This run verifies commit `8efaa66` (the RugCall judge-page
-  fixture review close; the bridge side also carries the cap-accounting
+  `programs/PQ-VERIFY.md`); fork suite 66 OK.
+  Full `make verify` 2026-11-25: **817 passed, 0 failed**.
+  This run verifies commit `23c314a` (the lock-side relayer
+  rotation test; the bridge side also carries the cap-accounting
   property tests from `e9a5dca` and the
   A-F1 external-seat positivity guard from `68fa4b6`). The SBF rebuild is
   byte-identical to the previous pin (solana_lock.so
