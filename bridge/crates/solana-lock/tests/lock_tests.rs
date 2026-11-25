@@ -627,6 +627,113 @@ async fn unlock_at_expiry_boundary() {
 }
 
 #[tokio::test]
+async fn relayer_rotation_requires_admin_multisig_and_takes_effect() {
+    // Rotation path on the release side (added 2026-11-25, daily
+    // build): the Cyber bridge post-mortem (24 Nov 2026) turned on
+    // revoking one compromised verifier key — and this side is the
+    // one that releases locked reserves, the lockbox analogue. The
+    // mint side has had this test since the rotation path shipped;
+    // the lock side's SetRelayers handler had none. The set can be
+    // replaced only by the admin multisig — never by a single
+    // admin, never by relayers themselves — and the new set is the
+    // only one that counts from that moment on.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let new_relayers: [Keypair; 5] = std::array::from_fn(|_| Keypair::new());
+    let new_pubkeys = relayer_pubkeys(&new_relayers);
+
+    fn set_relayers_ix(
+        program_id: Pubkey,
+        config: Pubkey,
+        signer_pubs: &[Pubkey],
+        relayers: [Pubkey; 5],
+    ) -> Instruction {
+        let mut metas = vec![AccountMeta::new(config, false)];
+        for p in signer_pubs {
+            metas.push(AccountMeta::new_readonly(*p, true));
+        }
+        Instruction::new_with_borsh(
+            program_id,
+            &LockInstruction::SetRelayers { relayers },
+            metas,
+        )
+    }
+    async fn send_admin_ix(
+        env: &mut Env,
+        ix: Instruction,
+        signer_idx: &[usize],
+        relayers_sign: bool,
+    ) -> Result<(), solana_program_test::BanksClientError> {
+        let blockhash = env
+            .context
+            .banks_client
+            .get_latest_blockhash()
+            .await
+            .unwrap();
+        let mut all: Vec<&Keypair> = vec![&env.context.payer];
+        for &i in signer_idx {
+            all.push(if relayers_sign {
+                &env.relayers[i]
+            } else {
+                &env.admins[i]
+            });
+        }
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&env.context.payer.pubkey()),
+            &all,
+            blockhash,
+        );
+        env.context.banks_client.process_transaction(tx).await
+    }
+    let admin_pubs: Vec<Pubkey> = env.admins.iter().map(|k| k.pubkey()).collect();
+    let relayer_pubs: Vec<Pubkey> = env.relayers.iter().map(|k| k.pubkey()).collect();
+
+    // One admin is below the 2-of-3 threshold.
+    let ix = set_relayers_ix(program_id, config_pda, &admin_pubs[..1], new_pubkeys);
+    let result = send_admin_ix(&mut env, ix, &[0], false).await;
+    assert_custom_error(result, BridgeError::Unauthorized);
+
+    // Two relayers are not admins at any count: the set cannot
+    // rotate itself (the compromised-key case — the key's owner
+    // must not be able to entrench or replace the set).
+    let ix = set_relayers_ix(program_id, config_pda, &relayer_pubs[..2], new_pubkeys);
+    let result = send_admin_ix(&mut env, ix, &[0, 1], true).await;
+    assert_custom_error(result, BridgeError::Unauthorized);
+
+    // Two admins, but the proposed set repeats a key.
+    let mut dup = new_pubkeys;
+    dup[4] = dup[0];
+    let ix = set_relayers_ix(program_id, config_pda, &admin_pubs[..2], dup);
+    let result = send_admin_ix(&mut env, ix, &[0, 1], false).await;
+    assert_custom_error(result, BridgeError::DuplicateRelayerSignature);
+
+    // Two admins and a clean set: rotation succeeds.
+    let ix = set_relayers_ix(program_id, config_pda, &admin_pubs[..2], new_pubkeys);
+    send_admin_ix(&mut env, ix, &[0, 1], false)
+        .await
+        .unwrap();
+
+    // The old set's attestations no longer count — a revoked
+    // (compromised) key's quorum releases nothing.
+    let msg = burn_message(1, 500, env.user.pubkey(), env.source_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_unlock(&mut env, msg.clone(), sigs).await;
+    assert_custom_error(result, BridgeError::UnknownRelayer);
+    assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 50_000);
+
+    // The new set's attestations unlock.
+    let sigs = sign_attestation(&msg, &new_relayers, 3);
+    send_unlock(&mut env, msg, sigs).await.unwrap();
+    assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 49_500);
+    assert_eq!(total_locked(&mut env).await, 49_500);
+}
+
+#[tokio::test]
 async fn unlock_replay_fails() {
     let mut env = setup(100_000, 500_000, 2_000_000).await;
     send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
