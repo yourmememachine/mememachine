@@ -17,7 +17,7 @@ use solana_program::{
 };
 use spl_token::{
     instruction::transfer as token_transfer,
-    state::Account as TokenAccount,
+    state::{Account as TokenAccount, Mint},
 };
 
 pub fn process(
@@ -190,6 +190,10 @@ fn process_initialize(
     let vault_account = next_account_info(&mut iter)?;
     let system_program = next_account_info(&mut iter)?;
     let programdata_account = next_account_info(&mut iter)?;
+    // Debate round 2026-11-26 (A-F1): the source mint account,
+    // appended last so the F-1 account prefix is unchanged; the
+    // freeze-authority check below inspects it.
+    let source_mint_account = next_account_info(&mut iter)?;
 
     if !payer.is_signer {
         return Err(ProgramError::MissingRequiredSignature);
@@ -243,6 +247,34 @@ fn process_initialize(
     }
     if vault_state.amount != 0 {
         return Err(BridgeError::InvalidAccountData.into());
+    }
+    // Debate round 2026-11-26 (A-F1): the source mint itself was
+    // never inspected — only the vault's parsed mint field was
+    // bound to the instruction's source_mint. A pre-existing mint
+    // whose freeze authority is a personal key lets that key freeze
+    // the custody vault; this program has no thaw path, so every
+    // locked token would be stranded permanently. Require the mint
+    // account (key + token-program owner + Mint::unpack, mirroring
+    // the Machine side) and reject a freeze authority that is
+    // neither none nor the vault-authority PDA. The PDA case is
+    // inert: the PDA can only act through this program's CPIs and
+    // the program issues no freeze/thaw CPI; a none can never gain
+    // a freeze authority later (spl-token rejects SetAuthority on a
+    // mint that cannot freeze). The mint's mint authority is the
+    // asset issuer's own trust assumption and is not checked.
+    if *source_mint_account.key != source_mint
+        || source_mint_account.owner != &spl_token::id()
+    {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    let mint_state = Mint::unpack(&source_mint_account.try_borrow_data()?)?;
+    if !mint_state.is_initialized {
+        return Err(BridgeError::InvalidAccountData.into());
+    }
+    if let solana_program::program_option::COption::Some(freeze) = mint_state.freeze_authority {
+        if freeze != vault_authority {
+            return Err(BridgeError::InvalidAccountData.into());
+        }
     }
     // Self-audit F-3: the same member-set validation SetRelayers
     // applies — no default keys, no duplicates, for either set.

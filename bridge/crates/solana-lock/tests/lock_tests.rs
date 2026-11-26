@@ -183,7 +183,9 @@ fn seed_programdata(test: &mut ProgramTest, authority: &Pubkey) {
 }
 
 /// Build the Initialize instruction (account list per the F-1
-/// layout: payer, config, vault, system program, programdata).
+/// layout plus the 2026-11-26 A-F1 source-mint account appended
+/// last: payer, config, vault, system program, programdata,
+/// source mint).
 fn initialize_ix(
     payer: &Pubkey,
     relayers: [Pubkey; 5],
@@ -213,6 +215,7 @@ fn initialize_ix(
             AccountMeta::new_readonly(vault, false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(programdata_address(), false),
+            AccountMeta::new_readonly(source_mint, false),
         ],
     )
 }
@@ -1956,3 +1959,191 @@ async fn debate_r2_deposit_to_default_destination_fails() {
     assert_eq!(total_locked(&mut env).await, 0);
 }
 
+
+// ---------------------------------------------------------------------------
+// Debate round 2026-11-26 (scope 1, rotation 3): regression tests.
+// ---------------------------------------------------------------------------
+
+/// Attempt Initialize against a source mint created with the given
+/// freeze authority (None, a personal key, or the vault-authority
+/// PDA). The vault is a normal empty PDA-owned token account.
+async fn freeze_authority_init_result(
+    freeze_authority: Option<Pubkey>,
+) -> Result<(), solana_program_test::BanksClientError> {
+    let program_id = program_id();
+    let deployer = Keypair::new();
+    let mut program_test = ProgramTest::new(
+        "solana_lock",
+        program_id,
+        solana_program_test::processor!(solana_lock::processor::process),
+    );
+    program_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    seed_programdata(&mut program_test, &deployer.pubkey());
+    let mut context = program_test.start_with_context().await;
+    let recent_blockhash = context.last_blockhash;
+    let fund_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &context.payer.pubkey(),
+            &deployer.pubkey(),
+            1_000_000_000,
+        )],
+        Some(&context.payer.pubkey()),
+        &[&context.payer],
+        recent_blockhash,
+    );
+    context.banks_client.process_transaction(fund_tx).await.unwrap();
+    let mint_authority = Keypair::new();
+    let (vault_authority, _) = authority_pda(&program_id);
+    let payer = context.payer.insecure_clone();
+    let source_mint = create_mint(
+        &mut context.banks_client,
+        &payer,
+        &recent_blockhash,
+        &mint_authority.pubkey(),
+        freeze_authority.as_ref(),
+        6,
+    )
+    .await;
+    let vault = create_token_account(
+        &mut context.banks_client,
+        &payer,
+        &recent_blockhash,
+        &source_mint,
+        &vault_authority,
+    )
+    .await;
+    let init_ix = initialize_ix(
+        &deployer.pubkey(),
+        relayer_pubkeys(&relayer_keypairs()),
+        admin_pubkeys(&admin_keypairs()),
+        source_mint,
+        vault,
+        1_000_000,
+        10_000_000,
+        1_000_000_000,
+    );
+    let blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[init_ix],
+        Some(&context.payer.pubkey()),
+        &[&context.payer, &deployer],
+        blockhash,
+    );
+    context.banks_client.process_transaction(tx).await
+}
+
+#[tokio::test]
+async fn debate_r3_initialize_rejects_personal_freeze_authority() {
+    // A-F1: the source mint's freeze authority can freeze the
+    // custody vault itself; the lock program has no thaw path, so
+    // every locked token would be stranded permanently. Initialize
+    // must reject a mint whose freeze authority is a personal key.
+    let personal = Pubkey::new_unique();
+    let result = freeze_authority_init_result(Some(personal)).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}
+
+#[tokio::test]
+async fn debate_r3_initialize_accepts_pda_freeze_authority() {
+    // A-F1 (accepted half): a freeze authority held by the
+    // vault-authority PDA is inert — the PDA can only act through
+    // this program's CPIs and the program issues no freeze/thaw
+    // CPI — mirroring the Machine-side rule and the vault
+    // close-authority rule.
+    let program_id = program_id();
+    let (vault_authority, _) = authority_pda(&program_id);
+    let result = freeze_authority_init_result(Some(vault_authority)).await;
+    assert!(result.is_ok(), "PDA freeze authority must initialize: {result:?}");
+}
+
+#[tokio::test]
+async fn debate_r3_initialize_rejects_mismatched_mint_account() {
+    // A-F1 (binding half): the mint account passed to Initialize
+    // must be the source_mint named in the instruction data; a
+    // different mint account must not let the freeze check inspect
+    // a clean mint while the config binds a tainted one.
+    let program_id = program_id();
+    let deployer = Keypair::new();
+    let mut program_test = ProgramTest::new(
+        "solana_lock",
+        program_id,
+        solana_program_test::processor!(solana_lock::processor::process),
+    );
+    program_test.add_builtin_program("spl_token", spl_token::id(), spl_token_builtin);
+    seed_programdata(&mut program_test, &deployer.pubkey());
+    let mut context = program_test.start_with_context().await;
+    let recent_blockhash = context.last_blockhash;
+    let fund_tx = Transaction::new_signed_with_payer(
+        &[system_instruction::transfer(
+            &context.payer.pubkey(),
+            &deployer.pubkey(),
+            1_000_000_000,
+        )],
+        Some(&context.payer.pubkey()),
+        &[&context.payer],
+        recent_blockhash,
+    );
+    context.banks_client.process_transaction(fund_tx).await.unwrap();
+    let mint_authority = Keypair::new();
+    let (vault_authority, _) = authority_pda(&program_id);
+    let payer = context.payer.insecure_clone();
+    let personal = Pubkey::new_unique();
+    // The mint the config will bind: personal freeze authority.
+    let source_mint = create_mint(
+        &mut context.banks_client,
+        &payer,
+        &recent_blockhash,
+        &mint_authority.pubkey(),
+        Some(&personal),
+        6,
+    )
+    .await;
+    // The clean mint actually passed as the mint account.
+    let decoy_mint = create_mint(
+        &mut context.banks_client,
+        &payer,
+        &recent_blockhash,
+        &mint_authority.pubkey(),
+        None,
+        6,
+    )
+    .await;
+    let vault = create_token_account(
+        &mut context.banks_client,
+        &payer,
+        &recent_blockhash,
+        &source_mint,
+        &vault_authority,
+    )
+    .await;
+    let (config_pda, _) = config_pda(&program_id);
+    let ix = Instruction::new_with_borsh(
+        program_id,
+        &LockInstruction::Initialize {
+            relayers: relayer_pubkeys(&relayer_keypairs()),
+            admins: admin_pubkeys(&admin_keypairs()),
+            source_mint,
+            vault,
+            per_tx_cap: 1_000_000,
+            daily_cap: 10_000_000,
+            vault_ceiling: 1_000_000_000,
+        },
+        vec![
+            AccountMeta::new(deployer.pubkey(), true),
+            AccountMeta::new(config_pda, false),
+            AccountMeta::new_readonly(vault, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new_readonly(programdata_address(), false),
+            AccountMeta::new_readonly(decoy_mint, false),
+        ],
+    );
+    let blockhash = context.banks_client.get_latest_blockhash().await.unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&context.payer.pubkey()),
+        &[&context.payer, &deployer],
+        blockhash,
+    );
+    let result = context.banks_client.process_transaction(tx).await;
+    assert_custom_error(result, BridgeError::InvalidAccountData);
+}

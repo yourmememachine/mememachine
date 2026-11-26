@@ -411,6 +411,7 @@ async fn setup_chains() -> Chains {
             AccountMeta::new_readonly(vault, false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             AccountMeta::new_readonly(programdata_address(&lock_pid), false),
+            AccountMeta::new_readonly(source_mint, false),
         ],
     );
     let blockhash = sol.banks_client.get_latest_blockhash().await.unwrap();
