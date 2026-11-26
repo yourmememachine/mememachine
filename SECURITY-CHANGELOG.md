@@ -7,6 +7,27 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-26 — `d4a83e1`** Code-review debate round 13
+  (scope 1, third rotation: machine-bridge + solana-lock;
+  two reviewers, debate reconciled). Lock `Initialize`
+  never inspected the source mint account — only the
+  vault's parsed mint field was bound to the
+  instruction's `source_mint` — so a pre-existing mint
+  with a personal freeze authority passed, and that key
+  could freeze the custody vault permanently (the
+  program has no thaw path, stranding every locked
+  token). `Initialize` now takes the source mint
+  account appended last (existing account prefix
+  unchanged), validates its key, token-program owner
+  and initialized `Mint` state, and rejects a freeze
+  authority that is neither none nor the
+  vault-authority PDA. One Low finding (no explicit
+  default-`source_mint` rejection) was killed in debate
+  as unreachable through the pinned token program.
+  3 new regression tests. SBF rebuilt: solana_lock.so
+  `381852c9…` (215,024 B), machine_bridge.so
+  `f66454d5…` (215,864 B). Localnet only; not deployed.
+
 - **2026-11-23 — `4782cbc`** Bridge review round 10
   hardening (scope 4, second rotation; two reviewers,
   debate reconciled, every fix reproduced failing-first).

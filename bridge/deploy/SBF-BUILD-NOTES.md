@@ -163,6 +163,19 @@ and its binary above stands. Built with
 | `solana_lock.so` | 212,840 | `42bbfadcb7f97972b48dc3ffc234bb83ffb746251c0e99c36cb1a368e050b2b2` |
 | `machine_bridge.so` | 215,832 | `e8b85254f11ca7f270d7bff9d0266060241331b3a7a7417ebb424300277941bf` |
 
+**Rebuilt 2026-11-26** from the code-review debate round 13
+change (`d4a83e1`: Lock `Initialize` inspects the source mint
+account and rejects a freeze authority that is neither none
+nor the vault-authority PDA; see the AUDIT.md scope update).
+Bridge programs only — LaunchGuard was not touched and its
+binary above stands. Built with
+`bridge/deploy/build-sbf.sh` (the scratch-tree method below).
+
+| Artifact | Size (bytes) | sha256 |
+|---|---|---|
+| `solana_lock.so` | 215,024 | `381852c93c60147e7baef30878a153924e6e36b5f879fd893209bdb5233a8d8c` |
+| `machine_bridge.so` | 215,864 | `f66454d5571bb2ac0f78688f30dca5a80d419030264b2427b602d2c8d63b1888` |
+
 ## Why the build does not run directly against the bridge workspace
 
 `bridge/deploy/build-sbf.sh` against the workspace fails before any

@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `78c37e9` (2026-11-26; `make verify` green —
-bridge workspace 238 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 130 passed, fork suite 66 OK, resolver JS suite 114 passed, app JS suite 174 passed; repo total 818). The pin is refreshed after every full verification run;
+Last verified commit: `d4a83e1` (2026-11-26; `make verify` green —
+bridge workspace 241 passed, LaunchGuard 68 passed, PQ vault 17
+passed, registry export 11 passed, RugCall 130 passed, fork suite 66 OK, resolver JS suite 114 passed, app JS suite 174 passed; repo total 821). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -611,6 +611,37 @@ chain configuration gates any public chain launch. Both scopes:
 > no program instruction change, no SBF rebuild in this
 > commit; bridge-common and proof-bundle were already
 > in Scope A. Auditors should still quote against the
+> current `main` HEAD.
+>
+> **Scope update 2026-11-26 (commit `d4a83e1`) — debate
+> round 13, scope 1 third rotation (machine-bridge +
+> solana-lock) — PROGRAM CHANGE, SBF REBUILT.** Two
+> independent reviewers audited the scope cold and
+> debated each other's findings. One finding survived
+> (A-F1, Medium): the lock program's `Initialize` bound
+> the vault's parsed mint field to the instruction's
+> `source_mint` but never inspected the source mint
+> account itself, so a pre-existing mint whose freeze
+> authority is a personal key passed — that key could
+> freeze the custody vault, and the program has no thaw
+> path, stranding every locked token permanently.
+> `Initialize` now takes the source mint account
+> (appended last, so the existing account prefix is
+> unchanged), requires its key, its token-program owner
+> and an initialized `Mint` state, and rejects a freeze
+> authority that is neither none nor the vault-authority
+> PDA (the PDA case is inert: the program issues no
+> freeze/thaw CPI, and a mint without a freeze authority
+> can never gain one). This mirrors the round 1 mint
+> check on the Machine side. The second finding (B-F1,
+> Low — no explicit rejection of a default
+> `source_mint`) was killed in debate as unreachable:
+> no on-chain path through the pinned token program
+> creates the crafted vault account its trace needs.
+> 3 new regression tests. SBF rebuilt: solana_lock.so
+> `381852c9…` (215,024 B), machine_bridge.so
+> `f66454d5…` (215,864 B). solana-lock was already in
+> Scope A. Auditors should still quote against the
 > current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
