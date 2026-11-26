@@ -734,6 +734,124 @@ async fn relayer_rotation_requires_admin_multisig_and_takes_effect() {
 }
 
 #[tokio::test]
+async fn rotation_while_paused_takes_effect_without_unpausing() {
+    // The full incident-response sequence (added 2026-11-26, daily
+    // build): pause first, rotate the compromised set out while
+    // paused, and the bridge must stay paused until a separate
+    // admin unpause — rotation must neither be blocked by the
+    // pause (or a compromised set could never be removed during
+    // an incident) nor silently end it. The Cyber post-mortem
+    // follow-up (Bitquery, 22 Nov 2026) is the cautionary shape:
+    // a third forged message was approved the morning after the
+    // first rotation because both keys the thief had used were
+    // still accepted — so here the old set must stay dead after
+    // the sequence completes, not just immediately after rotation.
+    let mut env = setup(100_000, 500_000, 2_000_000).await;
+    send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
+        .await
+        .unwrap();
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+    let new_relayers: [Keypair; 5] = std::array::from_fn(|_| Keypair::new());
+    let new_pubkeys = relayer_pubkeys(&new_relayers);
+
+    async fn send_ix(
+        env: &mut Env,
+        ix: Instruction,
+        signer_idx: &[usize],
+        relayers_sign: bool,
+    ) -> Result<(), solana_program_test::BanksClientError> {
+        let blockhash = env
+            .context
+            .banks_client
+            .get_latest_blockhash()
+            .await
+            .unwrap();
+        let mut all: Vec<&Keypair> = vec![&env.context.payer];
+        for &i in signer_idx {
+            all.push(if relayers_sign {
+                &env.relayers[i]
+            } else {
+                &env.admins[i]
+            });
+        }
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&env.context.payer.pubkey()),
+            &all,
+            blockhash,
+        );
+        env.context.banks_client.process_transaction(tx).await
+    }
+    fn admin_ix(
+        program_id: Pubkey,
+        config: Pubkey,
+        signer_pubs: &[Pubkey],
+        data: &LockInstruction,
+    ) -> Instruction {
+        let mut metas = vec![AccountMeta::new(config, false)];
+        for p in signer_pubs {
+            metas.push(AccountMeta::new_readonly(*p, true));
+        }
+        Instruction::new_with_borsh(program_id, data, metas)
+    }
+    let admin_pubs: Vec<Pubkey> = env.admins.iter().map(|k| k.pubkey()).collect();
+    let relayer_pubs: Vec<Pubkey> = env.relayers.iter().map(|k| k.pubkey()).collect();
+
+    // Pause with 2 of the (still current) relayers.
+    let ix = admin_ix(
+        program_id,
+        config_pda,
+        &relayer_pubs[..2],
+        &LockInstruction::Pause,
+    );
+    send_ix(&mut env, ix, &[0, 1], true).await.unwrap();
+
+    // Rotation succeeds while paused: 2-of-3 admins replace the set.
+    let ix = admin_ix(
+        program_id,
+        config_pda,
+        &admin_pubs[..2],
+        &LockInstruction::SetRelayers {
+            relayers: new_pubkeys,
+        },
+    );
+    send_ix(&mut env, ix, &[0, 1], false).await.unwrap();
+
+    // Rotation did not unpause: even the new set's quorum is
+    // refused while paused, and nothing leaves the vault.
+    // (Amount 100 stays under the tightened post-unpause dynamic
+    // per-tx cap — 25 bps of the 50,000 locked is 125 — so the
+    // later successful unlock isolates the set change, not caps.)
+    let msg = burn_message(1, 100, env.user.pubkey(), env.source_mint);
+    let sigs = sign_attestation(&msg, &new_relayers, 3);
+    let result = send_unlock(&mut env, msg.clone(), sigs).await;
+    assert_custom_error(result, BridgeError::BridgePaused);
+    assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 50_000);
+
+    // Separate admin unpause.
+    let ix = admin_ix(
+        program_id,
+        config_pda,
+        &admin_pubs[..2],
+        &LockInstruction::Unpause,
+    );
+    send_ix(&mut env, ix, &[0, 1], false).await.unwrap();
+
+    // The old set is still dead after the full sequence.
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_unlock(&mut env, msg.clone(), sigs).await;
+    assert_custom_error(result, BridgeError::UnknownRelayer);
+    assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 50_000);
+
+    // The new set unlocks.
+    let sigs = sign_attestation(&msg, &new_relayers, 3);
+    send_unlock(&mut env, msg, sigs).await.unwrap();
+    assert_eq!(token_balance(&mut env.context.banks_client, &env.vault).await, 49_900);
+    assert_eq!(total_locked(&mut env).await, 49_900);
+}
+
+#[tokio::test]
 async fn unlock_replay_fails() {
     let mut env = setup(100_000, 500_000, 2_000_000).await;
     send_deposit(&mut env, 50_000, Pubkey::new_unique(), 1)
