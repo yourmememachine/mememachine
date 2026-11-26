@@ -9,17 +9,17 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **237 passed, 0 failed** (50
+- **Tests:** bridge workspace **238 passed, 0 failed** (50
   bridge-common unit + 4 cap-accounting property tests + 35 machine-bridge
-  + 31 solana-lock (30 + 1 precompile-cost) + 74 relayer + 28 proof bundle + 15 receipt
+  + 32 solana-lock (31 + 1 precompile-cost) + 74 relayer + 28 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
   `programs/PQ-VERIFY.md`); fork suite 66 OK.
-  Full `make verify` 2026-11-25: **817 passed, 0 failed**.
-  This run verifies commit `23c314a` (the lock-side relayer
-  rotation test; the bridge side also carries the cap-accounting
+  Full `make verify` 2026-11-26: **818 passed, 0 failed**.
+  This run verifies commit `78c37e9` (the pause-rotate-unpause
+  incident-sequence test; the bridge side also carries the cap-accounting
   property tests from `e9a5dca` and the
   A-F1 external-seat positivity guard from `68fa4b6`). The SBF rebuild is
   byte-identical to the previous pin (solana_lock.so

@@ -5,9 +5,9 @@
 # Machine
 Website: https://machinechain.netlify.app/
 
-**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 817 tests, localnet, built in public.**
+**A Solana-derived L1 with LaunchGuard — a chain-native anti-rug launch standard — and a bridge designed from hack post-mortems. 818 tests, localnet, built in public.**
 
-![Tests: 817 passing](https://img.shields.io/badge/tests-817%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
+![Tests: 818 passing](https://img.shields.io/badge/tests-818%20passing-brightgreen) ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue) ![Agave 2.3.13](https://img.shields.io/badge/Agave-2.3.13-purple) [![CI](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml/badge.svg)](https://github.com/yourmememachine/mememachine/actions/workflows/ci.yml) [![GitHub stars](https://img.shields.io/github/stars/yourmememachine/mememachine?style=social)](https://github.com/yourmememachine/mememachine/stargazers)
 
 A Solana-derived L1 with its own token, its own culture, and apps
 running on it — built to be one of the best Solana forks, not just a
@@ -248,7 +248,7 @@ The locks are also machine-readable: the [registry export](programs/crates/regis
 
 ## Bridge
 
-Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 66 program tests passing (237 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (74 tests passing), the crossing-proof bundle tool in `bridge/crates/proof-bundle/` (28 tests passing; [bridge/PROOF-BUNDLE.md](bridge/PROOF-BUNDLE.md)), and the receipt indexer in `bridge/crates/receipt-indexer/` (15 tests passing; [bridge/RECEIPT-INDEXER.md](bridge/RECEIPT-INDEXER.md)) that resolves a crossing receipt to the transaction that created it. SBF-measured (2026-11-16, on the SBF builds of that date; not re-measured after the 2026-11-17/18 program changes): MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
+Native Rust programs (no Anchor) bridging SPL tokens between Solana and Machine: lock on Solana, mint wrapped 1:1 on Machine via 3-of-5 relayer attestation (verified on-chain through the ed25519 precompile). See [bridge/](bridge/) — 66 program tests passing (238 in the whole bridge workspace), plus the off-chain relayer in `bridge/crates/relayer/` (74 tests passing), the crossing-proof bundle tool in `bridge/crates/proof-bundle/` (28 tests passing; [bridge/PROOF-BUNDLE.md](bridge/PROOF-BUNDLE.md)), and the receipt indexer in `bridge/crates/receipt-indexer/` (15 tests passing; [bridge/RECEIPT-INDEXER.md](bridge/RECEIPT-INDEXER.md)) that resolves a crossing receipt to the transaction that created it. SBF-measured (2026-11-16, on the SBF builds of that date; not re-measured after the 2026-11-17/18 program changes): MintWrapped 92,152 CU total, Unlock 86,782 CU total — three ed25519 verifies fit the 200,000 CU budget. Local only, not deployed, not audited, nothing has crossed.
 
 ## Support
 

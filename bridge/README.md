@@ -91,7 +91,7 @@ cargo test --release
   paused bridge rejects mints (and relayers cannot unpause), kill-switch
   is permanent while burns stay open, admin signatures cannot mint,
   burn records the event and rejects replay.
-- **solana-lock integration tests** (30, plus 1 precompile-cost test, program-test with the real SPL
+- **solana-lock integration tests** (31, plus 1 precompile-cost test, program-test with the real SPL
   token program): deposit locks tokens in the vault, same-nonce deposit
   fails, deposit over the vault ceiling fails, unlock with a valid 3-of-5
   burn attestation releases tokens, unlock replay fails, 2-of-5 fails,
