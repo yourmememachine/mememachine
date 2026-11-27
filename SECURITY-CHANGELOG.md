@@ -7,6 +7,30 @@ or the audit surface, it gets a line here in the same commit or
 the next one. Routine docs and test-count syncs are omitted unless
 they record a security finding.
 
+- **2026-11-27 — `fa03117`** Code-review debate round 14
+  (scope 2, third rotation: relayer; two reviewers,
+  debate reconciled, no finding killed). The startup
+  signer-registration gate conflated a paused/killed
+  destination with registration, so after a kill (which
+  by design leaves burns — the exit path — open) any
+  restarted relayer could sign nothing at all; the gate
+  now reads the set only, and paused/killed gates only
+  per-direction collection/submission. The `Signed`
+  audit entry is appended before the attestation is
+  published (a failed append previously left a usable
+  signature with no evidence trail). Config validation
+  rejects colliding local file paths and resolves
+  symlinked parents in the shared-directory guard; the
+  config vault is cross-checked against the on-chain
+  LockConfig; the `run` daemon derives per-recipient
+  associated token accounts and caches submitted
+  nonces; signature ordering matches its documented
+  oldest-first contract; the audit log syncs its parent
+  directory on creation; attestation reads enforce the
+  64 KiB cap on the bytes actually read. 4 new tests.
+  Off-chain relayer only; no program change, no SBF
+  rebuild. Localnet only; not deployed.
+
 - **2026-11-26 — `d4a83e1`** Code-review debate round 13
   (scope 1, third rotation: machine-bridge + solana-lock;
   two reviewers, debate reconciled). Lock `Initialize`

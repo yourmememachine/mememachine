@@ -6,9 +6,9 @@ in one place, and so the scope is fixed in public before the
 engagement — an audit with a quietly narrowed scope is worse than
 none, because it looks like assurance.
 
-Last verified commit: `3de88c5` (2026-11-27; `make verify` green —
-bridge workspace 242 passed, LaunchGuard 68 passed, PQ vault 17
-passed, registry export 11 passed, RugCall 130 passed, fork suite 66 OK, resolver JS suite 114 passed, app JS suite 174 passed; repo total 822). The pin is refreshed after every full verification run;
+Last verified commit: `fa03117` (2026-11-27; `make verify` green —
+bridge workspace 246 passed, LaunchGuard 68 passed, PQ vault 17
+passed, registry export 11 passed, RugCall 130 passed, fork suite 66 OK, resolver JS suite 114 passed, app JS suite 174 passed; repo total 826). The pin is refreshed after every full verification run;
 STATUS.md and BRIDGE.md carry the same pin.
 
 ## What must be audited before real value moves
@@ -643,6 +643,37 @@ chain configuration gates any public chain launch. Both scopes:
 > `f66454d5…` (215,864 B). solana-lock was already in
 > Scope A. Auditors should still quote against the
 > current `main` HEAD.
+>
+> **Scope update 2026-11-27 (commit `fa03117`) — debate
+> round 14, scope 2 third rotation (relayer) — off-chain
+> only, no program change, no SBF rebuild.** Two
+> independent reviewers audited the relayer cold (13
+> findings raised with duplicates), debated
+> finding-by-finding — every finding was conceded by
+> both sides, none killed, no deadlock (one severity
+> grade settled by the reconciler: the vault cross-check
+> at Medium). Fixes: the startup signer-registration gate
+> no longer conflates a paused/killed destination with
+> registration, so a killed Machine bridge (minting off,
+> burns open by design) no longer blocks a restarted
+> relayer from signing the burn exit path; the `Signed`
+> audit entry is appended before the attestation is
+> published; config validation rejects colliding local
+> file paths (payer == relayer keypair remains the one
+> intentional alias) and resolves symlinked parents of
+> not-yet-created files in the shared-directory guard;
+> the config file's vault is cross-checked against the
+> on-chain LockConfig on both the signing and collection
+> paths; the `run` daemon derives each recipient's
+> associated token account when no explicit account is
+> given and caches nonces it has already submitted in
+> process; `signatures_at_slot` ordering now matches its
+> documented oldest-first contract; the audit log syncs
+> its parent directory when an append creates the file;
+> and attestation reads enforce the 64 KiB cap on the
+> bytes actually read. 4 new regression tests. The
+> relayer was already in Scope A. Auditors should still
+> quote against the current `main` HEAD.
 
 ### Scope B — Chain configuration (gating: public chain claims)
 | Component | Where |

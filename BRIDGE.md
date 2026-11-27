@@ -1,6 +1,6 @@
 # Machine Bridge — Design Document
 
-**Status: programs built and tested locally (see `bridge/` — bridge workspace `cargo test --release`: 242 passed, 0 failed, including the relayer's 74, the proof bundle's 28, and the receipt indexer's 15; LaunchGuard 68 passed, registry export 11 passed, PQ vault 17 passed and RugCall 130 passed in `programs/`, plus the 114-test resolver JS suite and the 174-test app JS suite under `rugcall/`); NOT deployed, NOT audited. Last verified commit: `3de88c5` (2026-11-27, `make verify` green). Nothing has been bridged, and no asset may cross until the prerequisites in §5 are met.**
+**Status: programs built and tested locally (see `bridge/` — bridge workspace `cargo test --release`: 246 passed, 0 failed, including the relayer's 78, the proof bundle's 28, and the receipt indexer's 15; LaunchGuard 68 passed, registry export 11 passed, PQ vault 17 passed and RugCall 130 passed in `programs/`, plus the 114-test resolver JS suite and the 174-test app JS suite under `rugcall/`); NOT deployed, NOT audited. Last verified commit: `fa03117` (2026-11-27, `make verify` green). Nothing has been bridged, and no asset may cross until the prerequisites in §5 are met.**
 
 - **Chains:** Solana mainnet ↔ Machine
 - **Machine identity:** Solana fork (Agave 2.3.13), custom genesis `32W8ouqrHbuhE3PM6ZsJrJcDbP7Tx9aC2zRvrEabkQSb`, native gas token **$MACHINE**, fixed supply 1,000,000,000, no inflation.
