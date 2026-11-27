@@ -4,25 +4,24 @@ Real commands and their real output. Nothing here is claimed without a
 run behind it. Verified 2026-11-14 ~11:07 UTC, in the bridge workspace
 directory.
 
-## Current state (2026-11-25, latest commits — read this first)
+## Current state (2026-11-27, latest commits — read this first)
 
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **241 passed, 0 failed** (50
-  bridge-common unit + 4 cap-accounting property tests + 35 machine-bridge
+- **Tests:** bridge workspace **242 passed, 0 failed** (50
+  bridge-common unit + 4 cap-accounting property tests + 36 machine-bridge
   + 35 solana-lock (34 + 1 precompile-cost) + 74 relayer + 28 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
   `programs/PQ-VERIFY.md`); fork suite 66 OK.
-  Full `make verify` 2026-11-26: **821 passed, 0 failed**.
-  This run verifies commit `d4a83e1` (the code-review debate
-  round 13 lock Initialize source-mint hardening; the bridge side also carries the cap-accounting
-  property tests from `e9a5dca` and the
-  A-F1 external-seat positivity guard from `68fa4b6`). SBF rebuilt
-  for this change (solana_lock.so
+  Full `make verify` 2026-11-27: **822 passed, 0 failed**.
+  This run verifies commit `3de88c5` (the mint-side
+  pause-rotate-unpause incident-sequence test; tests only, no
+  program change, no SBF rebuild — the SBF pins below stand:
+  solana_lock.so
   `381852c9…` 215,024 B, machine_bridge.so `f66454d5…`
   215,864 B).
 - **PQ Vault (2026-11-19, commit `8ca345c`):** new native

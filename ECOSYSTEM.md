@@ -25,8 +25,8 @@ Repositories / locations:
 | Public status snapshot | `status/` in this repo |
 | Solana OS (browser interface) | Hosted browser artifact (slug `solana-os`), source at `~/workspace/ts-spaces/solana-os/index.html` — not a GitHub repo |
 
-Verified totals at this date (`make verify`, 2026-11-26, against
-commit `d4a83e1`): **821 passed, 0 failed** — bridge workspace 241,
+Verified totals at this date (`make verify`, 2026-11-27, against
+commit `3de88c5`): **822 passed, 0 failed** — bridge workspace 242,
 LaunchGuard 68, PQ Vault 17, registry export 11, RugCall 130, fork
 suite 66, resolver JS 114, app JS 174.
 
@@ -89,9 +89,9 @@ and submitted. No admin mint; $MACHINE itself is never bridged.
 relayer exists (`bridge/crates/relayer/`) but has never run live;
 no asset has crossed, nothing here holds real funds.
 
-**Proven.** Built and tested locally only. Re-verified 2026-11-26:
-`cargo test --release` in `bridge/` — **241 passed, 0 failed**
-(54 bridge-common (50 unit + 4 cap-accounting property tests), 35 machine-bridge, 35 solana-lock
+**Proven.** Built and tested locally only. Re-verified 2026-11-27:
+`cargo test --release` in `bridge/` — **242 passed, 0 failed**
+(54 bridge-common (50 unit + 4 cap-accounting property tests), 36 machine-bridge, 35 solana-lock
 including the precompile-cost test, 74 relayer including the
 full end-to-end drill, 28 proof bundle, 15 receipt indexer).
 Full output in `bridge/VERIFY.md`.
@@ -249,7 +249,7 @@ What does **not** connect today:
   chain they belong to is a local testnet whose validator is
   currently stalled at slot 29,100.
 - Saying "the bridge is built" is true of the **programs and their
-  tests** (241/241 in the bridge workspace locally, including 74/74 relayer, 28/28 proof
+  tests** (242/242 in the bridge workspace locally, including 74/74 relayer, 28/28 proof
   bundle, and 15/15 receipt indexer). It is not a claim
   that bridging works — nothing is deployed, nothing has crossed,
   and no relayer has run live.

@@ -85,7 +85,7 @@ cargo test --release
   expired attestation, wrong version, daily-cap window reset, per-tx cap,
   admin threshold, pause authority, kill-switch semantics, config
   serialization round-trip.
-- **machine-bridge integration tests** (35, program-test with the real SPL
+- **machine-bridge integration tests** (36, program-test with the real SPL
   token program): valid 3-of-5 claim mints real tokens, replay of a used
   nonce fails, 2-of-5 fails, over per-tx cap fails, over daily cap fails,
   paused bridge rejects mints (and relayers cannot unpause), kill-switch
