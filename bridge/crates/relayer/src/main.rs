@@ -194,6 +194,28 @@ mod tests {
     }
 
     #[test]
+    fn debate_r3_derived_destination_is_recipient_ata() {
+        // Debate scope-2r3 (B-F2): the derived account is the
+        // recipient's ATA for the mint, and differs per recipient.
+        let mint = Pubkey::new_unique();
+        let a = Pubkey::new_unique();
+        let b = Pubkey::new_unique();
+        let da = derived_destination_token_account(&a, &mint);
+        assert_eq!(da, derived_destination_token_account(&a, &mint));
+        assert_ne!(da, derived_destination_token_account(&b, &mint));
+        let token_program =
+            Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+        let ata_program =
+            Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
+        let expected = Pubkey::find_program_address(
+            &[a.as_ref(), token_program.as_ref(), mint.as_ref()],
+            &ata_program,
+        )
+        .0;
+        assert_eq!(da, expected);
+    }
+
+    #[test]
     fn logged_events_dedupes_identical_events_only() {
         // Debate scope-2r2 (A-F4/B-F2): the same event repeated by
         // the run loop's rescan is marked once; a different nonce
@@ -245,6 +267,15 @@ fn source_for(cfg: &RelayerConfig, direction: Direction) -> Result<RpcSource> {
                     "on-chain source_mint {} does not match config file {}",
                     config.source_mint,
                     cfg.source_mint()
+                )));
+            }
+            // Debate scope-2r3 (A-F4/B-F3): cfg.vault() builds
+            // every Unlock instruction; cross-check it too.
+            if config.vault != cfg.vault() {
+                return Err(RelayerError::Rpc(format!(
+                    "on-chain vault {} does not match config file {}",
+                    config.vault,
+                    cfg.vault()
                 )));
             }
             Ok(RpcSource {
@@ -349,12 +380,14 @@ fn sign_once(
             // the signature from reaching the shared directory.
             verify_audit_log(cfg)?;
             let sig = signer.sign(&message);
-            let path = AttestationFile::new(direction, &message, &sig)
-                .write_to(Path::new(&cfg.attestation_dir))?;
-            // Log before advancing the cursor: if the log cannot be
-            // written, the nonce stays current and the next poll
-            // re-signs the identical message (signatures are
-            // deterministic; the file write is idempotent).
+            // Debate scope-2r3 (A-F1): append the Signed entry
+            // BEFORE publishing — every field is known in advance,
+            // and the old order left a usable attestation in the
+            // shared directory with no evidence trail when the
+            // append failed (disk full, fs error). If publishing
+            // then fails, the next poll re-signs deterministically
+            // and the duplicate Signed entry is the honest record
+            // of a second signing attempt.
             log_event(
                 cfg,
                 AuditEvent::Signed {
@@ -364,6 +397,8 @@ fn sign_once(
                     relayer: signer.pubkey().to_string(),
                 },
             )?;
+            let path = AttestationFile::new(direction, &message, &sig)
+                .write_to(Path::new(&cfg.attestation_dir))?;
             println!(
                 "{}: signed nonce {} amount {} -> {}",
                 direction.label(),
@@ -378,7 +413,27 @@ fn sign_once(
     }
 }
 
+/// The registered set/quorum WITHOUT the paused/killed gate
+/// (debate scope-2r3, B-F1): signing must not be blocked by a
+/// destination pause — the kill switch stops minting only and
+/// burns (the exit path) stay open by design, so a restarted
+/// relayer must still be able to sign burn attestations while
+/// the Machine bridge is killed. Paused/killed gates only
+/// collection/submission, per direction, in
+/// `registered_relayers`.
+fn registered_relayers_set(cfg: &RelayerConfig, direction: Direction) -> Result<([Pubkey; 5], u8)> {
+    registered_relayers_inner(cfg, direction, false)
+}
+
 fn registered_relayers(cfg: &RelayerConfig, direction: Direction) -> Result<([Pubkey; 5], u8)> {
+    registered_relayers_inner(cfg, direction, true)
+}
+
+fn registered_relayers_inner(
+    cfg: &RelayerConfig,
+    direction: Direction,
+    enforce_active: bool,
+) -> Result<([Pubkey; 5], u8)> {
     // Read the destination program's config: its relayer set is the
     // set that will verify the attestation on-chain, so collect
     // against exactly that set. (Both programs are initialized with
@@ -399,7 +454,7 @@ fn registered_relayers(cfg: &RelayerConfig, direction: Direction) -> Result<([Pu
             if c.discriminator != bridge_common::DISCRIMINATOR_CONFIG {
                 return Err(RelayerError::Rpc("destination config has wrong discriminator".into()));
             }
-            if c.paused || c.killed {
+            if enforce_active && (c.paused || c.killed) {
                 return Err(RelayerError::Rpc(
                     "destination bridge is paused or killed on-chain".into(),
                 ));
@@ -415,10 +470,23 @@ fn registered_relayers(cfg: &RelayerConfig, direction: Direction) -> Result<([Pu
             if c.discriminator != bridge_common::DISCRIMINATOR_CONFIG {
                 return Err(RelayerError::Rpc("destination config has wrong discriminator".into()));
             }
-            if c.paused {
+            if enforce_active && c.paused {
                 return Err(RelayerError::Rpc(
                     "destination bridge is paused on-chain".into(),
                 ));
+            }
+            // Debate scope-2r3 (A-F4/B-F3): the config file's vault
+            // builds every Unlock instruction, so cross-check it
+            // against the on-chain LockConfig here (collection path)
+            // as well as in source_for (signing path) — a stale
+            // vault must fail at startup/collection, not as an
+            // unexplained on-chain rejection on every poll.
+            if c.vault != cfg.vault() {
+                return Err(RelayerError::Rpc(format!(
+                    "on-chain vault {} does not match config file {}",
+                    c.vault,
+                    cfg.vault()
+                )));
             }
             Ok((c.relayers.relayers, c.relayers.quorum))
         }
@@ -430,7 +498,9 @@ fn registered_relayers(cfg: &RelayerConfig, direction: Direction) -> Result<([Pu
 /// and every peer's collector would discard its files.
 fn check_signer_registered(cfg: &RelayerConfig, signer: &RelayerSigner) -> Result<()> {
     for direction in [Direction::SolanaToMachine, Direction::MachineToSolana] {
-        let (relayers, _) = registered_relayers(cfg, direction)?;
+        // Set-only read (debate scope-2r3, B-F1): a paused/killed
+        // destination must not block signing for either direction.
+        let (relayers, _) = registered_relayers_set(cfg, direction)?;
         if !relayers.contains(&signer.pubkey()) {
             return Err(RelayerError::InvalidConfig(format!(
                 "signer {} is not in the registered relayer set for {}",
@@ -485,11 +555,24 @@ fn collect(
     }
 }
 
+/// Derive the recipient's associated token account — the
+/// deterministic destination for a crossing when the operator did
+/// not name an explicit account (debate scope-2r3, B-F2).
+fn derived_destination_token_account(recipient: &Pubkey, mint: &Pubkey) -> Pubkey {
+    let token_program = Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap();
+    let ata_program = Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").unwrap();
+    Pubkey::find_program_address(
+        &[recipient.as_ref(), token_program.as_ref(), mint.as_ref()],
+        &ata_program,
+    )
+    .0
+}
+
 fn submit(
     cfg: &RelayerConfig,
     direction: Direction,
     nonce: u64,
-    destination_token_account: &Pubkey,
+    destination_token_account: Option<Pubkey>,
     logged: &mut LoggedEvents,
 ) -> Result<()> {
     // Already processed on the destination? A GENUINE receipt —
@@ -524,6 +607,19 @@ fn submit(
         }
     }
     let (message, signatures) = collect(cfg, direction, nonce, logged)?;
+    // Debate scope-2r3 (B-F2): with no explicit account (the `run`
+    // daemon's per-nonce path), derive the recipient's associated
+    // token account from the message itself — one configured
+    // account for the whole daemon could only ever serve one
+    // recipient and stranded every other crossing forever.
+    let expected_mint_for_dest = match direction {
+        Direction::SolanaToMachine => cfg.wrapped_mint(),
+        Direction::MachineToSolana => cfg.source_mint(),
+    };
+    let destination_token_account = destination_token_account.unwrap_or_else(|| {
+        derived_destination_token_account(&message.recipient, &expected_mint_for_dest)
+    });
+    let destination_token_account = &destination_token_account;
     // The destination token account must belong to the message
     // recipient and hold the expected mint. The destination program
     // enforces both, but checking here turns a guaranteed on-chain
@@ -760,7 +856,7 @@ fn run() -> Result<()> {
                     RelayerError::InvalidConfig("--destination-token-account required".into())
                 })?,
             )?;
-            submit(&cfg, direction, nonce, &dest, &mut LoggedEvents::default())
+            submit(&cfg, direction, nonce, Some(dest), &mut LoggedEvents::default())
         }
         "run" => {
             let signer = RelayerSigner::load(&cfg.relayer_keypair_path)?;
@@ -779,6 +875,15 @@ fn run() -> Result<()> {
                 cfg.submit_enabled
             );
             let mut logged = LoggedEvents::default();
+            // Debate scope-2r3 (B-F4): nonces this process has
+            // already seen submit() succeed for (genuine receipt,
+            // submitted, or dry-run at quorum) are not re-scanned —
+            // the old rescan re-paid a receipt RPC for every
+            // historical nonce on every poll, unbounded as history
+            // grows. Failed nonces (quorum not yet reached) are
+            // NOT cached and are retried next poll.
+            let mut processed: std::collections::HashSet<(String, u64)> =
+                std::collections::HashSet::new();
             loop {
                 for direction in [Direction::SolanaToMachine, Direction::MachineToSolana] {
                     if let Err(e) = sign_once(&cfg, &signer, &mut state, direction) {
@@ -787,12 +892,22 @@ fn run() -> Result<()> {
                     // Submit EVERY signed-but-unprocessed nonce in
                     // this direction, not only the most recent one:
                     // a quorum that forms late for an earlier nonce
-                    // must still be submitted. `submit` itself skips
-                    // nonces whose destination receipt already exists,
-                    // so re-scanning processed nonces is cheap.
-                    if let Some(dest) = &dest {
-                        for nonce in cfg.start_nonce..state.next_nonce(direction) {
-                            if let Err(e) = submit(&cfg, direction, nonce, dest, &mut logged) {
+                    // must still be submitted. With no explicit
+                    // --destination-token-account, submit derives
+                    // each recipient's associated token account
+                    // from the message (debate scope-2r3, B-F2);
+                    // an explicit account remains an operator
+                    // override for non-ATA recipients.
+                    for nonce in cfg.start_nonce..state.next_nonce(direction) {
+                        let key = (direction.label().to_string(), nonce);
+                        if processed.contains(&key) {
+                            continue;
+                        }
+                        match submit(&cfg, direction, nonce, dest, &mut logged) {
+                            Ok(()) => {
+                                processed.insert(key);
+                            }
+                            Err(e) => {
                                 // QuorumNotReached is normal in the
                                 // loop; report and continue.
                                 eprintln!("{}: submit nonce {}: {e}", direction.label(), nonce);

@@ -139,7 +139,7 @@ impl RpcClient {
     pub fn signatures_at_slot(&self, pubkey: &Pubkey, target_slot: u64) -> Result<Vec<[u8; 64]>> {
         const PAGE: usize = 1000;
         const MAX_PAGES: usize = 100;
-        let mut found: Vec<[u8; 64]> = Vec::new();
+        let mut pages: Vec<Vec<[u8; 64]>> = Vec::new();
         let mut before: Option<String> = None;
         for _ in 0..MAX_PAGES {
             let mut opts = json!({"limit": PAGE, "commitment": "finalized"});
@@ -153,8 +153,8 @@ impl RpcClient {
             let arr = r.as_array().ok_or_else(|| {
                 RelayerError::Rpc("getSignaturesForAddress: not an array".into())
             })?;
-            let (mut candidates, cursor, done) = signature_page(arr, target_slot);
-            found.append(&mut candidates);
+            let (candidates, cursor, done) = signature_page(arr, target_slot);
+            pages.push(candidates);
             if done || arr.len() < PAGE {
                 break;
             }
@@ -163,9 +163,12 @@ impl RpcClient {
             })?);
         }
         // Pages arrive newest-first and each page's candidates are
-        // oldest-first within the page; reverse the whole list so
-        // the result is oldest-first overall.
-        found.reverse();
+        // oldest-first within the page. Oldest-first overall means
+        // reversing the PAGE order only — a whole-vector reverse
+        // also inverts within each page (debate scope-2r3,
+        // A-F5/B-F5: the old code returned newest-first on a
+        // single page and a non-monotonic order across pages).
+        let found = assemble_oldest_first(pages);
         if found.is_empty() {
             return Err(RelayerError::EventNotFound(format!(
                 "no successful signature for {pubkey} at slot {target_slot}"
@@ -241,6 +244,18 @@ pub fn signature_page(
         Some(oldest) => oldest["slot"].as_u64().map(|s| s < target_slot).unwrap_or(true),
     };
     (candidates, cursor, done)
+}
+
+/// Assemble per-page candidate lists (pages newest-first, each
+/// page oldest-first internally) into one oldest-first list by
+/// reversing the page order and keeping each page's internal
+/// order. Pure so the ordering contract is unit-testable.
+pub fn assemble_oldest_first(pages: Vec<Vec<[u8; 64]>>) -> Vec<[u8; 64]> {
+    let mut out = Vec::new();
+    for page in pages.into_iter().rev() {
+        out.extend(page);
+    }
+    out
 }
 
 /// Extract the `blockTime` field from a `getTransaction` reply,
@@ -457,6 +472,23 @@ mod tests {
         // Empty page: done, no cursor.
         let (c3, cur3, done3) = signature_page(&[], 100);
         assert!(c3.is_empty() && cur3.is_none() && done3);
+    }
+
+    #[test]
+    fn debate_r3_assemble_oldest_first_single_and_multi_page() {
+        // Debate scope-2r3 (A-F5/B-F5): single page stays
+        // oldest-first (the old whole-vector reverse flipped it);
+        // multi-page reverses page order only.
+        let single = assemble_oldest_first(vec![vec![[6u8; 64], [8u8; 64]]]);
+        assert_eq!(single, vec![[6u8; 64], [8u8; 64]]);
+        // Pages arrive newest-first: page1 = newer [a_old, a_new],
+        // page2 = older [b_old, b_new]; oldest-first overall is
+        // [b_old, b_new, a_old, a_new].
+        let multi = assemble_oldest_first(vec![
+            vec![[3u8; 64], [4u8; 64]],
+            vec![[1u8; 64], [2u8; 64]],
+        ]);
+        assert_eq!(multi, vec![[1u8; 64], [2u8; 64], [3u8; 64], [4u8; 64]]);
     }
 
     #[test]

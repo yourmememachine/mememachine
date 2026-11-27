@@ -107,17 +107,43 @@ fn effective_path(p: &str) -> std::path::PathBuf {
             .unwrap_or_else(|_| PathBuf::from("/"))
             .join(raw)
     };
-    let mut out = PathBuf::new();
-    for comp in abs.components() {
+    // Debate scope-2r3 (A-F3): the lexical fallback must resolve
+    // symlinks in the EXISTING parent prefix — a not-yet-created
+    // file under a symlinked parent inside the shared directory
+    // otherwise bypasses the guard on first run. Canonicalize the
+    // longest existing ancestor, then append the remainder
+    // lexically.
+    let mut existing = abs.clone();
+    let mut remainder: Vec<std::ffi::OsString> = Vec::new();
+    while !existing.exists() {
+        match existing.file_name() {
+            Some(name) => {
+                remainder.push(name.to_os_string());
+                existing.pop();
+            }
+            None => break,
+        }
+    }
+    let mut out = std::fs::canonicalize(&existing).unwrap_or(existing);
+    for comp in remainder.iter().rev() {
+        if comp == ".." {
+            out.pop();
+        } else if comp != "." {
+            out.push(comp);
+        }
+    }
+    // Resolve any "." / ".." already present in the original path.
+    let mut normalized = PathBuf::new();
+    for comp in out.components() {
         match comp {
             Component::CurDir => {}
             Component::ParentDir => {
-                out.pop();
+                normalized.pop();
             }
-            other => out.push(other.as_os_str()),
+            other => normalized.push(other.as_os_str()),
         }
     }
-    out
+    normalized
 }
 
 fn default_expiry_window_secs() -> i64 {
@@ -191,6 +217,35 @@ impl RelayerConfig {
                 return Err(RelayerError::InvalidConfig(
                     "audit_log_path must not be inside the shared attestation_dir".into(),
                 ));
+            }
+        }
+        // Debate scope-2r3 (A-F2): local file paths must be
+        // distinct — state save (tmp+rename) and audit append
+        // (create+append) destroy each other's files when two
+        // roles share one path, and a state path equal to a
+        // keypair path overwrites the signing key. The one
+        // intentional alias is payer == relayer keypair.
+        {
+            let audit_path = self.audit_log_path();
+            let locals: [(&str, std::path::PathBuf); 4] = [
+                ("relayer_keypair_path", effective_path(&self.relayer_keypair_path)),
+                ("payer_keypair_path", effective_path(&self.payer_keypair_path)),
+                ("state_path", effective_path(&self.state_path)),
+                ("audit_log_path", effective_path(&audit_path)),
+            ];
+            for i in 0..locals.len() {
+                for j in (i + 1)..locals.len() {
+                    if locals[i].1 == locals[j].1 {
+                        let pair = (locals[i].0, locals[j].0);
+                        if pair == ("relayer_keypair_path", "payer_keypair_path") {
+                            continue;
+                        }
+                        return Err(RelayerError::InvalidConfig(format!(
+                            "{} and {} must not be the same file",
+                            locals[i].0, locals[j].0
+                        )));
+                    }
+                }
             }
         }
         // Parse every pubkey field now so a typo fails at startup,
@@ -321,6 +376,44 @@ mod tests {
         // A genuinely outside path still passes.
         let cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn debate_r3_colliding_local_paths_rejected() {
+        // Debate scope-2r3 (A-F2): state == audit (or == keypair)
+        // passes the old validate and the writers destroy each
+        // other's files.
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.audit_log_path = Some(cfg.state_path.clone());
+        assert!(cfg.validate().is_err(), "state == audit must be rejected");
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.state_path = cfg.relayer_keypair_path.clone();
+        assert!(cfg.validate().is_err(), "state == relayer keypair must be rejected");
+        // The intentional alias payer == relayer stays allowed.
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.payer_keypair_path = cfg.relayer_keypair_path.clone();
+        assert!(cfg.validate().is_ok(), "payer == relayer keypair is intentional");
+    }
+
+    #[test]
+    fn debate_r3_symlinked_parent_into_shared_dir_rejected() {
+        // Debate scope-2r3 (A-F3): a not-yet-existing state file
+        // under a symlinked parent that resolves into the shared
+        // dir must be rejected on first run.
+        let base = std::env::temp_dir().join(format!("relayer-r3-symlink-{}", std::process::id()));
+        let shared = base.join("attestations");
+        std::fs::create_dir_all(&shared).unwrap();
+        let link = base.join("state-link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&shared, &link).unwrap();
+        #[cfg(not(unix))]
+        return;
+        let mut cfg: RelayerConfig = serde_json::from_str(&valid_config_json()).unwrap();
+        cfg.attestation_dir = shared.to_string_lossy().into_owned();
+        cfg.state_path = link.join("state.json").to_string_lossy().into_owned();
+        let result = cfg.validate();
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(result.is_err(), "symlinked parent into shared dir must be rejected");
     }
 
     #[test]

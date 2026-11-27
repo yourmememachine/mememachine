@@ -257,15 +257,23 @@ impl AttestationFile {
 
     pub fn read_from(path: &Path) -> Result<Self> {
         // Attestation files are small; refuse oversized files instead
-        // of reading unbounded untrusted input into memory.
+        // of reading unbounded untrusted input into memory. The cap
+        // is enforced on the bytes actually read (debate scope-2r3,
+        // B-F7): the old metadata check-then-read was a TOCTOU — a
+        // peer swapping or growing the file between the check and
+        // the read defeated the bound. Read at most MAX+1 bytes.
         const MAX_ATTESTATION_BYTES: u64 = 64 * 1024;
-        if std::fs::metadata(path)?.len() > MAX_ATTESTATION_BYTES {
+        use std::io::Read;
+        let file = std::fs::File::open(path)?;
+        let mut text = String::new();
+        file.take(MAX_ATTESTATION_BYTES + 1)
+            .read_to_string(&mut text)?;
+        if text.len() as u64 > MAX_ATTESTATION_BYTES {
             return Err(RelayerError::InvalidSignature(format!(
                 "attestation file {} exceeds {MAX_ATTESTATION_BYTES} bytes",
                 path.display()
             )));
         }
-        let text = std::fs::read_to_string(path)?;
         Ok(serde_json::from_str(&text)?)
     }
 }

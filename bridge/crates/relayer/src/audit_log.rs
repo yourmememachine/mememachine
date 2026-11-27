@@ -328,6 +328,12 @@ impl AuditLog {
                 std::fs::create_dir_all(parent)?;
             }
         }
+        // Debate scope-2r3 (A-F6/B-F6): syncing the file is not
+        // enough when this append CREATES it — the directory entry
+        // itself must be synced or a host crash can lose the file
+        // while the (directory-synced) attestation it evidences
+        // survives.
+        let existed = self.path.exists();
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .create(true)
@@ -338,6 +344,16 @@ impl AuditLog {
         // flush() only reaches the OS page cache; sync so the entry
         // survives a host crash / power loss, as the docs claim.
         file.sync_all()?;
+        drop(file);
+        if !existed {
+            if let Some(parent) = self.path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    if let Ok(d) = std::fs::File::open(parent) {
+                        let _ = d.sync_all();
+                    }
+                }
+            }
+        }
         self.entries.push(entry.clone());
         Ok(entry)
     }
