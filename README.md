@@ -204,11 +204,22 @@ Machine is entered in the Dev3pack Global Hackathon
 split honestly:
 
 **What existed before the hackathon** — everything in this
-repository up to commit `ba65722` (2026-11-19): the chain, the
-bridge, LaunchGuard (including the dust floor and the status
-page, both built on 2026-11-19 — pre-existing work, not
-weekend work), the PQ vault, Solana OS, and the ops/deploy
-hardening from code-review debate round 5 (2026-11-19).
+repository up to commit `eee273d` (2026-11-26), the last commit
+before the hackathon kickoff (Fri 27 Nov 2026, 08:00
+America/Vancouver) — 821 tests, all passing, as of 2026-11-26:
+the chain, the bridge (including message format v2 and the
+cap-accounting property tests, backlog #7, built 2026-11-21),
+LaunchGuard (including the dust floor and the status page,
+both built 2026-11-19), the PQ vault, Solana OS, the receipt
+hash-binding drill tests (backlog #10, built 2026-11-24), the
+weekly fuzz CI, the incident-sequence pins, code-review debate
+rounds 11–13 (including the round-13 lock Initialize
+mint-validation fix), the relayer-rotation pins of
+2026-11-25 to 2026-11-26, and the daily-build hardening of
+2026-11-20 to 2026-11-26. All of this is pre-existing work,
+not weekend work — including backlog #7 and backlog #10,
+which were originally planned as weekend items and were built
+early.
 
 **What was built 27–29 Nov 2026** — recorded here during the
 weekend, as it lands.
