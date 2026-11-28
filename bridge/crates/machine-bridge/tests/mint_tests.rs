@@ -1122,6 +1122,128 @@ async fn relayer_rotation_requires_admin_multisig_and_takes_effect() {
 }
 
 #[tokio::test]
+async fn set_cap_requires_admin_multisig_validates_and_takes_effect() {
+    // Cap changes are configuration, and configuration is code
+    // (Marlow post-mortem, Nov 2026: a threshold set wrong in an
+    // upgrade script drained the bridge). SetCap had no test on
+    // either side. Pins: only the 2-of-3 admin multisig can change
+    // caps (one admin cannot, relayers cannot), degenerate values
+    // are rejected (zero per-tx, zero daily, daily below per-tx),
+    // failed attempts leave the caps untouched, and a valid change
+    // binds the very next mint on both caps.
+    let mut env = setup(100_000, 500_000).await;
+    let program_id = program_id();
+    let (config_pda, _) = config_pda(&program_id);
+
+    fn set_cap_ix(
+        program_id: Pubkey,
+        config: Pubkey,
+        signer_pubs: &[Pubkey],
+        per_tx_cap: u64,
+        daily_cap: u64,
+    ) -> Instruction {
+        let mut metas = vec![AccountMeta::new(config, false)];
+        for p in signer_pubs {
+            metas.push(AccountMeta::new_readonly(*p, true));
+        }
+        Instruction::new_with_borsh(
+            program_id,
+            &MachineInstruction::SetCap {
+                per_tx_cap,
+                daily_cap,
+            },
+            metas,
+        )
+    }
+    async fn send_signed(
+        env: &mut Env,
+        ix: Instruction,
+        admin_idx: &[usize],
+        relayer_idx: &[usize],
+    ) -> Result<(), solana_program_test::BanksClientError> {
+        let blockhash = env
+            .context
+            .banks_client
+            .get_latest_blockhash()
+            .await
+            .unwrap();
+        let mut all: Vec<&Keypair> = vec![&env.context.payer];
+        for &i in admin_idx {
+            all.push(&env.admins[i]);
+        }
+        for &i in relayer_idx {
+            all.push(&env.relayers[i]);
+        }
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&env.context.payer.pubkey()),
+            &all,
+            blockhash,
+        );
+        env.context.banks_client.process_transaction(tx).await
+    }
+    let admin_pubs: Vec<Pubkey> = env.admins.iter().map(|k| k.pubkey()).collect();
+    let relayer_pubs: Vec<Pubkey> = env.relayers.iter().map(|k| k.pubkey()).collect();
+
+    // One admin is below the 2-of-3 threshold.
+    let ix = set_cap_ix(program_id, config_pda, &admin_pubs[..1], 40_000, 200_000);
+    let result = send_signed(&mut env, ix, &[0], &[]).await;
+    assert_custom_error(result, BridgeError::Unauthorized);
+
+    // Relayers operate the bridge; they do not govern its caps.
+    let ix = set_cap_ix(program_id, config_pda, &relayer_pubs[..2], 40_000, 200_000);
+    let result = send_signed(&mut env, ix, &[], &[0, 1]).await;
+    assert_custom_error(result, BridgeError::Unauthorized);
+
+    // Degenerate values are rejected even with a full admin quorum:
+    // a zero per-tx cap, a zero daily cap, and a daily cap below the
+    // per-tx cap (a configuration no mint could ever satisfy sanely).
+    for (per_tx, daily) in [(0, 200_000), (40_000, 0), (60_000, 50_000)] {
+        let ix = set_cap_ix(program_id, config_pda, &admin_pubs[..2], per_tx, daily);
+        let result = send_signed(&mut env, ix, &[0, 1], &[]).await;
+        assert_custom_error(result, BridgeError::InvalidAmount);
+    }
+
+    // None of the failed attempts moved the caps: the original
+    // 100,000 per-tx cap still admits a 100,000 mint.
+    let msg = test_message(1, 100_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_mint(&mut env, msg, sigs).await.unwrap();
+
+    // A valid 2-of-3 change takes effect immediately.
+    let ix = set_cap_ix(program_id, config_pda, &admin_pubs[..2], 40_000, 200_000);
+    send_signed(&mut env, ix, &[0, 1], &[])
+        .await
+        .unwrap();
+
+    // The new per-tx cap binds the next mint...
+    let msg = test_message(2, 50_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_mint(&mut env, msg, sigs).await;
+    assert_custom_error(result, BridgeError::AmountExceedsPerTxCap);
+
+    // ...a mint at the new cap succeeds (the failed attempt did not
+    // consume the nonce)...
+    let msg = test_message(2, 40_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_mint(&mut env, msg, sigs).await.unwrap();
+
+    // ...and the new daily cap binds too: 100,000 + 40,000 + 40,000
+    // is inside 200,000, one more 40,000 mint is not.
+    let msg = test_message(3, 40_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    send_mint(&mut env, msg, sigs).await.unwrap();
+    let msg = test_message(4, 40_000, env.recipient.pubkey(), env.wrapped_mint);
+    let sigs = sign_attestation(&msg, &env.relayers, 3);
+    let result = send_mint(&mut env, msg, sigs).await;
+    assert_custom_error(result, BridgeError::AmountExceedsDailyCap);
+    assert_eq!(
+        token_balance(&mut env.context.banks_client, &env.recipient_token_account).await,
+        180_000
+    );
+}
+
+#[tokio::test]
 async fn rotation_while_paused_takes_effect_without_unpausing() {
     // The full incident-response sequence on the mint side (added
     // 2026-11-27, daily build): pause first, rotate the compromised
