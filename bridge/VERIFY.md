@@ -9,18 +9,18 @@ directory.
 The sections below are the dated verification log; this summary is
 the current state and supersedes their numbers.
 
-- **Tests:** bridge workspace **246 passed, 0 failed** (50
-  bridge-common unit + 4 cap-accounting property tests + 36 machine-bridge
+- **Tests:** bridge workspace **247 passed, 0 failed** (50
+  bridge-common unit + 4 cap-accounting property tests + 37 machine-bridge
   + 35 solana-lock (34 + 1 precompile-cost) + 78 relayer + 28 proof bundle + 15 receipt
   indexer, including the
   full local end-to-end drill and the 45-crossing volume drill);
   LaunchGuard **68 passed**, PQ vault **17 passed** and registry
   export **11 passed** (`programs/VERIFY.md`,
   `programs/PQ-VERIFY.md`); fork suite 66 OK.
-  Full `make verify` 2026-11-27: **826 passed, 0 failed**.
-  This run verifies commit `fa03117` (the relayer
-  debate-round hardening, scope 2 third rotation; off-chain
-  relayer only, no program change, no SBF rebuild — the SBF
+  Full `make verify` 2026-11-28: **827 passed, 0 failed**.
+  This run verifies commit `d67e868` (the mint-side
+  SetCap gating, validation and live-effect test; tests
+  only, no program change, no SBF rebuild — the SBF
   pins below stand:
   solana_lock.so
   `381852c9…` 215,024 B, machine_bridge.so `f66454d5…`
